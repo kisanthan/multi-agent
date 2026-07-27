@@ -36,10 +36,9 @@ class Einstellungen(BaseSettings):
         env_file=PROJEKT_WURZEL / ".env", env_file_encoding="utf-8", extra="ignore"
     )
 
-    # Offene fachliche Festlegung (Buchungs-Agent, Prozess A): unterhalb der
-    # Schwelle Human-on-the-loop, oberhalb Human-in-the-loop. Konfigurierbar,
-    # damit die Arbeit beide Varianten demonstrieren kann statt eine zu setzen.
-    buchung_schwelle_eur: float = 10_000.0
+    # Zulaessige Abweichung zwischen Zahlbetrag und Stammdaten-Betrag, bevor ein
+    # Klaerfall ausgeloest wird. Der Buchungs-Agent ist unabhaengig vom Betrag
+    # immer Human-in-the-loop (Thesis §7.4) -- es gibt bewusst keine Schwelle.
     betrag_toleranz_eur: float = 0.01
 
     modell_modus: ModellModus = ModellModus.LOKAL

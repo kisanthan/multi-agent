@@ -99,10 +99,10 @@ Freigabe-Queue (Human-in-the-loop) im Browser:
 
 | # | Szenario | Belegt |
 |---|---|---|
-| 1 | Gültige Zahlung → automatische Verbuchung (offen→bezahlt) | Happy Path A, schwellenbasierte Autonomie |
+| 1 | Gültige Zahlung → Abgleich ok → Buchungsfreigabe (HITL) → offen→bezahlt | Happy Path A, finanzwirksame Buchung immer Human-in-the-loop |
 | 2 | Unbekannte Nummer → Klärfall → HITL-Freigabe → Verbuchung | Human-in-the-loop, Ausnahmebehandlung |
-| 3 | Rechnung → eindeutige Kostenstelle → automatische Archivierung in ELO (Prozessende) | Happy Path B, Human-on-the-loop |
-| 4 | Mehrdeutige Rechnung → Vier-Augen-Freigabe → Mensch entscheidet → ELO | HITL an semantischer Risikostelle |
+| 3 | Rechnung mit Kostenstellenreferenz → exakter Nachschlag → automatische Archivierung in ELO (Prozessende) | Happy Path B, deterministischer Referenz-Nachschlag |
+| 4 | Rechnung ohne Referenz → Nachschlag scheitert → Vier-Augen-Freigabe → ELO | HITL bei fehlender Referenz |
 | 5 | Unberechtigter Einspeiser → AD-Check verweigert | Least Privilege, Governance |
 
 ## Tests

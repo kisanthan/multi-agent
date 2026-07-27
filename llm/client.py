@@ -47,9 +47,11 @@ def waehle_modell(agent_id: str) -> Modellwahl:
     modus = einstellungen.modell_modus
 
     if klasse is Modellklasse.KEINE:
+        # Deterministische Komponenten (Reader, Policy, Audit) UND deterministisch
+        # arbeitende Domain-Agenten (Abgleich, Kostenstelle -- exakter Nachschlag,
+        # Thesis §7.4) rufen kein Sprachmodell auf.
         raise ValueError(
-            f"{cfg.name} ist kein KI-Agent (Typ {cfg.typ.value}) und darf kein "
-            "Modell aufrufen."
+            f"{cfg.name} ruft kein Sprachmodell auf (Modellklasse KEINE)."
         )
 
     if modus is ModellModus.LOKAL:

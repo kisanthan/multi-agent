@@ -20,12 +20,12 @@ Eingang (PDF + Einspeiser-UPN)
         ▼
    [Orchestrator]  ── Conditional Edge nach Dokumenttyp
         ├──────────────► Prozess A                 └──────────────► Prozess B
-        │  [Abgleich] (Stufe 1, deterministisch)      [Kostenstelle] (Stufe 2, LLM)
-        │      │ Nummer vorhanden?                        │ Zuordnung eindeutig?
+        │  [Abgleich] (Stufe 1, deterministisch)      [Kostenstelle] (Stufe 2, deterministisch)
+        │      │ Nummer vorhanden?                        │ Referenz eindeutig?
         │      │   nein → Klärfall (HITL)                 │   nein → Klärfall/Freigabe (HITL)
         │      ▼                                           ▼
         │  [Buchung] (Stufe 3)                        [ELO] (Stufe 3)
-        │      │ > Schwelle? → HITL                        │
+        │      │ Buchungsfreigabe (HITL, immer)            │
         │      ▼                                           ▼
         │   Navision /booking (offen→bezahlt)         ELO /archive  ── Prozessende
         │
@@ -35,9 +35,17 @@ Eingang (PDF + Einspeiser-UPN)
 
 > **Prozess B endet bei ELO** (Diagramm Teil 3): revisionssichere Archivierung
 > ist das Prozessende, es gibt keine Navision-Verbuchung in Prozess B. Navision
-> wird nur in Prozess A angesprochen. Beide Domänen-Agenten (Kostenstelle, ELO)
-> sind Human-on-the-loop — die Vier-Augen-Freigabe greift nur bei mehrdeutiger
-> Kostenstellen-Zuordnung.
+> wird nur in Prozess A angesprochen. Kostenstelle und ELO sind Human-on-the-loop
+> — die Vier-Augen-Freigabe greift nur, wenn die Kostenstellenreferenz fehlt.
+>
+> **Zwei deterministische Domain-Agenten:** Abgleich (Prozess A, Rechnungsnummer)
+> und Kostenstelle (Prozess B, Kostenstellenreferenz) sind exakte referenzielle
+> Nachschläge ohne Sprachmodell (Thesis §7.4). Das Extrahieren der Nummer bzw.
+> Referenz leistet der Klassifikations-Agent (mit Modell).
+>
+> **Buchungs-Agent immer Human-in-the-loop:** der finanzwirksame Buchungsschritt
+> (Prozess A) verlangt für jede Buchung eine menschliche Freigabe — keine
+> Betragsschwelle (Thesis §7.4, Tabelle 11).
 
 ## Schichten und ihre Grenzen
 

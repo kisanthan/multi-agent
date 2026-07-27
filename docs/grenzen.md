@@ -48,6 +48,15 @@ Fachlogik, Performance oder Fehlermodi der Echtsysteme. Die AD-/Entra-Anbindung
 ist eine SQLite-Tabelle, kein echtes Verzeichnis; es gibt keine echte
 Authentifizierung — der „angemeldete Nutzer" ist im Prototyp eine Auswahl.
 
+### L3b — Kostenstellenreferenz als Betriebsannahme
+Der Kostenstellen-Agent ist ein exakter referenzieller Nachschlag (Thesis §7.4):
+Er setzt voraus, dass der Beleg eine maschinenlesbare Kostenstellenreferenz trägt
+(im Prototyp ein Code `KTR-…`, den der Extraktions-Agent liest). Reale
+Eingangsrechnungen tragen eine solche Referenz nicht immer explizit — dann greift
+korrekterweise der Klärfall (menschliche Zuordnung) häufiger. Der Prototyp
+demonstriert den deterministischen Pfad; die Häufigkeit des Klärfalls auf
+Echtbelegen ist empirisch offen.
+
 ### L4 — Governance-Umfang
 Die Policy-Engine deckt die im Fachkonzept genannten Regeln ab (RBAC,
 Autonomiestufen, Betragsschwellen, Vier-Augen-Prinzip). Sie ist kein

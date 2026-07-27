@@ -29,6 +29,7 @@ class Vorgang(TypedDict, total=False):
     betrag_eur: float | None
     lieferant: str | None
     positionen: list[str]
+    kostenstellen_referenz: str | None   # vom Beleg extrahiert (Prozess B)
 
     # --- Prozess A: Abgleich ---
     befund: str
@@ -37,7 +38,6 @@ class Vorgang(TypedDict, total=False):
     # --- Prozess B: Kostenstelle ---
     kostenstelle_id: str | None
     kostenstelle_begruendung: str
-    kostenstelle_alternativen: list[str]
     kostenstelle_eindeutig: bool
     archiv_id: str | None
 

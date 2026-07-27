@@ -2,11 +2,11 @@
 
 Verbucht die Zahlung im ERP und setzt den Status offen -> bezahlt.
 
-Hier greift die offene fachliche Festlegung des Konzepts: vollautomatisch oder
-freigabepflichtig? Der Agent entscheidet das nicht selbst -- er *fragt die
-Policy* (governance/policy.py), die schwellenwertbasiert antwortet. Das ist der
-Kern der Architekturaussage: die Governance sitzt nicht im Agenten und erst
-recht nicht im Modell.
+Der finanzwirksame Buchungsschritt steht unter Human-in-the-loop (Thesis §7.4):
+jede Buchung erfordert eine menschliche Freigabe -- unabhaengig vom Betrag. Der
+Agent entscheidet das nicht selbst, sondern *fragt die Policy*
+(governance/policy.py). Das ist der Kern der Architekturaussage: die Governance
+sitzt nicht im Agenten und erst recht nicht im Modell.
 
 Der Agent ruft selbst kein Sprachmodell auf. Was hier passiert -- Policy fragen,
 HTTP-Call ans ERP -- ist deterministisch. Die Modellklasse FRONTIER in der
@@ -42,9 +42,9 @@ def buche(con: sqlite3.Connection, *, nummer: str, betrag_eur: float, akteur: st
     """Verbucht eine Zahlung -- nach Policy-Pruefung.
 
     `freigegeben_von` wird gesetzt, wenn ein Mensch den HITL-Punkt bereits
-    entschieden hat. Dann entfaellt die erneute Schwellenpruefung: die Freigabe
-    *ist* die Erlaubnis, sonst liefe der Vorgang in eine Endlosschleife aus
-    Freigabe und erneuter Nachfrage.
+    entschieden hat. Dann entfaellt die erneute Policy-Freigabepruefung: die
+    Freigabe *ist* die Erlaubnis, sonst liefe der Vorgang in eine Endlosschleife
+    aus Freigabe und erneuter Nachfrage.
     """
     if freigegeben_von is None:
         entscheid = pruefe_schreibaktion(

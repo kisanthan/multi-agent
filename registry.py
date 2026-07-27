@@ -118,39 +118,44 @@ REGISTRY: dict[str, AgentKonfiguration] = {
         typ=AgentTyp.SHARED_DOMAIN,
         autonomiestufe=Autonomiestufe.LESEZUGRIFF,
         aufsicht=Aufsichtsmodus.HUMAN_ON_THE_LOOP,
-        modellklasse=Modellklasse.LOKAL_KLEIN,
+        # Kein Modell: exakter Primaerschluessel-Nachschlag (Thesis §7.4,
+        # docs/mapping.md I1) -- wie der Kostenstellen-Agent.
+        modellklasse=Modellklasse.KEINE,
         prozesse=("A",),
         darf_schreiben=False,
-        beschreibung="Gleicht die extrahierte Rechnungs-/Bestellnummer gegen die "
-        "Stammdatenbasis ab. Nur Lesezugriff.",
+        beschreibung="Gleicht die extrahierte Rechnungs-/Bestellnummer exakt gegen "
+        "die Stammdatenbasis ab (deterministisch). Nur Lesezugriff.",
     ),
     "buchung": AgentKonfiguration(
         name="Buchungs-Agent",
         typ=AgentTyp.SHARED_DOMAIN,
         autonomiestufe=Autonomiestufe.REVERSIBLES_SCHREIBEN,
-        # Offene fachliche Festlegung: schwellenwertabhaengig. Der hier
-        # hinterlegte Modus ist der Default unterhalb der Schwelle; oberhalb
-        # eskaliert governance.policy auf Human-in-the-loop.
-        aufsicht=Aufsichtsmodus.HUMAN_ON_THE_LOOP,
+        # Thesis §7.4 / Tabelle 11: der finanzwirksame Buchungsschritt steht
+        # unter Human-in-the-loop -- jede Buchung erfordert eine menschliche
+        # Freigabe. Kopplung "steigende Autonomie -> engere Aufsicht" (Kap. 2.2).
+        aufsicht=Aufsichtsmodus.HUMAN_IN_THE_LOOP,
         modellklasse=Modellklasse.FRONTIER,
         prozesse=("A",),
         darf_schreiben=True,
         beschreibung="Verbucht die Zahlung im ERP, Status offen -> bezahlt. "
-        "Oberhalb BUCHUNG_SCHWELLE_EUR freigabepflichtig.",
+        "Finanzwirksam, daher immer freigabepflichtig (Human-in-the-loop).",
     ),
     "kostenstelle": AgentKonfiguration(
         name="Kostenstellen-Agent",
         typ=AgentTyp.SHARED_DOMAIN,
         autonomiestufe=Autonomiestufe.VORSCHLAG,
-        # Diagramm Teil 3: Human-on-the-loop. Bei eindeutiger Zuordnung laeuft
-        # der Vorgang automatisch weiter; nur bei Mehrdeutigkeit greift die
-        # Vier-Augen-Freigabe (Klaerfall). Spiegelt Prozess A.
+        # Diagramm Teil 3: Human-on-the-loop. Loest die Belegreferenz eindeutig
+        # auf, laeuft der Vorgang automatisch zur Archivierung; fehlt/unbekannt
+        # die Referenz, greift die Vier-Augen-Freigabe (Klaerfall). Spiegelt A.
         aufsicht=Aufsichtsmodus.HUMAN_ON_THE_LOOP,
-        modellklasse=Modellklasse.LOKAL_KLEIN,
+        # Kein Modell: die Zuordnung ist ein exakter referenzieller Nachschlag
+        # (Thesis §7.4), kein semantisches Matching -- wie der Abgleich-Agent.
+        # Das Extrahieren der Referenz leistet der Klassifikations-Agent.
+        modellklasse=Modellklasse.KEINE,
         prozesse=("B",),
         darf_schreiben=False,
-        beschreibung="Schlaegt anhand der Kostenstellen-Referenz eine Kostenstelle "
-        "vor. Bei Mehrdeutigkeit Vier-Augen-Freigabe durch einen Menschen.",
+        beschreibung="Schlaegt die Kostenstellenreferenz des Belegs exakt im "
+        "Katalog nach (deterministisch). Fehlt sie, Vier-Augen-Freigabe.",
     ),
     "elo": AgentKonfiguration(
         name="ELO-Agent",

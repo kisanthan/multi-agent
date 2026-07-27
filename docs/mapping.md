@@ -21,9 +21,9 @@ Stellen gegen die tatsächlichen Diagramme abgeglichen werden.
 | Reader-Tool | [tools/reader.py](../tools/reader.py) | kein Agent | – | deterministisch | keine |
 | Orchestrator-Agent | `route_dokumenttyp` in [graph/workflow.py](../graph/workflow.py) | Orchestrator | – | Human-on-the-loop | lokal/klein |
 | Klassifikation & Extraktion | [agents/klassifikation.py](../agents/klassifikation.py) | Shared Domain | 2 | Human-on-the-loop | vision |
-| Abgleich-Agent | [agents/abgleich.py](../agents/abgleich.py) | Shared Domain | 1 | Human-on-the-loop | *(entfällt, s.u.)* |
-| Buchungs-Agent | [agents/buchung.py](../agents/buchung.py) | Shared Domain | 3 | schwellenbasiert | Frontier |
-| Kostenstellen-Agent | [agents/kostenstelle.py](../agents/kostenstelle.py) | Shared Domain | 2 | Human-on-the-loop | lokal/klein |
+| Abgleich-Agent | [agents/abgleich.py](../agents/abgleich.py) | Shared Domain | 1 | Human-on-the-loop | keine *(det., I1)* |
+| Buchungs-Agent | [agents/buchung.py](../agents/buchung.py) | Shared Domain | 3 | **Human-in-the-loop** | Frontier |
+| Kostenstellen-Agent | [agents/kostenstelle.py](../agents/kostenstelle.py) | Shared Domain | 2 | Human-on-the-loop | keine *(det., I1)* |
 | ELO-Agent (Prozessende B) | [agents/zielsysteme.py](../agents/zielsysteme.py) | Shared Domain | 3 | Human-on-the-loop | lokal/klein |
 | Policy-/Governance | [governance/policy.py](../governance/policy.py) | Policy | – | deterministisch | keine |
 | Audit-/Monitoring | [governance/audit.py](../governance/audit.py) | Audit | – | read-only | keine |
@@ -54,29 +54,41 @@ Die Tabelle ist im Code als wirksame Datenstruktur hinterlegt
 
 ## Interpretationsentscheidungen
 
-### I1 — Abgleich-Agent ohne Sprachmodell *(mit Nutzer abgestimmt)*
+### I1 — Abgleich- und Kostenstellen-Agent ohne Sprachmodell *(mit Nutzer abgestimmt)*
 
-Die Tabelle weist dem Abgleich-Agenten eine Modellklasse zu. Fachlich ist der
-Abgleich jedoch eine Suche über einen Primärschlüssel: ein Sprachmodell könnte
-dort nichts beitragen, was SQL nicht exakt und reproduzierbar leistet — es könnte
-nur halluzinieren, und das an einer finanzrelevanten Stelle. Der Prototyp
-implementiert den Abgleich deshalb **deterministisch**
-([agents/abgleich.py](../agents/abgleich.py)); Autonomiestufe 1 und Aufsichts­
-modus bleiben unverändert gültig, nur die Modellzuordnung entfällt.
+Thesis §7.4: Sowohl der Nummern-Abgleich (Prozess A) als auch die
+Kostenstellenzuordnung (Prozess B) sind „exakte, referenzielle Nachschläge auf
+strukturierte Stammdaten". Ein Sprachmodell könnte dort nichts beitragen, was ein
+Datenbankzugriff nicht exakt und reproduzierbar leistet — es könnte nur
+halluzinieren, und das an finanz- bzw. buchungsrelevanter Stelle. Der Prototyp
+implementiert beide Agenten deshalb **deterministisch**
+([agents/abgleich.py](../agents/abgleich.py),
+[agents/kostenstelle.py](../agents/kostenstelle.py)); Autonomiestufe und
+Aufsichtsmodus bleiben gültig, die Modellklasse ist `KEINE`. Das Extrahieren der
+Nummer bzw. der Kostenstellenreferenz vom Beleg leistet der vorgelagerte
+Klassifikations-/Extraktions-Agent (der ein Modell nutzt).
 
 **Verwertbarer Befund für die Arbeit:** Rolle und Autonomiestufe eines Agenten
 implizieren nicht automatisch Modellinferenz. Die Typologie sagt, *welche Rolle*
 und *welche Autonomiestufe* eine Komponente hat — ob dafür ein Sprachmodell nötig
-ist, ist eine davon getrennte Entscheidung. Das ist ein Ergebnis des
-Demonstrations-Artefakts, das in die Evaluation (Kap. 5/6) einfließen kann.
+ist, ist eine davon getrennte Entscheidung. Deterministische Domain-Agenten
+(Abgleich, Kostenstelle) stehen damit neben den ohnehin deterministischen
+Querschnittskomponenten (Reader, Policy, Audit).
 
-### I2 — Buchungs-Agent: offene fachliche Festlegung als Konfiguration
+### I2 — Buchungs-Agent: immer Human-in-the-loop (Abgleich mit Thesis §7.4)
 
-Die Frage „vollautomatisch oder freigabepflichtig?" ist im Prototyp
-schwellenwertbasiert und konfigurierbar (`BUCHUNG_SCHWELLE_EUR`). Unterhalb →
-Human-on-the-loop (automatisch), oberhalb → Human-in-the-loop (Interrupt). Beide
-Varianten laufen in derselben Demo. Die Entscheidung wird damit zur
-Konfigurationsfrage, statt in der Arbeit vorweggenommen werden zu müssen.
+Der finanzwirksame Buchungsschritt steht nach Thesis §7.4 und Tabelle 11 unter
+**Human-in-the-loop**: jede Buchung erfordert eine menschliche Freigabe,
+unabhängig vom Betrag. Eine frühere Prototyp-Fassung nutzte eine Betragsschwelle
+(darunter automatisch, darüber Freigabe); diese wurde entfernt, weil sie die im
+Konzept geforderte durchgängige Aufsicht abgeschwächt hätte. Realisiert über die
+Aufsichtsmodus-Regel in [governance/policy.py](../governance/policy.py).
+
+*(Verbleibende Thesis-interne Spannung: Abb. 6 beschriftet den Buchungs-Agenten
+als „Human-on-the-loop", der Text als „Human-in-the-loop"; die Bewertungstabelle
+nennt zudem für Prozess A „manueller Eingriff nur im Ausnahmefall". Der Code
+folgt dem Text/der Tabelle. Siehe [gap-analyse-thesis.md](gap-analyse-thesis.md)
+G3.)*
 
 ### I3 — Autonomiestufen „1–2"
 
@@ -90,16 +102,17 @@ Der Dokumenttyp steht nach dem Klassifikations-Agenten bereits fest. Der
 Orchestrator *routet* danach (Conditional Edge), statt ein zweites Modell zu
 fragen — ein zweiter Aufruf könnte dem ersten widersprechen.
 
-### I5 — Kostenstellen-Agent: Human-on-the-loop, HITL nur bei Mehrdeutigkeit
+### I5 — Kostenstellen-Agent: Human-on-the-loop, HITL nur bei fehlender Referenz
 
-Nach dem Diagramm Teil 3 ist der Kostenstellen-Agent **Human-on-the-loop**: bei
-eindeutiger Zuordnung läuft der Vorgang automatisch bis zur Archivierung, die
-Vier-Augen-Freigabe greift nur bei Mehrdeutigkeit (Entscheidung „Zuordnung
-eindeutig?" → nein/Klärfall). Das spiegelt exakt Prozess A (Nummer vorhanden?).
-Realisiert in [graph/workflow.py](../graph/workflow.py) über `route_kostenstelle`.
+Nach dem Diagramm Teil 3 ist der Kostenstellen-Agent **Human-on-the-loop**: löst
+die Belegreferenz eindeutig eine Kostenstelle auf, läuft der Vorgang automatisch
+bis zur Archivierung; die Vier-Augen-Freigabe greift nur, wenn die Referenz fehlt
+oder unbekannt ist (Entscheidung „Zuordnung eindeutig?" → nein/Klärfall). Das
+spiegelt exakt Prozess A (Nummer vorhanden?). Realisiert in
+[graph/workflow.py](../graph/workflow.py) über `route_kostenstelle`.
 
 *(Frühere Prototyp-Fassung erzwang an dieser Stelle immer eine Freigabe; das
-neue Diagramm hat den Aufsichtsmodus auf on-the-loop präzisiert.)*
+Diagramm hat den Aufsichtsmodus auf on-the-loop präzisiert.)*
 
 ### I6 — Prozess B endet bei ELO (keine Navision-Verbuchung)
 
@@ -121,19 +134,22 @@ Nachschläge auf strukturierte Stammdaten." RAG wird in der Arbeit nur als
 des Klassifikations-/Extraktions-Agenten bei ungewöhnlichen Beleglayouts und zur
 Anreicherung der menschlichen Klärfallprüfung um Vertrags-/Richtlinienpassagen.
 
-Der Prototyp folgt dieser Linie für den **Abgleich-Agenten** (deterministisch,
-siehe I1). Beim **Kostenstellen-Agenten weicht der Prototyp ab**: er ist
-LLM-/schlüsselwortbasiert-semantisch implementiert
-([agents/kostenstelle.py](../agents/kostenstelle.py)), während die Thesis ihn als
-exakten referenziellen Nachschlag beschreibt. Diese Divergenz ist offen (siehe
-Abgleich-Notiz in [gap-analyse-thesis.md](gap-analyse-thesis.md)).
+Der Prototyp folgt dieser Linie nun für **beide** Nachschläge: sowohl der
+Abgleich-Agent als auch der Kostenstellen-Agent sind deterministische, exakte
+Referenz-Nachschläge ohne Sprachmodell (siehe I1). Die frühere Prototyp-Fassung
+implementierte die Kostenstellenzuordnung LLM-/schlüsselwortbasiert-semantisch;
+das wurde auf einen Referenz-Nachschlag umgestellt, um mit der Thesis-Aussage
+konsistent zu sein: Die Rechnung trägt eine Kostenstellenreferenz (z. B.
+`KTR-ITINFRA`), der Extraktions-Agent liest sie, der Kostenstellen-Agent schlägt
+sie exakt im Katalog nach. „Nicht eindeutig" heißt jetzt: Referenz fehlt oder
+unbekannt → Klärfall.
 
-**Analytische Spannung, die in der Arbeit adressiert werden sollte:** Der
-Prozessschritt „Zuordnung eindeutig?" mit Klärfall-Pfad impliziert, dass die
-Kostenstellenzuordnung einen *Klassifikationscharakter* hat — ein rein exakter
-Nachschlag ist entweder ein Treffer oder keiner, aber nicht „mehrdeutig". Die
-Bezeichnung als „exakter referenzieller Nachschlag" trägt daher für die
-Kostenstelle weniger weit als für die Rechnungsnummer.
+**Verbleibende analytische Spannung (für die Arbeit):** Der Prozessschritt
+„Zuordnung eindeutig?" mit Klärfall-Pfad passt nun sauber zum Referenz-Nachschlag
+(Referenz vorhanden → eindeutig; fehlt → Klärfall). Die zuvor notierte Spannung
+(„ein exakter Nachschlag ist nie mehrdeutig") ist damit aufgelöst: die
+„Uneindeutigkeit" liegt nicht in einer semantischen Ähnlichkeit, sondern im
+Fehlen der Referenz auf dem Beleg.
 
 ## Governance-Durchsetzung
 

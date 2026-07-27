@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import pytest
 
-from config import einstellungen
 from governance.policy import Ergebnis, pruefe_freigabe, pruefe_reader_zugriff, pruefe_schreibaktion
 
 EINSPEISER = "einspeiser@chg-meridian.com"
@@ -49,36 +48,27 @@ def test_stufe_1_und_2_duerfen_nicht_schreiben(con, agent_id, stufe):
     assert e.regel in ("least_privilege", "autonomiestufe")
 
 
-# ------------------------------------------------ Regel 4: Betragsschwelle
+# ---------------------------------------- Buchungs-Agent: immer HITL
 
-def test_buchung_unter_schwelle_ist_automatisch(con):
-    betrag = einstellungen.buchung_schwelle_eur - 0.01
-    e = pruefe_schreibaktion(con, agent_id="buchung", akteur=EINSPEISER,
-                             aktion="verbuchen", betrag_eur=betrag)
-    assert e.ergebnis is Ergebnis.ERLAUBT
-    assert e.regel == "betragsschwelle"
-
-
-def test_buchung_ueber_schwelle_braucht_freigabe(con):
-    betrag = einstellungen.buchung_schwelle_eur + 0.01
+@pytest.mark.parametrize("betrag", [0.01, 1_500.0, 25_000.0, 500_000.0])
+def test_buchung_ist_immer_freigabepflichtig(con, betrag):
+    """Thesis §7.4 / Tabelle 11: der finanzwirksame Buchungsschritt steht unter
+    Human-in-the-loop -- unabhaengig vom Betrag. Es gibt bewusst keine Schwelle,
+    ab der automatisch gebucht wuerde.
+    """
     e = pruefe_schreibaktion(con, agent_id="buchung", akteur=EINSPEISER,
                              aktion="verbuchen", betrag_eur=betrag)
     assert e.ergebnis is Ergebnis.FREIGABE_NOETIG
-    assert e.regel == "betragsschwelle"
+    assert e.regel == "aufsichtsmodus"
 
 
-def test_buchung_genau_auf_schwelle_ist_automatisch(con):
-    """Die Schwelle ist exklusiv: erst *ueber* dem Wert wird eskaliert.
-
-    Explizit getestet, weil die Grenze sonst eine stillschweigende Annahme
-    waere -- und in der Arbeit steht 'unterhalb Betrag X automatisch'.
-    """
+def test_buchung_freigabepflichtig_auch_ohne_betrag(con):
     e = pruefe_schreibaktion(con, agent_id="buchung", akteur=EINSPEISER,
-                             aktion="verbuchen", betrag_eur=einstellungen.buchung_schwelle_eur)
-    assert e.ergebnis is Ergebnis.ERLAUBT
+                             aktion="verbuchen")
+    assert e.ergebnis is Ergebnis.FREIGABE_NOETIG
 
 
-# ------------------------------------------------ Regel 5: Aufsichtsmodus
+# ------------------------------------------------ Regel 4: Aufsichtsmodus
 
 def test_elo_agent_ist_on_the_loop_und_laeuft_automatisch(con):
     """ELO-Agent (Stufe 3, Human-on-the-loop) ist das Prozessende von Prozess B.

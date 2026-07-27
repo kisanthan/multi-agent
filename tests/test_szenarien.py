@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from agents.schemas import Dokumenttyp, Klassifikation, Kostenstellenvorschlag
+from agents.schemas import Dokumenttyp, Klassifikation
 from config import EINGANG_DIR, MANIFEST_PFAD
 from governance.audit import verify_chain
 from llm.extraktion import Extraktionsergebnis
@@ -98,12 +98,6 @@ def _mock_klassifikation(monkeypatch, **felder):
     monkeypatch.setattr("agents.klassifikation.extrahiere", lambda *a, **k: erg)
 
 
-def _mock_kostenstelle(monkeypatch, **felder):
-    daten = Kostenstellenvorschlag(**felder)
-    erg = Extraktionsergebnis(daten=daten, versuche=1, modell="mock", anbieter="mock")
-    monkeypatch.setattr("agents.kostenstelle.extrahiere", lambda *a, **k: erg)
-
-
 def _reset_status(nummer: str, status: str = "offen") -> None:
     from config import DB_PFAD
     con = sqlite3.connect(DB_PFAD)
@@ -119,24 +113,38 @@ def _pdf(name: str) -> str:
 
 # ------------------------------------------------- Szenario 1: Happy Path A
 
-def test_szenario1_kleiner_betrag_wird_automatisch_verbucht(app, thread, monkeypatch):
-    """Gueltige Zahlung unter Schwelle -> automatische Verbuchung, offen->bezahlt."""
+def test_szenario1_gueltige_zahlung_braucht_buchungsfreigabe(app, thread, monkeypatch):
+    """Gueltige Zahlung -> Abgleich ok -> Buchungsfreigabe (HITL) -> offen->bezahlt.
+
+    Thesis §7.4: der finanzwirksame Buchungsschritt steht unter Human-in-the-loop.
+    Auch bei gueltiger, eindeutiger Zuordnung wird die Buchung erst nach einer
+    menschlichen Freigabe ausgefuehrt -- es gibt keine automatische Verbuchung.
+    """
     _reset_status("RE-2026-4200")
-    _set_betrag("RE-2026-4200", 1_500.0)  # deterministisch unter der Schwelle
+    _set_betrag("RE-2026-4200", 1_500.0)
     _mock_klassifikation(
         monkeypatch, typ=Dokumenttyp.ZAHLUNGSBESTAETIGUNG,
-        nummer="RE-2026-4200", betrag_eur=1_500.0,  # stimmt mit Stammdaten ueberein
+        nummer="RE-2026-4200", betrag_eur=1_500.0,
         lieferant="Microsoft Deutschland GmbH",
     )
 
+    from langgraph.types import Command
     zustand = app.invoke(
         {"pfad": _pdf("A_zahlung_ok_01.pdf"), "akteur": "m.keller@chg-meridian.com",
          "protokoll": []},
         thread,
     )
 
-    # Kein Interrupt: unter Schwelle laeuft es ohne Freigabe durch.
-    assert "__interrupt__" not in zustand
+    # Buchung ist immer HITL -> auch der Happy Path haelt fuer die Freigabe an.
+    assert "__interrupt__" in zustand
+    assert zustand["__interrupt__"][0].value["befund"] == "ok"
+
+    zustand = app.invoke(
+        Command(resume={"entscheidung": "freigegeben",
+                        "pruefer": "s.hofmann@chg-meridian.com",
+                        "nummer": "RE-2026-4200"}),
+        thread,
+    )
     assert zustand["ergebnis"] == "verbucht"
 
     from config import DB_PFAD
@@ -148,15 +156,18 @@ def test_szenario1_kleiner_betrag_wird_automatisch_verbucht(app, thread, monkeyp
     assert status == "bezahlt"
 
 
-def test_szenario1_grosser_betrag_braucht_freigabe(app, thread, monkeypatch):
-    """Gueltige Zahlung ueber Schwelle -> HITL, dann Verbuchung."""
+def test_szenario1_grosser_betrag_gleiche_einzelfreigabe(app, thread, monkeypatch):
+    """Auch ein hoher Betrag laeuft ueber genau eine Freigabe -- keine Schwelle.
+
+    Belegt, dass es keinen betragsabhaengigen Sonderpfad gibt: 500.000 EUR
+    durchlaufen dieselbe einzelne Human-in-the-loop-Freigabe wie 1.500 EUR.
+    """
     _reset_status("RE-2026-4200")
+    _set_betrag("RE-2026-4200", 500_000.0)
     _mock_klassifikation(
         monkeypatch, typ=Dokumenttyp.ZAHLUNGSBESTAETIGUNG,
-        nummer="RE-2026-4200", betrag_eur=25_000.0,
+        nummer="RE-2026-4200", betrag_eur=500_000.0,
     )
-    # Betrag im Dokument weicht bewusst nicht ab: wir setzen den Stammbetrag hoch.
-    _set_betrag("RE-2026-4200", 25_000.0)
 
     from langgraph.types import Command
     zustand = app.invoke(
@@ -164,10 +175,7 @@ def test_szenario1_grosser_betrag_braucht_freigabe(app, thread, monkeypatch):
          "protokoll": []},
         thread,
     )
-
-    assert "__interrupt__" in zustand  # ueber Schwelle -> haelt an
-    anfrage = zustand["__interrupt__"][0].value
-    assert anfrage["art"] == "klaerfall"
+    assert "__interrupt__" in zustand
 
     zustand = app.invoke(
         Command(resume={"entscheidung": "freigegeben",
@@ -253,10 +261,8 @@ def test_szenario3_eindeutige_kostenstelle_wird_automatisch_archiviert(app, thre
         nummer="ER-2026-7102", betrag_eur=37_940.0,
         lieferant="Microsoft Deutschland GmbH",
         positionen=["Microsoft 365 E5, 1200 Lizenzen", "Azure Cloud Hosting"],
+        kostenstellen_referenz="KTR-ITINFRA",  # loest eindeutig auf KST-1000
     )
-    _mock_kostenstelle(monkeypatch, kostenstelle_id="KST-1000",
-                       begruendung="Schluesselwort 'azure', 'lizenz'",
-                       eindeutig=True, alternativen=[])
 
     zustand = app.invoke(
         {"pfad": _pdf("B_rechnung_ok_02.pdf"), "akteur": "m.keller@chg-meridian.com",
@@ -264,9 +270,10 @@ def test_szenario3_eindeutige_kostenstelle_wird_automatisch_archiviert(app, thre
         thread,
     )
 
-    # Eindeutig -> Human-on-the-loop -> kein Interrupt.
+    # Referenz loest eindeutig auf -> Human-on-the-loop -> kein Interrupt.
     assert "__interrupt__" not in zustand
     assert zustand["ergebnis"] == "archiviert"
+    assert zustand["kostenstelle_id"] == "KST-1000"
     assert zustand["archiv_id"].startswith("ELO-")
 
     from config import DB_PFAD
@@ -278,36 +285,35 @@ def test_szenario3_eindeutige_kostenstelle_wird_automatisch_archiviert(app, thre
     con.close()
 
 
-# ---------------------------------------- Szenario 4: mehrdeutig
+# ---------------------------------------- Szenario 4: Referenz fehlt
 
-def test_szenario4_mehrdeutige_kostenstelle_entscheidet_mensch(app, thread, monkeypatch):
-    """Konflikt -> Vier-Augen-Freigabe -> Mensch waehlt -> Archivierung.
+def test_szenario4_fehlende_referenz_entscheidet_mensch(app, thread, monkeypatch):
+    """Keine Belegreferenz -> Nachschlag scheitert -> Klaerfall -> Mensch waehlt.
 
-    Nur bei Mehrdeutigkeit greift die HITL-Freigabe (Klaerfall). Die menschliche
-    Wahl bestimmt die Kostenstelle und ist im Audit-Trail nachvollziehbar.
+    Der exakte Nachschlag ist nicht eindeutig, sobald die Referenz fehlt. Dann
+    greift die Vier-Augen-Freigabe; die menschliche Wahl bestimmt die
+    Kostenstelle und ist im Audit-Trail nachvollziehbar.
     """
     _mock_klassifikation(
         monkeypatch, typ=Dokumenttyp.EINGANGSRECHNUNG,
         nummer="ER-2026-7200", betrag_eur=24_400.0,
         lieferant="SAP Deutschland SE",
         positionen=["SAP Lizenzverlaengerung Modul FI", "Anwenderschulung SAP FI"],
+        kostenstellen_referenz=None,  # keine Referenz auf dem Beleg
     )
-    # Modell meldet Mehrdeutigkeit: kein eindeutiger Vorschlag.
-    _mock_kostenstelle(monkeypatch, kostenstelle_id=None,
-                       begruendung="'lizenz' -> KST-1000, 'schulung' -> KST-5000",
-                       eindeutig=False, alternativen=["KST-1000", "KST-5000"])
 
     from langgraph.types import Command
     zustand = app.invoke(
-        {"pfad": _pdf("B_rechnung_mehrdeutig.pdf"), "akteur": "t.brandt@chg-meridian.com",
-         "protokoll": []},
+        {"pfad": _pdf("B_rechnung_ohne_referenz.pdf"),
+         "akteur": "t.brandt@chg-meridian.com", "protokoll": []},
         thread,
     )
 
     assert "__interrupt__" in zustand
     anfrage = zustand["__interrupt__"][0].value
     assert anfrage["eindeutig"] is False
-    assert set(anfrage["alternativen"]) == {"KST-1000", "KST-5000"}
+    # Der Pruefer bekommt den vollstaendigen Katalog zur Auswahl.
+    assert any(k["id"] == "KST-5000" for k in anfrage["katalog"])
 
     # Mensch entscheidet sich fuer HR-Schulung.
     zustand = app.invoke(

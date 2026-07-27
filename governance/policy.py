@@ -16,7 +16,6 @@ import sqlite3
 from dataclasses import dataclass, field
 from enum import Enum
 
-from config import einstellungen
 from governance import ad
 from registry import Aufsichtsmodus, Autonomiestufe, konfiguration
 
@@ -96,30 +95,16 @@ def pruefe_schreibaktion(
             f"mindestens Stufe {Autonomiestufe.REVERSIBLES_SCHREIBEN.value}.", basis,
         )
 
-    # Regel 4 -- Betragsschwelle (offene fachliche Festlegung, Prozess A).
-    # Nur der Buchungs-Agent kennt eine Schwelle; sie eskaliert den
-    # Aufsichtsmodus von on-the-loop auf in-the-loop.
-    if agent_id == "buchung" and betrag_eur is not None:
-        schwelle = einstellungen.buchung_schwelle_eur
-        kontext = {**basis, "betrag_eur": betrag_eur, "schwelle_eur": schwelle}
-        if betrag_eur > schwelle:
-            return Entscheid(
-                Ergebnis.FREIGABE_NOETIG, "betragsschwelle",
-                f"Betrag {betrag_eur:.2f} EUR ueberschreitet die Schwelle "
-                f"{schwelle:.2f} EUR -> Human-in-the-loop.", kontext,
-            )
-        return Entscheid(
-            Ergebnis.ERLAUBT, "betragsschwelle",
-            f"Betrag {betrag_eur:.2f} EUR liegt unter der Schwelle "
-            f"{schwelle:.2f} EUR -> Human-on-the-loop, automatische Ausfuehrung.",
-            kontext,
-        )
-
-    # Regel 5 -- Aufsichtsmodus aus der Registry.
+    # Regel 4 -- Aufsichtsmodus aus der Registry.
+    # Der Buchungs-Agent ist Human-in-the-loop (Thesis §7.4): der finanzwirksame
+    # Buchungsschritt erfordert immer eine menschliche Freigabe, unabhaengig vom
+    # Betrag. Eine betragsbasierte Schwelle gibt es bewusst nicht -- das waere
+    # eine Abschwaechung der im Konzept geforderten durchgaengigen Aufsicht.
     if cfg.aufsicht is Aufsichtsmodus.HUMAN_IN_THE_LOOP:
+        kontext = {**basis, "betrag_eur": betrag_eur}
         return Entscheid(
             Ergebnis.FREIGABE_NOETIG, "aufsichtsmodus",
-            f"{cfg.name} ist Human-in-the-loop -- Freigabe erforderlich.", basis,
+            f"{cfg.name} ist Human-in-the-loop -- Freigabe erforderlich.", kontext,
         )
     if cfg.aufsicht is Aufsichtsmodus.HUMAN_ON_THE_LOOP:
         return Entscheid(
@@ -128,7 +113,7 @@ def pruefe_schreibaktion(
             basis,
         )
 
-    # Regel 6 -- Default deny. Ein nicht abgedeckter Aufsichtsmodus ist ein
+    # Regel 5 -- Default deny. Ein nicht abgedeckter Aufsichtsmodus ist ein
     # Konfigurationsfehler und darf nicht als Erlaubnis durchgehen.
     return Entscheid(
         Ergebnis.VERWEIGERT, "default_deny",

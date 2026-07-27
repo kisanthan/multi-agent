@@ -94,10 +94,11 @@ def knoten_klassifikation(zustand: Vorgang) -> dict:
         "betrag_eur": d.betrag_eur,
         "lieferant": d.lieferant,
         "positionen": d.positionen,
+        "kostenstellen_referenz": d.kostenstellen_referenz,
         "protokoll": _notiz(zustand, "klassifikation",
                             f"Typ={d.typ.value}, Nummer={d.nummer}, "
-                            f"Betrag={d.betrag_eur} ({e.anbieter}/{e.modell}, "
-                            f"Versuch {e.versuche})."),
+                            f"Betrag={d.betrag_eur}, KST-Ref={d.kostenstellen_referenz} "
+                            f"({e.anbieter}/{e.modell}, Versuch {e.versuche})."),
     }
 
 
@@ -185,57 +186,35 @@ def route_buchung(zustand: Vorgang) -> str:
 # ---------------------------------------------------------- Prozess B
 
 def knoten_kostenstelle(zustand: Vorgang) -> dict:
-    """Kostenstellen-Agent (Stufe 2): schlaegt vor, fuehrt nichts aus."""
+    """Kostenstellen-Agent (Stufe 2): exakter referenzieller Nachschlag.
+
+    Deterministisch -- kein Sprachmodell (Thesis §7.4, siehe agents/kostenstelle).
+    Loest die vom Beleg extrahierte Referenz gegen den Katalog auf.
+    """
     con = _con()
     try:
-        e = kostenstelle.schlage_vor(con, lieferant=zustand.get("lieferant"),
-                                     positionen=zustand.get("positionen", []),
-                                     akteur=zustand["akteur"])
-        if not e.gelungen:
-            return {
-                "klaerfall": True,
-                "klaerfall_grund": e.eskalation or "Vorschlag fehlgeschlagen",
-                "eskalation": e.eskalation,
-                "protokoll": _notiz(zustand, "kostenstelle",
-                                    f"Vorschlag gescheitert -> Klaerfall."),
-            }
-
-        d = e.daten
-        gueltig = kostenstelle.ist_gueltig(con, d.kostenstelle_id)
+        z = kostenstelle.ordne_zu(con, referenz=zustand.get("kostenstellen_referenz"),
+                                  akteur=zustand["akteur"],
+                                  positionen=zustand.get("positionen", []))
     finally:
         con.close()
 
-    # Ein Vorschlag ausserhalb des Katalogs ist unbrauchbar -- nicht der Mensch
-    # soll die Halluzination bemerken, sondern das System.
-    if d.kostenstelle_id and not gueltig:
-        return {
-            "kostenstelle_id": None,
-            "kostenstelle_begruendung": d.begruendung,
-            "kostenstelle_eindeutig": False,
-            "kostenstelle_alternativen": d.alternativen,
-            "protokoll": _notiz(zustand, "kostenstelle",
-                                f"Vorschlag {d.kostenstelle_id} existiert nicht im "
-                                "Katalog -- Entscheidung geht an den Menschen."),
-        }
-
     return {
-        "kostenstelle_id": d.kostenstelle_id,
-        "kostenstelle_begruendung": d.begruendung,
-        "kostenstelle_eindeutig": d.eindeutig and gueltig,
-        "kostenstelle_alternativen": d.alternativen,
-        "protokoll": _notiz(zustand, "kostenstelle",
-                            f"Vorschlag: {d.kostenstelle_id} "
-                            f"(eindeutig={d.eindeutig}). {d.begruendung}"),
+        "kostenstelle_id": z.kostenstelle_id,
+        "kostenstelle_begruendung": z.begruendung,
+        "kostenstelle_eindeutig": z.eindeutig,
+        "protokoll": _notiz(zustand, "kostenstelle", z.begruendung),
     }
 
 
 def route_kostenstelle(zustand: Vorgang) -> str:
     """Zuordnung eindeutig? (Diagramm Teil 3).
 
-    Der Kostenstellen-Agent ist Human-on-the-loop: bei eindeutiger Zuordnung
-    laeuft der Vorgang automatisch zur Archivierung. Nur bei Mehrdeutigkeit (oder
-    fehlgeschlagenem Vorschlag) greift die Vier-Augen-Freigabe. Das spiegelt die
-    Struktur von Prozess A (Nummer vorhanden? -> direkt oder Klaerfall).
+    Der Kostenstellen-Agent ist Human-on-the-loop: loest die Belegreferenz
+    eindeutig eine Kostenstelle auf, laeuft der Vorgang automatisch zur
+    Archivierung. Fehlt oder unbekannt die Referenz, greift die
+    Vier-Augen-Freigabe. Das spiegelt Prozess A (Nummer vorhanden? -> direkt
+    oder Klaerfall).
     """
     if zustand.get("kostenstelle_eindeutig"):
         return "elo"
@@ -249,15 +228,22 @@ def knoten_freigabe_kostenstelle(zustand: Vorgang) -> dict:
     eindeutiger Zuordnung ueberspringt route_kostenstelle diesen Knoten -- der
     Kostenstellen-Agent ist Human-on-the-loop.
     """
+    # Fehlt die Belegreferenz, waehlt der Mensch aus dem vollstaendigen Katalog.
+    con = _con()
+    try:
+        katalog = kostenstelle.katalog(con)
+    finally:
+        con.close()
+
     antwort = interrupt({
         "art": "kostenstellen_freigabe",
         "dateiname": zustand.get("dateiname"),
         "lieferant": zustand.get("lieferant"),
         "betrag_eur": zustand.get("betrag_eur"),
         "positionen": zustand.get("positionen", []),
-        "vorschlag": zustand.get("kostenstelle_id"),
+        "referenz": zustand.get("kostenstellen_referenz"),
         "begruendung": zustand.get("kostenstelle_begruendung"),
-        "alternativen": zustand.get("kostenstelle_alternativen", []),
+        "katalog": [{"id": k[0], "bezeichnung": k[1], "referenz": k[2]} for k in katalog],
         "eindeutig": zustand.get("kostenstelle_eindeutig"),
     })
 

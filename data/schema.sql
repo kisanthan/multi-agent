@@ -24,8 +24,13 @@ CREATE TABLE IF NOT EXISTS rechnungen (
 CREATE TABLE IF NOT EXISTS kostenstellen (
     id            TEXT PRIMARY KEY,
     bezeichnung   TEXT NOT NULL,
-    -- Komma-separierte Schluesselwoerter als Zuordnungsregel. Bewusst simpel:
-    -- die Regel ist Referenzdatum fuer den Agenten, nicht selbst Logik.
+    -- Eindeutige Referenz, die auf dem Beleg steht und exakt nachgeschlagen
+    -- wird (Thesis §7.4: "exakter referenzieller Nachschlag"). Der
+    -- Kostenstellen-Agent gleicht die vom Beleg extrahierte Referenz gegen
+    -- diese Spalte ab -- deterministisch, kein Sprachmodell.
+    referenz      TEXT NOT NULL UNIQUE,
+    -- Beschreibende Schluesselwoerter (Metadaten fuer die Klaerfall-Anzeige;
+    -- werden fuer die Zuordnung NICHT als Aehnlichkeitsmass verwendet).
     schluesselwoerter TEXT NOT NULL
 );
 

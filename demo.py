@@ -55,12 +55,10 @@ def _antwort_auf(anfrage: dict, pruefer: str, entscheidung: str) -> dict:
     """Baut die Freigabeantwort fuer einen Interrupt."""
     art = anfrage.get("art")
     if art == "kostenstellen_freigabe":
-        # Ist der Vorschlag mehrdeutig, entscheidet der Mensch aktiv; sonst
-        # bestaetigt er den Vorschlag.
-        kst = anfrage.get("vorschlag")
-        if not kst:
-            alternativen = anfrage.get("alternativen") or []
-            kst = alternativen[0] if alternativen else None
+        # Fehlt die Belegreferenz, waehlt der Pruefer aus dem Katalog. Im
+        # nicht-interaktiven Lauf nehmen wir die erste Katalogposition.
+        katalog = anfrage.get("katalog") or []
+        kst = katalog[0]["id"] if katalog else None
         return {"entscheidung": entscheidung, "pruefer": pruefer, "kostenstelle_id": kst}
     return {"entscheidung": entscheidung, "pruefer": pruefer,
             "nummer": anfrage.get("nummer")}
@@ -79,8 +77,7 @@ def fuehre_aus(dok: dict, *, pruefer: str, entscheidung: str, interaktiv: bool) 
     print(f"Erwartung:  {dok['erwartung']}")
     if dok["stoerfall"]:
         print(f"Stoerfall:  {dok['stoerfall']}")
-    print(f"Modus:      MODELL_MODUS={einstellungen.modell_modus.value}, "
-          f"Schwelle={einstellungen.buchung_schwelle_eur:.0f} EUR")
+    print(f"Modus:      MODELL_MODUS={einstellungen.modell_modus.value}")
     print("-" * 78)
 
     try:

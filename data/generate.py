@@ -32,19 +32,20 @@ fake = Faker("de_DE")
 
 # ------------------------------------------------------------------ Stammdaten
 
-# Realistische CHG-Kostenstellen. Die Schluesselwoerter sind die
-# Zuordnungsregel, gegen die der Kostenstellen-Agent arbeitet.
+# Realistische CHG-Kostenstellen. Die Referenz (3. Spalte) ist der eindeutige
+# Code, der auf dem Beleg steht und exakt nachgeschlagen wird; die
+# Schluesselwoerter dienen nur der Klaerfall-Anzeige.
 KOSTENSTELLEN = [
-    ("KST-1000", "IT-Infrastruktur", "server,cloud,azure,rechenzentrum,lizenz,software,hosting"),
-    ("KST-1100", "Telekommunikation", "telefon,mobilfunk,festnetz,internet,datenleitung,voip"),
-    ("KST-2000", "Vertrieb", "crm,messe,vertrieb,kundenbesuch,provision"),
-    ("KST-2100", "Marketing", "werbung,kampagne,druck,messestand,social media"),
-    ("KST-3000", "Leasing-Operations", "leasing,refinanzierung,vertragsverwaltung,asset"),
-    ("KST-3100", "Technology & Asset Management", "hardware,notebook,refurbishment,logistik,geraet"),
-    ("KST-4000", "Finanzen & Controlling", "wirtschaftspruefung,steuerberatung,reporting,abschluss"),
-    ("KST-5000", "Human Resources", "personal,recruiting,schulung,weiterbildung,zeitarbeit"),
-    ("KST-6000", "Recht & Compliance", "rechtsberatung,anwalt,datenschutz,revision"),
-    ("KST-7000", "Facility Management", "miete,strom,reinigung,gebaeude,instandhaltung"),
+    ("KST-1000", "IT-Infrastruktur", "KTR-ITINFRA", "server,cloud,azure,rechenzentrum,lizenz,software,hosting"),
+    ("KST-1100", "Telekommunikation", "KTR-TELCO", "telefon,mobilfunk,festnetz,internet,datenleitung,voip"),
+    ("KST-2000", "Vertrieb", "KTR-SALES", "crm,messe,vertrieb,kundenbesuch,provision"),
+    ("KST-2100", "Marketing", "KTR-MKT", "werbung,kampagne,druck,messestand,social media"),
+    ("KST-3000", "Leasing-Operations", "KTR-LEASEOPS", "leasing,refinanzierung,vertragsverwaltung,asset"),
+    ("KST-3100", "Technology & Asset Management", "KTR-TAM", "hardware,notebook,refurbishment,logistik,geraet"),
+    ("KST-4000", "Finanzen & Controlling", "KTR-FIN", "wirtschaftspruefung,steuerberatung,reporting,abschluss"),
+    ("KST-5000", "Human Resources", "KTR-HR", "personal,recruiting,schulung,weiterbildung,zeitarbeit"),
+    ("KST-6000", "Recht & Compliance", "KTR-LEGAL", "rechtsberatung,anwalt,datenschutz,revision"),
+    ("KST-7000", "Facility Management", "KTR-FM", "miete,strom,reinigung,gebaeude,instandhaltung"),
 ]
 
 # Feste Lieferanten mit Bezug zu den Prozessbeispielen der Arbeit, plus
@@ -99,6 +100,7 @@ class Dokument:
     betrag_eur: float | None = None
     lieferant: str | None = None
     erwartete_kostenstelle: str | None = None
+    kostenstellen_referenz: str | None = None
 
 
 def _rechnungsnummer(i: int) -> str:
@@ -108,7 +110,7 @@ def _rechnungsnummer(i: int) -> str:
 def erzeuge_stammdaten(con: sqlite3.Connection, rng: random.Random) -> list[dict]:
     """Legt Lieferanten, Kostenstellen, AD und 50 offene Rechnungen an."""
     con.executemany("INSERT INTO lieferanten VALUES (?,?,?,?)", LIEFERANTEN)
-    con.executemany("INSERT INTO kostenstellen VALUES (?,?,?)", KOSTENSTELLEN)
+    con.executemany("INSERT INTO kostenstellen VALUES (?,?,?,?)", KOSTENSTELLEN)
     con.executemany("INSERT INTO ad_gruppen VALUES (?,?)", AD_GRUPPEN)
 
     for upn, name, rolle, gruppen in AD_NUTZER:
@@ -193,8 +195,14 @@ def zahlungsbestaetigung(pfad: Path, *, nummer: str, betrag: float,
 
 
 def eingangsrechnung(pfad: Path, *, nummer: str, betrag: float, lieferant: tuple,
-                     positionen: list[tuple[str, float]], datum: date) -> None:
-    """Prozess B: Lieferantenrechnung mit Positionen (Kostenstellen-Referenz)."""
+                     positionen: list[tuple[str, float]], datum: date,
+                     kostenstellen_referenz: str | None = None) -> None:
+    """Prozess B: Lieferantenrechnung mit Positionen und Kostenstellen-Referenz.
+
+    Die Kostenstellen-Referenz ist der eindeutige Code, gegen den der
+    Kostenstellen-Agent exakt nachschlaegt. Fehlt sie (None), entsteht ein
+    Klaerfall -- die Zuordnung ist dann nicht eindeutig und geht an den Menschen.
+    """
     _, name, ustid, adresse = lieferant
     c = canvas.Canvas(str(pfad), pagesize=A4)
     y = _kopf(c, "Rechnung", f"{name} | {adresse}")
@@ -202,6 +210,8 @@ def eingangsrechnung(pfad: Path, *, nummer: str, betrag: float, lieferant: tuple
     y = _zeile(c, y, "Rechnungsdatum:", datum.strftime("%d.%m.%Y"))
     y = _zeile(c, y, "USt-IdNr.:", ustid)
     y = _zeile(c, y, "Rechnungsempfaenger:", "CHG-MERIDIAN AG, Franz-Beer-Str. 111, 88250 Weingarten")
+    if kostenstellen_referenz:
+        y = _zeile(c, y, "Kostenstellenreferenz:", kostenstellen_referenz, fett=True)
     y -= 8 * mm
 
     c.setFont("Helvetica-Bold", 10)
@@ -330,7 +340,11 @@ def erzeuge_dokumente(rechnungen: list[dict], rng: random.Random) -> list[Dokume
         nummer=ok["nummer"], betrag_eur=ok["betrag_eur"], lieferant=lief[1],
     ))
 
-    # ---- Prozess B, Happy Path: eindeutige Kostenstellen -------------------
+    referenz_nach_kst = {k[0]: k[2] for k in KOSTENSTELLEN}
+
+    # ---- Prozess B, Happy Path: eindeutige Kostenstellen-Referenz ----------
+    # Jede Rechnung traegt eine eindeutige Kostenstellenreferenz, die exakt
+    # nachgeschlagen wird (kein semantisches Matching).
     eindeutig = [
         ("LIF-0001", [("Mobilfunk Rahmenvertrag, 250 Anschluesse", 8_450.00),
                       ("Festnetz Standort Weingarten", 1_120.00)], "KST-1100"),
@@ -342,24 +356,26 @@ def erzeuge_dokumente(rechnungen: list[dict], rng: random.Random) -> list[Dokume
     for idx, (lif_id, positionen, kst) in enumerate(eindeutig, start=1):
         lief = lieferant_nach_id[lif_id]
         nummer = f"ER-2026-{7100 + idx:04d}"
+        referenz = referenz_nach_kst[kst]
         gesamt = round(sum(p[1] for p in positionen), 2)
         name = f"B_rechnung_ok_{idx:02d}.pdf"
         eingangsrechnung(
             EINGANG_DIR / name, nummer=nummer, betrag=gesamt, lieferant=lief,
             positionen=positionen, datum=STICHTAG - timedelta(days=rng.randint(1, 10)),
+            kostenstellen_referenz=referenz,
         )
         docs.append(Dokument(
             dateiname=name, prozess="B", szenario="3_happy_path",
             einspeiser="m.keller@chg-meridian.com", stoerfall=None,
-            erwartung="eindeutige Kostenstelle -> automatische Archivierung in ELO "
-                      "(Prozessende B)",
+            erwartung="eindeutige Kostenstellenreferenz -> exakter Nachschlag -> "
+                      "automatische Archivierung in ELO (Prozessende B)",
             nummer=nummer, betrag_eur=gesamt, lieferant=lief[1],
-            erwartete_kostenstelle=kst,
+            erwartete_kostenstelle=kst, kostenstellen_referenz=referenz,
         ))
 
-    # ---- Prozess B, Stoerfall: mehrdeutige Kostenstelle (Szenario 4) -------
-    # Positionen treffen bewusst Schluesselwoerter mehrerer Kostenstellen:
-    # 'schulung' -> HR, 'software'/'lizenz' -> IT-Infrastruktur.
+    # ---- Prozess B, Stoerfall: Kostenstellenreferenz fehlt (Szenario 4) ----
+    # Die Rechnung traegt KEINE Kostenstellenreferenz. Der exakte Nachschlag
+    # scheitert -> Zuordnung nicht eindeutig -> Klaerfall, Mensch entscheidet.
     lief = lieferant_nach_id["LIF-0006"]
     nummer = "ER-2026-7200"
     positionen = [
@@ -367,17 +383,19 @@ def erzeuge_dokumente(rechnungen: list[dict], rng: random.Random) -> list[Dokume
         ("Anwenderschulung SAP FI, 3 Tage, 12 Teilnehmer", 9_600.00),
     ]
     gesamt = round(sum(p[1] for p in positionen), 2)
-    name = "B_rechnung_mehrdeutig.pdf"
+    name = "B_rechnung_ohne_referenz.pdf"
     eingangsrechnung(
         EINGANG_DIR / name, nummer=nummer, betrag=gesamt, lieferant=lief,
         positionen=positionen, datum=STICHTAG - timedelta(days=3),
+        kostenstellen_referenz=None,
     )
     docs.append(Dokument(
-        dateiname=name, prozess="B", szenario="4_kostenstelle_mehrdeutig",
-        einspeiser="t.brandt@chg-meridian.com", stoerfall="kostenstelle_mehrdeutig",
-        erwartung="Konflikt KST-1000 vs. KST-5000 -> HITL entscheidet",
+        dateiname=name, prozess="B", szenario="4_kostenstelle_referenz_fehlt",
+        einspeiser="t.brandt@chg-meridian.com", stoerfall="kostenstelle_referenz_fehlt",
+        erwartung="keine Kostenstellenreferenz auf dem Beleg -> Nachschlag "
+                  "scheitert -> Klaerfall, Mensch waehlt Kostenstelle",
         nummer=nummer, betrag_eur=gesamt, lieferant=lief[1],
-        erwartete_kostenstelle=None,
+        erwartete_kostenstelle=None, kostenstellen_referenz=None,
     ))
 
     return docs

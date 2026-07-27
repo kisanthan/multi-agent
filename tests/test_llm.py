@@ -52,7 +52,7 @@ def modell_antwortet(*antworten, modell: str = "qwen3:8b", anbieter: str = "olla
 
 def test_lokaler_modus_nutzt_ueberall_ollama():
     with patch.object(einstellungen, "modell_modus", ModellModus.LOKAL):
-        for agent in ("orchestrator", "abgleich", "klassifikation", "buchung", "elo"):
+        for agent in ("orchestrator", "klassifikation", "buchung", "elo"):
             assert waehle_modell(agent).anbieter == "ollama"
 
 
@@ -60,7 +60,6 @@ def test_hybrid_modus_trennt_nach_risikoklasse():
     """Die Kernaussage von teil2_ki_modelle.png, im Code nachvollzogen."""
     with patch.object(einstellungen, "modell_modus", ModellModus.HYBRID):
         # Lesende/unkritische Rollen bleiben lokal -> Datenhoheit.
-        assert waehle_modell("abgleich").anbieter == "ollama"
         assert waehle_modell("orchestrator").anbieter == "ollama"
         assert waehle_modell("elo").anbieter == "ollama"
         # Risikobehaftete Rollen bekommen ein Frontier-Modell.
@@ -70,7 +69,7 @@ def test_hybrid_modus_trennt_nach_risikoklasse():
 
 def test_cloud_modus_nutzt_ueberall_anthropic():
     with patch.object(einstellungen, "modell_modus", ModellModus.CLOUD):
-        assert waehle_modell("abgleich").anbieter == "anthropic"
+        assert waehle_modell("klassifikation").anbieter == "anthropic"
         assert waehle_modell("buchung").anbieter == "anthropic"
 
 
@@ -79,10 +78,11 @@ def test_frontier_agent_bekommt_frontier_modell():
         assert waehle_modell("buchung").modell_id == einstellungen.cloud_modell_frontier
 
 
-@pytest.mark.parametrize("agent_id", ["reader", "policy", "audit"])
-def test_nicht_agenten_bekommen_kein_modell(agent_id):
-    """Reader, Policy und Audit sind keine KI-Agenten -- das ist erzwungen."""
-    with pytest.raises(ValueError, match="kein KI-Agent"):
+@pytest.mark.parametrize("agent_id", ["reader", "policy", "audit", "abgleich", "kostenstelle"])
+def test_deterministische_komponenten_bekommen_kein_modell(agent_id):
+    """Reader/Policy/Audit UND die deterministisch arbeitenden Domain-Agenten
+    (Abgleich, Kostenstelle -- exakter Nachschlag) rufen kein Sprachmodell auf."""
+    with pytest.raises(ValueError, match="kein Sprachmodell"):
         waehle_modell(agent_id)
 
 

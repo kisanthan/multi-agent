@@ -51,25 +51,9 @@ class Klassifikation(BaseModel):
         description="Nur bei Eingangsrechnungen: die Bezeichnungen der "
                     "Rechnungspositionen, woertlich.",
     )
-
-
-class Kostenstellenvorschlag(BaseModel):
-    """Ergebnis des Kostenstellen-Agenten (Autonomiestufe 2: Vorschlag)."""
-
-    kostenstelle_id: str | None = Field(
+    kostenstellen_referenz: str | None = Field(
         default=None,
-        description="ID der am besten passenden Kostenstelle, z.B. KST-1000. "
-                    "None, wenn keine eindeutig passt.",
-    )
-    begruendung: str = Field(
-        description="Kurze Begruendung, welche Schluesselwoerter den Ausschlag gaben."
-    )
-    alternativen: list[str] = Field(
-        default_factory=list,
-        description="IDs weiterer plausibler Kostenstellen. Mehr als eine "
-                    "bedeutet: mehrdeutig, Mensch muss entscheiden.",
-    )
-    eindeutig: bool = Field(
-        description="True nur, wenn genau eine Kostenstelle passt und keine "
-                    "ernsthafte Alternative besteht."
+        description="Nur bei Eingangsrechnungen: die auf dem Beleg angegebene "
+                    "Kostenstellenreferenz, z.B. KTR-ITINFRA. None, wenn der "
+                    "Beleg keine Referenz nennt.",
     )

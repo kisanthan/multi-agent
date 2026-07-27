@@ -61,7 +61,6 @@ def main() -> None:
 
         st.sidebar.markdown("---")
         st.sidebar.write(f"**Modell-Modus:** `{einstellungen.modell_modus.value}`")
-        st.sidebar.write(f"**Buchungsschwelle:** {einstellungen.buchung_schwelle_eur:,.0f} EUR")
         st.sidebar.write(f"**Freigabegruppe:** `{ad.FREIGABE_GRUPPE}`")
 
         if berechtigt.erlaubt:
@@ -112,11 +111,11 @@ def _zeige_queue(upn: str, berechtigt: bool) -> None:
 
             spalte_a, spalte_b = st.columns(2)
             with spalte_a:
-                for k in ("grund", "befund", "nummer", "lieferant"):
+                for k in ("grund", "befund", "nummer", "lieferant", "referenz"):
                     if anfrage.get(k):
                         st.write(f"**{k}:** {anfrage[k]}")
             with spalte_b:
-                for k in ("betrag_eur", "soll_betrag_eur", "vorschlag", "begruendung"):
+                for k in ("betrag_eur", "soll_betrag_eur", "begruendung"):
                     if anfrage.get(k) not in (None, ""):
                         st.write(f"**{k}:** {anfrage[k]}")
 
@@ -127,11 +126,15 @@ def _zeige_queue(upn: str, berechtigt: bool) -> None:
 
             kostenstelle_id = None
             if anfrage.get("art") == "kostenstellen_freigabe":
-                optionen = [anfrage.get("vorschlag"), *anfrage.get("alternativen", [])]
-                optionen = [o for o in optionen if o] or _alle_kostenstellen()
-                if not anfrage.get("eindeutig"):
-                    st.warning("Zuordnung ist nicht eindeutig -- bitte entscheiden.")
-                kostenstelle_id = st.selectbox("Kostenstelle", optionen, key=f"k{thread_id}")
+                katalog = anfrage.get("katalog") or []
+                optionen = [k["id"] for k in katalog] or _alle_kostenstellen()
+                labels = {k["id"]: f"{k['id']} — {k['bezeichnung']} ({k['referenz']})"
+                          for k in katalog}
+                st.warning("Keine Kostenstellenreferenz auf dem Beleg -- bitte "
+                           "Kostenstelle waehlen.")
+                kostenstelle_id = st.selectbox(
+                    "Kostenstelle", optionen,
+                    format_func=lambda o: labels.get(o, o), key=f"k{thread_id}")
 
             links, rechts = st.columns(2)
             with links:
