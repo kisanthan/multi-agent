@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+
+# Generierte Artefakte: reproduzierbar via `python -m data.generate` (fixer Seed),
+# gehoeren daher nicht in die Versionskontrolle.
+data/stammdaten.db
+data/stammdaten.db-wal
+data/stammdaten.db-shm
+data/manifest.json
+data/eingang/*.pdf
+data/checkpoints.sqlite
+
+.DS_Store
