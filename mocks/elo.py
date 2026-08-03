@@ -19,7 +19,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from config import DB_PFAD
-from governance.audit import Entscheidung, protokolliere
+from governance.audit import Entscheidung, Vorgangsbezug, protokolliere
 
 app = FastAPI(title="ELO-Mock (DMS)", version="1.0")
 
@@ -33,6 +33,8 @@ class Ablage(BaseModel):
     dokument_hash: str = Field(min_length=64, max_length=64,
                                description="SHA-256 des Rohdokuments")
     akteur: str
+    vorgang_id: str | None = Field(
+        default=None, description="Vorgang, zu dem die Ablage gehoert")
 
 
 @app.get("/health")
@@ -44,6 +46,7 @@ def health() -> dict:
 def archiviere(a: Ablage) -> dict:
     """Legt ein Dokument revisionssicher ab und liefert die Archiv-ID."""
     con = _con()
+    bezug = Vorgangsbezug(a.vorgang_id, a.dateiname)
     try:
         vorhanden = con.execute(
             "SELECT archiv_id FROM archiv WHERE dokument_hash = ?", (a.dokument_hash,)
@@ -55,7 +58,8 @@ def archiviere(a: Ablage) -> dict:
                           entscheidung=Entscheidung.INFO,
                           begruendung=f"ELO: Dokument bereits abgelegt unter "
                                       f"{vorhanden[0]}.",
-                          payload={"archiv_id": vorhanden[0], "dateiname": a.dateiname})
+                          payload={"archiv_id": vorhanden[0], "dateiname": a.dateiname},
+                          bezug=bezug, ergebnis="bereits archiviert")
             con.commit()
             return {"archiv_id": vorhanden[0], "bereits_vorhanden": True}
 
@@ -68,7 +72,8 @@ def archiviere(a: Ablage) -> dict:
                       entscheidung=Entscheidung.ERLAUBT,
                       begruendung=f"ELO: {a.dateiname} revisionssicher abgelegt.",
                       payload={"archiv_id": aid, "dateiname": a.dateiname,
-                               "dokument_hash": a.dokument_hash})
+                               "dokument_hash": a.dokument_hash},
+                      bezug=bezug, ergebnis="archiviert")
         con.commit()
         return {"archiv_id": aid, "bereits_vorhanden": False}
     finally:

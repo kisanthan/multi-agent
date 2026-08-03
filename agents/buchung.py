@@ -22,7 +22,7 @@ from dataclasses import dataclass
 import httpx
 
 from config import einstellungen
-from governance.audit import Entscheidung, protokolliere
+from governance.audit import OHNE_BEZUG, Entscheidung, Vorgangsbezug, protokolliere
 from governance.policy import Ergebnis, pruefe_schreibaktion
 
 AGENT_ID = "buchung"
@@ -38,7 +38,8 @@ class Buchungsergebnis:
 
 
 def buche(con: sqlite3.Connection, *, nummer: str, betrag_eur: float, akteur: str,
-          beleg: str, freigegeben_von: str | None = None) -> Buchungsergebnis:
+          beleg: str, freigegeben_von: str | None = None,
+          bezug: Vorgangsbezug = OHNE_BEZUG) -> Buchungsergebnis:
     """Verbucht eine Zahlung -- nach Policy-Pruefung.
 
     `freigegeben_von` wird gesetzt, wenn ein Mensch den HITL-Punkt bereits
@@ -56,7 +57,8 @@ def buche(con: sqlite3.Connection, *, nummer: str, betrag_eur: float, akteur: st
             protokolliere(con, akteur=akteur, agent=AGENT_ID, aktion="zahlung_verbuchen",
                           entscheidung=Entscheidung.VERWEIGERT,
                           begruendung=entscheid.begruendung,
-                          payload={"nummer": nummer, "regel": entscheid.regel})
+                          payload={"nummer": nummer, "regel": entscheid.regel},
+                          bezug=bezug, ergebnis="verweigert")
             con.commit()
             return Buchungsergebnis(False, False, entscheid.begruendung, nummer)
 
@@ -64,7 +66,8 @@ def buche(con: sqlite3.Connection, *, nummer: str, betrag_eur: float, akteur: st
             protokolliere(con, akteur=akteur, agent=AGENT_ID, aktion="freigabe_angefordert",
                           entscheidung=Entscheidung.INFO, begruendung=entscheid.begruendung,
                           payload={"nummer": nummer, "betrag_eur": betrag_eur,
-                                   "regel": entscheid.regel})
+                                   "regel": entscheid.regel},
+                          bezug=bezug, ergebnis="freigabe_noetig")
             con.commit()
             return Buchungsergebnis(False, True, entscheid.begruendung, nummer)
     else:
@@ -73,7 +76,8 @@ def buche(con: sqlite3.Connection, *, nummer: str, betrag_eur: float, akteur: st
                       begruendung=f"Buchung von {freigegeben_von} freigegeben "
                                   "(Vier-Augen-Prinzip).",
                       payload={"nummer": nummer, "betrag_eur": betrag_eur,
-                               "einspeiser": akteur})
+                               "einspeiser": akteur},
+                      bezug=bezug, ergebnis="freigegeben")
         con.commit()
 
     # Der ERP-Aufruf. Das Zielsystem prueft seine Vorbedingungen selbst -- ein
@@ -82,7 +86,7 @@ def buche(con: sqlite3.Connection, *, nummer: str, betrag_eur: float, akteur: st
         antwort = httpx.post(
             f"{einstellungen.navision_url}/booking",
             json={"nummer": nummer, "betrag_eur": betrag_eur, "akteur": akteur,
-                  "beleg": beleg},
+                  "beleg": beleg, "vorgang_id": bezug.vorgang_id},
             timeout=30.0,
         )
     except httpx.HTTPError as e:

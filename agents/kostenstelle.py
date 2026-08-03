@@ -23,7 +23,7 @@ import sqlite3
 from dataclasses import dataclass
 from enum import Enum
 
-from governance.audit import Entscheidung, protokolliere
+from governance.audit import OHNE_BEZUG, Entscheidung, Vorgangsbezug, protokolliere
 
 AGENT_ID = "kostenstelle"
 
@@ -57,7 +57,8 @@ def normalisiere(referenz: str) -> str:
 
 
 def ordne_zu(con: sqlite3.Connection, *, referenz: str | None, akteur: str,
-             positionen: list[str] | None = None) -> Kostenstellenzuordnung:
+             positionen: list[str] | None = None,
+             bezug: Vorgangsbezug = OHNE_BEZUG) -> Kostenstellenzuordnung:
     """Schlaegt die Kostenstellenreferenz exakt im Katalog nach. Nur Lesezugriff."""
     if not referenz:
         ergebnis = Kostenstellenzuordnung(
@@ -65,7 +66,7 @@ def ordne_zu(con: sqlite3.Connection, *, referenz: str | None, akteur: str,
             "Der Beleg nennt keine Kostenstellenreferenz -- keine eindeutige "
             "Zuordnung moeglich.",
         )
-        _protokolliere(con, akteur, ergebnis)
+        _protokolliere(con, akteur, ergebnis, bezug)
         return ergebnis
 
     norm = normalisiere(referenz)
@@ -84,7 +85,7 @@ def ordne_zu(con: sqlite3.Connection, *, referenz: str | None, akteur: str,
             f"Referenz {norm} loest eindeutig auf {row[0]} ({row[1]}) auf.",
         )
 
-    _protokolliere(con, akteur, ergebnis)
+    _protokolliere(con, akteur, ergebnis, bezug)
     return ergebnis
 
 
@@ -107,11 +108,13 @@ def existiert(con: sqlite3.Connection, kostenstelle_id: str | None) -> bool:
 
 
 def _protokolliere(con: sqlite3.Connection, akteur: str,
-                   e: Kostenstellenzuordnung) -> None:
+                   e: Kostenstellenzuordnung,
+                   bezug: Vorgangsbezug = OHNE_BEZUG) -> None:
     protokolliere(
         con, akteur=akteur, agent=AGENT_ID, aktion="kostenstelle_zuordnen",
         entscheidung=Entscheidung.INFO, begruendung=e.begruendung,
         payload={"befund": e.befund.value, "kostenstelle_id": e.kostenstelle_id,
                  "referenz": e.referenz},
+        bezug=bezug, ergebnis=e.befund.value,
     )
     con.commit()

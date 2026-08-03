@@ -22,7 +22,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from config import DB_PFAD
-from governance.audit import Entscheidung, protokolliere
+from governance.audit import Entscheidung, Vorgangsbezug, protokolliere
 
 app = FastAPI(title="Navision-Mock (Dynamics NAV)", version="1.0")
 
@@ -40,6 +40,8 @@ class Buchung(BaseModel):
     betrag_eur: float = Field(gt=0)
     akteur: str = Field(description="UPN des verantwortlichen Nutzers")
     beleg: str = Field(description="Dateiname der Zahlungsbestaetigung")
+    vorgang_id: str | None = Field(
+        default=None, description="Vorgang, zu dem die Buchung gehoert")
 
 
 @app.get("/health")
@@ -57,6 +59,7 @@ def verbuche_zahlung(b: Buchung) -> dict:
     es verlaesst sich nicht darauf, dass der Aufrufer sauber gearbeitet hat.
     """
     con = _con()
+    bezug = Vorgangsbezug(b.vorgang_id, b.beleg)
     try:
         row = con.execute(
             "SELECT status, betrag_eur FROM rechnungen WHERE nummer = ?", (b.nummer,)
@@ -66,7 +69,8 @@ def verbuche_zahlung(b: Buchung) -> dict:
             protokolliere(con, akteur=b.akteur, agent="buchung", aktion="zahlung_verbuchen",
                           entscheidung=Entscheidung.VERWEIGERT,
                           begruendung=f"Navision: Nummer {b.nummer} unbekannt.",
-                          payload={"nummer": b.nummer, "beleg": b.beleg})
+                          payload={"nummer": b.nummer, "beleg": b.beleg},
+                          bezug=bezug, ergebnis="abgelehnt: unbekannt")
             con.commit()
             raise HTTPException(404, f"Rechnung {b.nummer} nicht gefunden")
 
@@ -76,7 +80,8 @@ def verbuche_zahlung(b: Buchung) -> dict:
             protokolliere(con, akteur=b.akteur, agent="buchung", aktion="zahlung_verbuchen",
                           entscheidung=Entscheidung.VERWEIGERT,
                           begruendung=f"Navision: {b.nummer} ist bereits bezahlt.",
-                          payload={"nummer": b.nummer, "beleg": b.beleg})
+                          payload={"nummer": b.nummer, "beleg": b.beleg},
+                          bezug=bezug, ergebnis="abgelehnt: Dublette")
             con.commit()
             raise HTTPException(409, f"Rechnung {b.nummer} ist bereits bezahlt")
 
@@ -89,7 +94,8 @@ def verbuche_zahlung(b: Buchung) -> dict:
                       entscheidung=Entscheidung.ERLAUBT,
                       begruendung=f"Navision: {b.nummer} offen -> bezahlt.",
                       payload={"nummer": b.nummer, "betrag_eur": b.betrag_eur,
-                               "soll_betrag_eur": soll_betrag, "beleg": b.beleg})
+                               "soll_betrag_eur": soll_betrag, "beleg": b.beleg},
+                      bezug=bezug, ergebnis="verbucht")
         con.commit()
         return {"nummer": b.nummer, "status": "bezahlt", "bezahlt_am": bezahlt_am}
     finally:

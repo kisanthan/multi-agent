@@ -81,6 +81,40 @@ Alle Modell-IDs (`claude-opus-4-8`, `claude-haiku-4-5`, `qwen3:8b`,
 `llama3.2-vision:11b`) und Preise sind mit Abrufdatum **17.07.2026** zu
 verstehen und wechseln quartalsweise.
 
+### L8 — Oberfläche führt Vorgänge blockierend aus
+Die Streamlit-UI fährt einen Vorgang synchron im Request des startenden
+Browser-Tabs (`app.stream()` mit Live-Fortschritt). Mit lokalem Modell dauert
+das ein bis drei Minuten, in denen dieser Tab belegt ist. Ein Produktivsystem
+hätte hier eine Auftragswarteschlange (Worker, Job-Queue). Für die Demonstration
+ist die blockierende Variante bewusst gewählt: sie kommt ohne Nebenläufigkeit
+aus und macht jeden Knoten in dem Moment sichtbar, in dem er läuft. Freigaben
+aus einer zweiten Sitzung sind nicht betroffen, weil der Vorgangszustand im
+LangGraph-Checkpoint liegt und nicht im Browser.
+
+### L9 — Erweiterung des Audit-Trails erzwingt einen Kettenneuaufbau
+Der Trail führt seit dem UI-Umbau die Felder `vorgang_id`, `datenquelle` und
+`ergebnis` als eigene Spalten; sie gehen in den Hash ein, damit sie ebenso
+manipulationsgeschützt sind wie der übrige Eintrag (damit ist zugleich der
+offene Punkt O2 aus
+[abschlussbericht-thesis-angleichung.md](abschlussbericht-thesis-angleichung.md)
+geschlossen).
+
+Die Kehrseite ist grundsätzlicher Natur und für die Arbeit aufschlussreich:
+**eine hash-verkettete Tabelle lässt sich nicht schema-migrieren.** Bestehende
+Einträge wurden ohne die neuen Felder gehasht; nimmt man sie ins Hashmaterial
+auf, bricht die Kette für jeden Altbestand. Im Prototyp ist das folgenlos —
+alle Daten sind synthetisch, `python -m data.generate` baut sie neu auf. Ein
+Produktivsystem bräuchte stattdessen eine versionierte Kette: die alte Kette
+wird abgeschlossen und ihr Kopf-Hash als Genesis der neuen Kette verankert, mit
+einer Versionsmarke je Eintrag. Der Prototyp setzt das nicht um.
+
+### L10 — Vier-Augen-Prinzip nur teilweise erzwungen
+`governance/policy.py` prüft die Mitgliedschaft in `SG-CHG-Freigabe`, aber
+nicht, ob Prüfer und Einspeiser dieselbe Person sind. Die Oberfläche weist
+sichtbar darauf hin, wenn beide identisch sind; technisch verhindert wird es
+nicht. Eine Durchsetzung wäre eine Erweiterung der Policy (mit eigenen Tests)
+und ist bewusst nicht Teil des UI-Umbaus.
+
 ## Umgebungsbedingte Hinweise (dieser Rechner)
 
 - Läuft auf Python 3.14; alle Dependencies haben native Wheels. `uv` ließ sich

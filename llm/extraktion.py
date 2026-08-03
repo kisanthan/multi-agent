@@ -23,7 +23,7 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel, ValidationError
 
-from governance.audit import Entscheidung, protokolliere
+from governance.audit import OHNE_BEZUG, Entscheidung, Vorgangsbezug, protokolliere
 from llm.client import LLMNichtErreichbar, client_fuer
 
 MAX_VERSUCHE = 2
@@ -67,6 +67,7 @@ def extrahiere(
     system: str,
     prompt: str,
     schema: type[BaseModel],
+    bezug: Vorgangsbezug = OHNE_BEZUG,
 ) -> Extraktionsergebnis:
     """Ruft das Modell und validiert die Antwort gegen `schema`.
 
@@ -90,6 +91,7 @@ def extrahiere(
                 entscheidung=Entscheidung.VERWEIGERT,
                 begruendung=f"Modell nicht erreichbar: {e}",
                 payload={"modell": wahl.modell_id, "anbieter": wahl.anbieter},
+                bezug=bezug, ergebnis="modell_nicht_erreichbar",
             )
             con.commit()
             return Extraktionsergebnis(
@@ -107,6 +109,7 @@ def extrahiere(
                 begruendung=f"Versuch {versuch}/{MAX_VERSUCHE} verletzt das Schema.",
                 payload={"modell": wahl.modell_id, "anbieter": wahl.anbieter,
                          "fehler": letzter_fehler},
+                bezug=bezug, ergebnis="schemaverletzung",
             )
             con.commit()
             aktueller_prompt = (
@@ -123,6 +126,7 @@ def extrahiere(
             begruendung=f"Extraktion gelungen in Versuch {versuch}.",
             payload={"modell": wahl.modell_id, "anbieter": wahl.anbieter,
                      "ergebnis": json.loads(daten.model_dump_json())},
+            bezug=bezug, ergebnis=f"extrahiert (Versuch {versuch})",
         )
         con.commit()
         return Extraktionsergebnis(daten, versuch, wahl.modell_id, wahl.anbieter, roh=roh)
@@ -136,6 +140,7 @@ def extrahiere(
         con, akteur=akteur, agent=agent_id, aktion="llm_eskalation",
         entscheidung=Entscheidung.VERWEIGERT, begruendung=eskalation,
         payload={"modell": wahl.modell_id, "anbieter": wahl.anbieter, "roh": roh[:2000]},
+        bezug=bezug, ergebnis="eskaliert",
     )
     con.commit()
     return Extraktionsergebnis(

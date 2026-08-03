@@ -60,6 +60,30 @@ CREATE TABLE IF NOT EXISTS ad_mitgliedschaften (
     PRIMARY KEY (upn, gruppe)
 );
 
+-- ------------------------------------------------------------------- Eingang
+
+-- Eine hochgeladene Datei. Bewusst eine eigene Entitaet und nicht dasselbe wie
+-- ein Vorgang: dieselbe Datei kann mehrfach verarbeitet werden (erneuter
+-- Start), und wer sie wann eingespeist hat, laesst sich aus dem Dateisystem
+-- nicht rekonstruieren.
+--
+-- Der *Vorgang* selbst steht bewusst NICHT hier, sondern bleibt im
+-- LangGraph-Checkpoint -- er ueberlebt dort den Prozess und wartet auf den
+-- Menschen. Eine Vorgangstabelle waere eine zweite Wahrheit.
+CREATE TABLE IF NOT EXISTS uploads (
+    upload_id      TEXT PRIMARY KEY,
+    dateiname      TEXT NOT NULL,
+    pfad           TEXT NOT NULL,
+    dateityp       TEXT NOT NULL,
+    groesse_bytes  INTEGER NOT NULL CHECK (groesse_bytes > 0),
+    inhalt_hash    TEXT NOT NULL,   -- SHA-256, erkennt erneute Uploads derselben Datei
+    hochgeladen_von TEXT NOT NULL,
+    hochgeladen_am TEXT NOT NULL,
+    pruefergebnis  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_uploads_hash ON uploads (inhalt_hash);
+
 -- ------------------------------------------------------------- Zielsysteme (Mocks)
 
 -- Navision (Prozess A) wirkt auf die Tabelle `rechnungen` (Status offen ->
@@ -78,6 +102,10 @@ CREATE TABLE IF NOT EXISTS archiv (
 -- Append-only mit Hash-Verkettung: jeder Eintrag hasht den vorherigen.
 -- Die Unveraenderlichkeit wird zusaetzlich per Trigger erzwungen (unten), damit
 -- ein UPDATE/DELETE nicht bloss "nicht vorgesehen", sondern unmoeglich ist.
+-- Die Feldliste folgt dem Wortlaut der Arbeit: Auftraggeber (akteur), Agent,
+-- Datenquelle, Werkzeugaufruf (aktion), Policy-Entscheidung und Ergebnis.
+-- `vorgang_id`, `datenquelle` und `ergebnis` gehen in den Hash ein -- laegen sie
+-- daneben, waeren genau die Felder faelschbar, die den Nachweis tragen.
 CREATE TABLE IF NOT EXISTS audit (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     ts           TEXT NOT NULL,
@@ -86,6 +114,9 @@ CREATE TABLE IF NOT EXISTS audit (
     aktion       TEXT NOT NULL,
     entscheidung TEXT NOT NULL CHECK (entscheidung IN ('erlaubt', 'verweigert', 'info')),
     begruendung  TEXT NOT NULL,
+    vorgang_id   TEXT,            -- Thread-ID des Vorgangs, NULL bei Systemereignissen
+    datenquelle  TEXT,            -- Beleg/Datei, auf die sich die Aktion bezieht
+    ergebnis     TEXT,            -- fachlicher Ausgang der Aktion
     payload_hash TEXT NOT NULL,
     prev_hash    TEXT NOT NULL,
     hash         TEXT NOT NULL UNIQUE
@@ -105,3 +136,4 @@ END;
 
 CREATE INDEX IF NOT EXISTS idx_rechnungen_status ON rechnungen (status);
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit (ts);
+CREATE INDEX IF NOT EXISTS idx_audit_vorgang ON audit (vorgang_id);

@@ -14,6 +14,7 @@ from __future__ import annotations
 import sqlite3
 
 from agents.schemas import Klassifikation
+from governance.audit import OHNE_BEZUG, Vorgangsbezug
 from llm.extraktion import Extraktionsergebnis, extrahiere
 
 AGENT_ID = "klassifikation"
@@ -33,7 +34,8 @@ hat Positionen.
 - Antworte nur mit JSON, ohne erklaerenden Text."""
 
 
-def klassifiziere(con: sqlite3.Connection, *, markdown: str, akteur: str) -> Extraktionsergebnis:
+def klassifiziere(con: sqlite3.Connection, *, markdown: str, akteur: str,
+                  bezug: Vorgangsbezug = OHNE_BEZUG) -> Extraktionsergebnis:
     """Klassifiziert und extrahiert. Eskaliert bei Schemaverletzung (R1)."""
     prompt = (
         "Klassifiziere das folgende Dokument und extrahiere die Felder.\n\n"
@@ -42,4 +44,4 @@ def klassifiziere(con: sqlite3.Connection, *, markdown: str, akteur: str) -> Ext
         "--- ENDE ---"
     )
     return extrahiere(con, agent_id=AGENT_ID, akteur=akteur, system=SYSTEM,
-                      prompt=prompt, schema=Klassifikation)
+                      prompt=prompt, schema=Klassifikation, bezug=bezug)

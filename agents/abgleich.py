@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from config import einstellungen
-from governance.audit import Entscheidung, protokolliere
+from governance.audit import OHNE_BEZUG, Entscheidung, Vorgangsbezug, protokolliere
 
 AGENT_ID = "abgleich"
 
@@ -63,14 +63,14 @@ def normalisiere(nummer: str) -> str:
 
 
 def gleiche_ab(con: sqlite3.Connection, *, nummer: str | None, betrag_eur: float | None,
-               akteur: str) -> Abgleichergebnis:
+               akteur: str, bezug: Vorgangsbezug = OHNE_BEZUG) -> Abgleichergebnis:
     """Prueft die Nummer gegen die Stammdaten. Nur Lesezugriff."""
     if not nummer:
         ergebnis = Abgleichergebnis(
             Befund.KEINE_NUMMER, None, None, betrag_eur,
             "Im Dokument wurde keine Rechnungs-/Bestellnummer gefunden.",
         )
-        _protokolliere(con, akteur, ergebnis)
+        _protokolliere(con, akteur, ergebnis, bezug)
         return ergebnis
 
     norm = normalisiere(nummer)
@@ -101,15 +101,17 @@ def gleiche_ab(con: sqlite3.Connection, *, nummer: str | None, betrag_eur: float
             f"Nummer {norm} gefunden, Status offen, Betrag stimmt ueberein.",
         )
 
-    _protokolliere(con, akteur, ergebnis)
+    _protokolliere(con, akteur, ergebnis, bezug)
     return ergebnis
 
 
-def _protokolliere(con: sqlite3.Connection, akteur: str, e: Abgleichergebnis) -> None:
+def _protokolliere(con: sqlite3.Connection, akteur: str, e: Abgleichergebnis,
+                   bezug: Vorgangsbezug = OHNE_BEZUG) -> None:
     protokolliere(
         con, akteur=akteur, agent=AGENT_ID, aktion="nummer_abgleichen",
         entscheidung=Entscheidung.INFO, begruendung=e.begruendung,
         payload={"befund": e.befund.value, "nummer": e.nummer,
                  "soll_betrag_eur": e.soll_betrag_eur, "ist_betrag_eur": e.ist_betrag_eur},
+        bezug=bezug, ergebnis=e.befund.value,
     )
     con.commit()

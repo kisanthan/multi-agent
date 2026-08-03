@@ -1,0 +1,13 @@
+# Streamlit-Konfiguration der Oberflaeche.
+
+[client]
+# Blendet die Entwickler-Werkzeugleiste aus -- insbesondere den
+# "Deploy"-Knopf samt Dialog. Der Prototyp wird nicht aus der App heraus
+# veroeffentlicht; der Knopf waere eine Einladung ins Leere.
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+primaryColor = "#0b5cad"
