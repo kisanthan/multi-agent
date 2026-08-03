@@ -54,11 +54,13 @@ def thread():
 
 
 @pytest.fixture
-def app(monkeypatch):
-    """Kompilierter Graph mit gemocktem LLM und In-Prozess-Mocks."""
-    from config import CHECKPOINT_PFAD
-    Path(CHECKPOINT_PFAD).unlink(missing_ok=True)
+def app(monkeypatch, tmp_path):
+    """Kompilierter Graph mit gemocktem LLM und In-Prozess-Mocks.
 
+    Der Checkpoint liegt im tmp_path und nicht auf dem produktiven Pfad: die
+    laufende Oberflaeche haelt `data/checkpoints.sqlite` offen, und ein Test
+    darf weder deren Vorgaenge loeschen noch an einer Dateisperre scheitern.
+    """
     # --- Zielsysteme per ASGI in den Prozess holen ---
     # FastAPIs TestClient spricht die ASGI-App synchron an (httpx' ASGITransport
     # ist async-only und passt nicht zu den synchronen httpx.post-Aufrufen der
@@ -84,7 +86,7 @@ def app(monkeypatch):
     monkeypatch.setattr("agents.zielsysteme.httpx.post", fake_post)
 
     from graph.workflow import kompiliere
-    graph, cp_con = kompiliere()
+    graph, cp_con = kompiliere(tmp_path / "checkpoints.sqlite")
     yield graph
     cp_con.close()
     navision_client.close()

@@ -20,10 +20,12 @@ import json
 import sqlite3
 import sys
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from config import DB_PFAD, EINGANG_DIR, MANIFEST_PFAD, einstellungen
 from governance.audit import lies_alle, verify_chain
+from graph.wirkung import lies_wirkung
 
 # Prueferkonten aus dem AD-Mock (Mitglieder von SG-CHG-Freigabe).
 STANDARD_PRUEFER = "s.hofmann@chg-meridian.com"
@@ -70,7 +72,8 @@ def fuehre_aus(dok: dict, *, pruefer: str, entscheidung: str, interaktiv: bool) 
     from graph.workflow import kompiliere
 
     app, cp_con = kompiliere()
-    thread = {"configurable": {"thread_id": f"{dok['dateiname']}-{uuid.uuid4().hex[:8]}"}}
+    vorgang_id = f"{dok['dateiname']}-{uuid.uuid4().hex[:8]}"
+    thread = {"configurable": {"thread_id": vorgang_id}}
 
     _trenner(f"SZENARIO {dok['szenario']}  |  {dok['dateiname']}")
     print(f"Einspeiser: {dok['einspeiser']}")
@@ -83,7 +86,8 @@ def fuehre_aus(dok: dict, *, pruefer: str, entscheidung: str, interaktiv: bool) 
     try:
         zustand = app.invoke(
             {"pfad": str(EINGANG_DIR / dok["dateiname"]), "akteur": dok["einspeiser"],
-             "protokoll": []},
+             "vorgang_id": vorgang_id,
+             "gestartet_am": datetime.now(timezone.utc).isoformat(), "protokoll": []},
             thread,
         )
 
@@ -122,13 +126,14 @@ def _zeige_wirkung(dok: dict, zustand: dict) -> None:
     """Zeigt die Wirkung im Zielsystem -- der eigentliche Nachweis."""
     con = sqlite3.connect(DB_PFAD)
     try:
-        if zustand.get("nummer"):
-            row = con.execute("SELECT status, bezahlt_am FROM rechnungen WHERE nummer = ?",
-                              (zustand["nummer"],)).fetchone()
-            if row:
-                print(f"  NAVISION: {zustand['nummer']} -> Status '{row[0]}'")
-        if zustand.get("archiv_id"):
-            print(f"  ELO:      {zustand['archiv_id']} (revisionssicher, Prozessende B)")
+        # Dieselbe Abfrage nutzt die Bestaetigungskarte der Oberflaeche.
+        wirkung = lies_wirkung(con, zustand)
+        if wirkung.navision_status:
+            print(f"  NAVISION: {wirkung.navision_nummer} -> "
+                  f"Status '{wirkung.navision_status}'")
+        if wirkung.elo_archiv_id:
+            print(f"  ELO:      {wirkung.elo_archiv_id} "
+                  "(revisionssicher, Prozessende B)")
 
         eintraege = lies_alle(con)
         print(f"\n  Audit-Trail (letzte Eintraege dieses Laufs):")

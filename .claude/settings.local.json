@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(ls -la /Users/kisi/Desktop/MatstAgent/ 2>/dev/null; echo \"---DESKTOP---\"; ls -la /Users/kisi/Desktop/ | head -50)"
+      "Bash(ls -la /Users/kisi/Desktop/MatstAgent/ 2>/dev/null; echo \"---DESKTOP---\"; ls -la /Users/kisi/Desktop/ | head -50)",
+      "PowerShell(python -m venv .venv)"
     ]
   }
 }

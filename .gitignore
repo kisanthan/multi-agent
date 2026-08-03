@@ -12,5 +12,7 @@ data/stammdaten.db-shm
 data/manifest.json
 data/eingang/*.pdf
 data/checkpoints.sqlite
+data/checkpoints.sqlite-wal
+data/checkpoints.sqlite-shm
 
 .DS_Store

@@ -12,22 +12,30 @@ import pytest
 from governance.audit import (
     GENESIS_HASH,
     Entscheidung,
+    Vorgangsbezug,
     lies_alle,
     protokolliere,
     verify_chain,
+    vorgaenge_im_trail,
 )
+
+
+BEZUG = Vorgangsbezug("vorgang-1", "a.pdf")
 
 
 def _drei_eintraege(con):
     protokolliere(con, akteur="einspeiser@chg-meridian.com", agent="reader",
                   aktion="dokument_eingespeist", entscheidung=Entscheidung.ERLAUBT,
-                  begruendung="AD-Check bestanden", payload={"datei": "a.pdf"})
+                  begruendung="AD-Check bestanden", payload={"datei": "a.pdf"},
+                  bezug=BEZUG, ergebnis="1 Seite(n) gelesen")
     protokolliere(con, akteur="einspeiser@chg-meridian.com", agent="abgleich",
                   aktion="nummer_abgeglichen", entscheidung=Entscheidung.INFO,
-                  begruendung="RE-2026-4200 gefunden", payload={"nummer": "RE-2026-4200"})
+                  begruendung="RE-2026-4200 gefunden", payload={"nummer": "RE-2026-4200"},
+                  bezug=BEZUG, ergebnis="ok")
     protokolliere(con, akteur="einspeiser@chg-meridian.com", agent="buchung",
                   aktion="zahlung_verbucht", entscheidung=Entscheidung.ERLAUBT,
-                  begruendung="unter Schwelle", payload={"betrag": 1234.56})
+                  begruendung="freigegeben", payload={"betrag": 1234.56},
+                  bezug=BEZUG, ergebnis="verbucht")
     con.commit()
 
 
@@ -115,6 +123,70 @@ def test_verify_chain_erkennt_geloeschten_eintrag(con):
     # Eintrag 3 verweist jetzt auf einen Vorgaenger, den es nicht mehr gibt.
     assert ergebnis.bruch_bei == 3
     assert "geloeschten oder eingefuegten" in ergebnis.grund
+
+
+def test_verify_chain_erkennt_umgehaengten_vorgang(con):
+    """Der Vorgangsbezug ist gehasht -- ein Eintrag laesst sich nicht umwidmen.
+
+    Waere `vorgang_id` vom Hash ausgenommen, koennte man eine verweigerte
+    Aktion nachtraeglich einem anderen Vorgang zuschreiben, ohne dass die Kette
+    bricht -- und der gefilterte Trail wuerde luegen.
+    """
+    _drei_eintraege(con)
+    con.execute("DROP TRIGGER audit_kein_update")
+    con.execute("UPDATE audit SET vorgang_id = 'ein-anderer-vorgang' WHERE id = 2")
+    con.commit()
+
+    assert not verify_chain(con).gueltig
+
+
+def test_verify_chain_erkennt_geaenderte_datenquelle(con):
+    _drei_eintraege(con)
+    con.execute("DROP TRIGGER audit_kein_update")
+    con.execute("UPDATE audit SET datenquelle = 'ein_anderer_beleg.pdf' WHERE id = 1")
+    con.commit()
+
+    assert not verify_chain(con).gueltig
+
+
+def test_verify_chain_erkennt_geaendertes_ergebnis(con):
+    """Ein nachtraeglich geschoentes Ergebnis muss auffallen.
+
+    Eintrag 3 steht auf 'verbucht'; hier wird er auf 'abgelehnt' umgeschrieben
+    -- die Richtung ist gleichgueltig, jede Aenderung muss die Kette brechen.
+    """
+    _drei_eintraege(con)
+    con.execute("DROP TRIGGER audit_kein_update")
+    con.execute("UPDATE audit SET ergebnis = 'abgelehnt' WHERE id = 3")
+    con.commit()
+
+    assert not verify_chain(con).gueltig
+
+
+def test_eintraege_lassen_sich_nach_vorgang_filtern(con):
+    _drei_eintraege(con)
+    protokolliere(con, akteur="a@b.c", agent="reader", aktion="dokument_eingespeist",
+                  entscheidung=Entscheidung.ERLAUBT, begruendung="anderer Lauf",
+                  bezug=Vorgangsbezug("vorgang-2", "b.pdf"))
+    con.commit()
+
+    eintraege = lies_alle(con, vorgang_id="vorgang-1")
+
+    assert len(eintraege) == 3
+    assert {e.vorgang_id for e in eintraege} == {"vorgang-1"}
+    assert sorted(vorgaenge_im_trail(con)) == ["vorgang-1", "vorgang-2"]
+
+
+def test_eintraege_ohne_vorgang_stoeren_den_filter_nicht(con):
+    """Ein Upload gehoert zu keinem Vorgang und darf in keinem auftauchen."""
+    protokolliere(con, akteur="a@b.c", aktion="datei_hochgeladen",
+                  entscheidung=Entscheidung.ERLAUBT, begruendung="abgelegt",
+                  bezug=Vorgangsbezug(None, "c.pdf"))
+    con.commit()
+
+    assert lies_alle(con, vorgang_id="vorgang-1") == []
+    assert vorgaenge_im_trail(con) == []
+    assert verify_chain(con).gueltig
 
 
 def test_payload_hash_ist_reihenfolgeunabhaengig(con):

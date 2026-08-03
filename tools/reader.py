@@ -22,7 +22,7 @@ from pathlib import Path
 
 from config import ReaderParser, einstellungen
 from governance import policy
-from governance.audit import Entscheidung, protokolliere
+from governance.audit import OHNE_BEZUG, Entscheidung, Vorgangsbezug, protokolliere
 
 
 class ZugriffVerweigert(Exception):
@@ -76,7 +76,8 @@ def _parse_docling(pfad: Path) -> tuple[str, int]:
     return ergebnis.document.export_to_markdown(), len(ergebnis.document.pages)
 
 
-def lies_dokument(con: sqlite3.Connection, pfad: Path | str, *, akteur: str) -> Dokumentinhalt:
+def lies_dokument(con: sqlite3.Connection, pfad: Path | str, *, akteur: str,
+                  bezug: Vorgangsbezug = OHNE_BEZUG) -> Dokumentinhalt:
     """Nimmt ein PDF entgegen und liefert LLM-taugliches Markdown.
 
     Der AD-Check ist die erste Anweisung -- vor jedem Dateizugriff. Ein
@@ -84,6 +85,10 @@ def lies_dokument(con: sqlite3.Connection, pfad: Path | str, *, akteur: str) -> 
     gelesen noch geparst noch ein Modell aufgerufen.
     """
     pfad = Path(pfad)
+    # Die Datenquelle steht fest, sobald der Pfad bekannt ist -- auch bei
+    # verweigertem Zugriff muss im Trail stehen, *worauf* zugegriffen werden
+    # sollte.
+    bezug = Vorgangsbezug(bezug.vorgang_id, bezug.datenquelle or pfad.name)
 
     entscheid = policy.pruefe_reader_zugriff(con, akteur=akteur)
     if not entscheid.erlaubt:
@@ -91,6 +96,7 @@ def lies_dokument(con: sqlite3.Connection, pfad: Path | str, *, akteur: str) -> 
             con, akteur=akteur, agent="reader", aktion="dokument_einspeisen",
             entscheidung=Entscheidung.VERWEIGERT, begruendung=entscheid.begruendung,
             payload={"datei": pfad.name, "regel": entscheid.regel},
+            bezug=bezug, ergebnis="zugriff_verweigert",
         )
         con.commit()
         raise ZugriffVerweigert(entscheid.begruendung)
@@ -110,6 +116,7 @@ def lies_dokument(con: sqlite3.Connection, pfad: Path | str, *, akteur: str) -> 
         entscheidung=Entscheidung.ERLAUBT, begruendung=entscheid.begruendung,
         payload={"datei": pfad.name, "dokument_hash": dok_hash,
                  "parser": parser.value, "seiten": seiten},
+        bezug=bezug, ergebnis=f"{seiten} Seite(n) gelesen",
     )
     con.commit()
 

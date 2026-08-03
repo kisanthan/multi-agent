@@ -89,11 +89,52 @@ Dann die fünf Szenarien:
 .venv/bin/python demo.py --audit           # Audit-Trail + Kettenprüfung
 ```
 
-Freigabe-Queue (Human-in-the-loop) im Browser:
+## Oberfläche
 
 ```bash
 .venv/bin/streamlit run ui/app.py
 ```
+
+Die Oberfläche zeigt den vollständigen Weg eines Belegs — die Szenarien lassen
+sich dort ohne Terminal durchspielen. Der Aufbau folgt der Frage, die der
+Nutzer gerade hat:
+
+| Bereich | Seite | Route | Inhalt |
+|---|---|---|---|
+| **Upload** | Neuer Beleg | `/` | Belege per Drag-and-drop ablegen (Mehrfachauswahl, Eingangsprüfung) und Verarbeitung starten; darunter die zuletzt eingespeisten Vorgänge |
+| | Alle Vorgänge | `/historie` | alle Vorgänge beider Prozesse mit Suche, Filter und Zeitraum |
+| **Vorgangsarten** | Zahlungsbestätigung | `/zahlungsbestaetigung` | Kennzahlen, offene und erledigte Vorgänge — nur Prozess A |
+| | Eingangsrechnung | `/eingangsrechnung` | dasselbe für Prozess B |
+| **Nachweis** | Protokoll | `/protokoll` | hash-verketteter Audit-Trail, filterbar nach Vorgang, Schritt und Bewertung; CSV-Export |
+| | Architektur | `/architektur` | beide Prozesse im Ablauf plus Agenten-Registry (Autonomiestufe, Aufsicht, Modellklasse) |
+
+**Zur Sprache:** die Arbeitsansichten kommen ohne Fachbegriffe der Arbeit aus —
+kein „Prozess A", kein „Human-in-the-loop", keine Sicherheitsgruppen. Wer diese
+Begriffe braucht, findet sie gebündelt auf der Seite **Architektur**; ein Test
+([tests/test_ui_sprache.py](tests/test_ui_sprache.py)) hält die Trennung fest.
+Ausgenommen bleibt der *Inhalt* des Protokolls: dort steht der aufgezeichnete
+Wortlaut, denn ein Nachweis, der für die Anzeige umformuliert wird, ist keiner.
+
+Ein einzelner Vorgang liegt unter `/vorgang?id=…` — verlinkbar und reloadfest,
+mit Prozess-Stepper, Freigabe, Bestätigung und einem Sprung in den gefilterten
+Audit-Trail.
+
+Der in der Sidebar angemeldete Nutzer ist zugleich der Einspeiser. Damit sind
+beide Governance-Aussagen im Bedienfluss sichtbar statt nur im Test: ein Nutzer
+ohne `SG-CHG-DocIngest` kann nicht hochladen und wird beim Start eines
+vorhandenen Belegs am Reader abgewiesen (Szenario 5); ohne `SG-CHG-Freigabe`
+bleiben die Freigabeknöpfe gesperrt. Auf dem Bildschirm erscheint davon nur die
+Folge — „Sie haben nur Leserechte", „Ihr Konto ist nicht zum Hochladen von
+Belegen berechtigt" —, nie der Name der Gruppe.
+
+Ein Lauf dauert mit lokalem Modell ein bis drei Minuten und blockiert währenddessen
+den startenden Browser-Tab; der Fortschritt wird Knoten für Knoten angezeigt.
+Freigaben aus einem zweiten Tab sind davon nicht betroffen, weil der Zustand im
+Checkpoint liegt (siehe [docs/grenzen.md](docs/grenzen.md), L8).
+
+**Ein weiterer Prozess** braucht keine neue Seite: ein Eintrag in
+[prozessregistry.py](prozessregistry.py) erzeugt Navigation, Route,
+Arbeitsansicht, Stepper und Filter.
 
 ## Die fünf Szenarien
 
@@ -128,12 +169,17 @@ governance/   deterministisch, KEIN LLM: policy, ad, audit
 tools/        Reader-Tool (PDF -> Markdown, AD-Check als Eintrittsbedingung)
 llm/          Anbieter-Abstraktion, validierte Extraktion, Preflight
 mocks/        FastAPI: Navision (ERP), ELO (DMS)
-graph/        LangGraph-Workflow + Zustandsmodell
+graph/        LangGraph-Workflow, Zustandsmodell, Vorgangsuebersicht, Zielsystem-Wirkung
 data/         Datengenerator (seed-fest), SQLite, generierte PDFs
-ui/           Streamlit-Freigabe-Queue
+ui/           Streamlit-Oberflaeche
+  shared/       Stil, Formate, Filter, Laufzeitkontext (kennt keine Fachlichkeit)
+  vorgaenge/    Vorgangsliste, Detailansicht, Lauf, Schrittableitung
+  upload/       Eingangspruefung und Ablage
+  seiten/       Upload, Historie, Prozess (parametrisiert), Audit, Architektur
 tests/        pytest
 docs/         Architektur, Mapping Konzept->Code, Grenzen
 registry.py   Agenten-Konfigurationstabelle (wirksam, nicht nur dokumentiert)
+prozessregistry.py  Prozesse als Konfiguration: Schrittfolge, Zielsystem, Felder
 config.py     .env-Konfiguration
 demo.py       CLI-Runner der fünf Szenarien
 ```

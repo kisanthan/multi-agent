@@ -27,6 +27,26 @@ class Entscheidung(str, Enum):
 
 
 @dataclass(frozen=True)
+class Vorgangsbezug:
+    """Woher ein Eintrag stammt: welcher Vorgang, welche Datenquelle.
+
+    Als eigenes Objekt und nicht als zwei Parameter, weil der Bezug durch die
+    gesamte Agentenkette gereicht wird -- ein Argument je Funktion statt zwei.
+
+    Ein Vorgang ist ein einzelner Lauf, nicht ein Dokument: dieselbe Datei kann
+    mehrfach verarbeitet werden. Deshalb genuegt die Datenquelle allein nicht,
+    um die Eintraege eines Laufs zu finden.
+    """
+
+    vorgang_id: str | None = None
+    datenquelle: str | None = None
+
+
+# Fuer Eintraege, die zu keinem Vorgang gehoeren (Systemereignisse, Tests).
+OHNE_BEZUG = Vorgangsbezug()
+
+
+@dataclass(frozen=True)
 class AuditEintrag:
     id: int
     ts: str
@@ -35,6 +55,9 @@ class AuditEintrag:
     aktion: str
     entscheidung: Entscheidung
     begruendung: str
+    vorgang_id: str | None
+    datenquelle: str | None
+    ergebnis: str | None
     payload_hash: str
     prev_hash: str
     hash: str
@@ -55,15 +78,20 @@ def _payload_hash(payload: dict) -> str:
 
 
 def _eintrag_hash(ts: str, akteur: str, agent: str | None, aktion: str,
-                  entscheidung: str, begruendung: str, payload_hash: str,
-                  prev_hash: str) -> str:
+                  entscheidung: str, begruendung: str, vorgang_id: str | None,
+                  datenquelle: str | None, ergebnis: str | None,
+                  payload_hash: str, prev_hash: str) -> str:
     """Hasht den vollstaendigen Eintragsinhalt inklusive Vorgaenger-Hash.
 
     Alle inhaltlichen Felder gehen ein -- wuerde nur payload_hash verkettet,
-    liessen sich Akteur oder Entscheidung unbemerkt aendern.
+    liessen sich Akteur oder Entscheidung unbemerkt aendern. Das gilt
+    ausdruecklich auch fuer Vorgangsbezug, Datenquelle und Ergebnis: waeren sie
+    ausgenommen, koennte man einen Eintrag einem anderen Vorgang zuschreiben,
+    ohne dass die Kette bricht.
     """
     material = "|".join([
         ts, akteur, agent or "", aktion, entscheidung, begruendung,
+        vorgang_id or "", datenquelle or "", ergebnis or "",
         payload_hash, prev_hash,
     ])
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
@@ -76,7 +104,9 @@ def letzter_hash(con: sqlite3.Connection) -> str:
 
 def protokolliere(con: sqlite3.Connection, *, akteur: str, aktion: str,
                   entscheidung: Entscheidung, begruendung: str,
-                  agent: str | None = None, payload: dict | None = None) -> AuditEintrag:
+                  agent: str | None = None, payload: dict | None = None,
+                  bezug: Vorgangsbezug = OHNE_BEZUG,
+                  ergebnis: str | None = None) -> AuditEintrag:
     """Haengt einen Eintrag an die Kette an.
 
     Bewusst ohne `commit()`: der Aufrufer entscheidet ueber die
@@ -87,17 +117,21 @@ def protokolliere(con: sqlite3.Connection, *, akteur: str, aktion: str,
     ts = datetime.now(timezone.utc).isoformat()
     p_hash = _payload_hash(payload)
     prev = letzter_hash(con)
-    h = _eintrag_hash(ts, akteur, agent, aktion, entscheidung.value, begruendung, p_hash, prev)
+    h = _eintrag_hash(ts, akteur, agent, aktion, entscheidung.value, begruendung,
+                      bezug.vorgang_id, bezug.datenquelle, ergebnis, p_hash, prev)
 
     cur = con.execute(
         "INSERT INTO audit (ts, akteur, agent, aktion, entscheidung, begruendung,"
-        " payload_hash, prev_hash, hash) VALUES (?,?,?,?,?,?,?,?,?)",
-        (ts, akteur, agent, aktion, entscheidung.value, begruendung, p_hash, prev, h),
+        " vorgang_id, datenquelle, ergebnis, payload_hash, prev_hash, hash)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (ts, akteur, agent, aktion, entscheidung.value, begruendung,
+         bezug.vorgang_id, bezug.datenquelle, ergebnis, p_hash, prev, h),
     )
     return AuditEintrag(
         id=cur.lastrowid, ts=ts, akteur=akteur, agent=agent, aktion=aktion,
         entscheidung=entscheidung, begruendung=begruendung,
-        payload_hash=p_hash, prev_hash=prev, hash=h,
+        vorgang_id=bezug.vorgang_id, datenquelle=bezug.datenquelle,
+        ergebnis=ergebnis, payload_hash=p_hash, prev_hash=prev, hash=h,
     )
 
 
@@ -123,13 +157,14 @@ def verify_chain(con: sqlite3.Connection) -> Pruefergebnis:
     """
     rows = con.execute(
         "SELECT id, ts, akteur, agent, aktion, entscheidung, begruendung,"
-        " payload_hash, prev_hash, hash FROM audit ORDER BY id"
+        " vorgang_id, datenquelle, ergebnis, payload_hash, prev_hash, hash"
+        " FROM audit ORDER BY id"
     ).fetchall()
 
     erwarteter_prev = GENESIS_HASH
     for i, r in enumerate(rows):
         (eid, ts, akteur, agent, aktion, entscheidung, begruendung,
-         p_hash, prev_hash, h) = r
+         vorgang_id, datenquelle, ergebnis, p_hash, prev_hash, h) = r
 
         if prev_hash != erwarteter_prev:
             return Pruefergebnis(
@@ -140,7 +175,7 @@ def verify_chain(con: sqlite3.Connection) -> Pruefergebnis:
             )
 
         neu = _eintrag_hash(ts, akteur, agent, aktion, entscheidung, begruendung,
-                            p_hash, prev_hash)
+                            vorgang_id, datenquelle, ergebnis, p_hash, prev_hash)
         if neu != h:
             return Pruefergebnis(
                 False, i, eid,
@@ -153,17 +188,39 @@ def verify_chain(con: sqlite3.Connection) -> Pruefergebnis:
     return Pruefergebnis(True, len(rows))
 
 
-def lies_alle(con: sqlite3.Connection, limit: int | None = None) -> list[AuditEintrag]:
-    """Read-only-Zugriff auf den Trail (Aufsichtsmodus der Audit-Komponente)."""
+def lies_alle(con: sqlite3.Connection, limit: int | None = None, *,
+              vorgang_id: str | None = None) -> list[AuditEintrag]:
+    """Read-only-Zugriff auf den Trail (Aufsichtsmodus der Audit-Komponente).
+
+    `vorgang_id` schraenkt auf einen einzelnen Lauf ein. Achtung: eine
+    gefilterte Sicht taugt nicht als Unversehrtheitsnachweis -- `verify_chain()`
+    prueft immer die vollstaendige Kette.
+    """
     sql = ("SELECT id, ts, akteur, agent, aktion, entscheidung, begruendung,"
-           " payload_hash, prev_hash, hash FROM audit ORDER BY id")
+           " vorgang_id, datenquelle, ergebnis, payload_hash, prev_hash, hash"
+           " FROM audit")
+    parameter: tuple = ()
+    if vorgang_id:
+        sql += " WHERE vorgang_id = ?"
+        parameter = (vorgang_id,)
+    sql += " ORDER BY id"
     if limit:
         sql += f" LIMIT {int(limit)}"
+
     return [
         AuditEintrag(
             id=r[0], ts=r[1], akteur=r[2], agent=r[3], aktion=r[4],
             entscheidung=Entscheidung(r[5]), begruendung=r[6],
-            payload_hash=r[7], prev_hash=r[8], hash=r[9],
+            vorgang_id=r[7], datenquelle=r[8], ergebnis=r[9],
+            payload_hash=r[10], prev_hash=r[11], hash=r[12],
         )
-        for r in con.execute(sql).fetchall()
+        for r in con.execute(sql, parameter).fetchall()
     ]
+
+
+def vorgaenge_im_trail(con: sqlite3.Connection) -> list[str]:
+    """Alle Vorgangs-IDs, zu denen es Eintraege gibt (fuer den Filter)."""
+    return [r[0] for r in con.execute(
+        "SELECT DISTINCT vorgang_id FROM audit WHERE vorgang_id IS NOT NULL"
+        " ORDER BY vorgang_id"
+    ).fetchall()]

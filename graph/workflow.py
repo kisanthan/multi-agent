@@ -25,13 +25,48 @@ from agents import abgleich, buchung, klassifikation, kostenstelle, zielsysteme
 from agents.abgleich import Befund
 from agents.schemas import Dokumenttyp
 from config import DB_PFAD
-from governance.audit import Entscheidung, protokolliere
+from governance.audit import Entscheidung, Vorgangsbezug, protokolliere
 from graph.state import Vorgang
 from tools.reader import ZugriffVerweigert, lies_dokument
 
 
 def _con() -> sqlite3.Connection:
     return sqlite3.connect(DB_PFAD)
+
+
+def _bezug(zustand: Vorgang) -> Vorgangsbezug:
+    """Vorgangsbezug fuer den Audit-Trail.
+
+    Jeder Eintrag eines Laufs traegt dieselbe Vorgangs-ID und denselben Beleg --
+    nur so laesst sich der Trail spaeter nach genau diesem Vorgang filtern.
+    Der Dateiname steht erst nach dem Reader fest; davor genuegt der Pfad.
+    """
+    return Vorgangsbezug(
+        vorgang_id=zustand.get("vorgang_id"),
+        datenquelle=zustand.get("dateiname") or Path(zustand.get("pfad", "")).name,
+    )
+
+
+def _gelesene_felder(d) -> str:
+    """Was der Extraktions-Agent gefunden hat -- als Satz, nicht als Dump.
+
+    Der Text erscheint in der Detailansicht unter „Was bisher geschah". Rohe
+    Feldnamen und `None` haetten dort nichts verloren; was nicht gefunden
+    wurde, wird als solches benannt.
+    """
+    gefunden = []
+    if d.nummer:
+        gefunden.append(f"Rechnungsnummer {d.nummer}")
+    if d.betrag_eur is not None:
+        gefunden.append(f"Betrag {d.betrag_eur:.2f} EUR".replace(".", ","))
+    if d.lieferant:
+        gefunden.append(f"Lieferant {d.lieferant}")
+    if d.kostenstellen_referenz:
+        gefunden.append(f"Kostenstelle {d.kostenstellen_referenz}")
+
+    if not gefunden:
+        return "Beleg ausgewertet, aber keine verwertbaren Angaben gefunden."
+    return "Erkannt: " + ", ".join(gefunden) + "."
 
 
 def _notiz(zustand: Vorgang, knoten: str, text: str) -> list[dict]:
@@ -45,14 +80,16 @@ def knoten_reader(zustand: Vorgang) -> dict:
     """Reader-Tool. Der AD-Check steckt in `lies_dokument` (Least Privilege)."""
     con = _con()
     try:
-        inhalt = lies_dokument(con, zustand["pfad"], akteur=zustand["akteur"])
+        inhalt = lies_dokument(con, zustand["pfad"], akteur=zustand["akteur"],
+                               bezug=_bezug(zustand))
     except ZugriffVerweigert as e:
         # Szenario 5: Ende des Vorgangs. Kein Parsing, kein Modell, kein Ziel.
         return {
             "abgeschlossen": True,
             "ergebnis": "zugriff_verweigert",
             "fehler": str(e),
-            "protokoll": _notiz(zustand, "reader", f"AD-Check verweigert: {e}"),
+            "protokoll": _notiz(zustand, "reader",
+                                f"Zugriff nicht erlaubt: {e}"),
         }
     finally:
         con.close()
@@ -61,9 +98,9 @@ def knoten_reader(zustand: Vorgang) -> dict:
         "markdown": inhalt.markdown,
         "dokument_hash": inhalt.dokument_hash,
         "dateiname": inhalt.dateiname,
-        "protokoll": _notiz(zustand, "reader",
-                            f"{inhalt.dateiname} gelesen ({inhalt.parser}, "
-                            f"{inhalt.seiten} Seite(n))."),
+        "protokoll": _notiz(
+            zustand, "reader",
+            f"{inhalt.dateiname} eingelesen, {inhalt.seiten} Seite(n)."),
     }
 
 
@@ -72,7 +109,8 @@ def knoten_klassifikation(zustand: Vorgang) -> dict:
     con = _con()
     try:
         e = klassifikation.klassifiziere(con, markdown=zustand["markdown"],
-                                         akteur=zustand["akteur"])
+                                         akteur=zustand["akteur"],
+                                         bezug=_bezug(zustand))
     finally:
         con.close()
 
@@ -83,8 +121,10 @@ def knoten_klassifikation(zustand: Vorgang) -> dict:
             "klaerfall_grund": e.eskalation or "Extraktion fehlgeschlagen",
             "eskalation": e.eskalation,
             "typ": Dokumenttyp.UNBEKANNT.value,
-            "protokoll": _notiz(zustand, "klassifikation",
-                                f"Extraktion gescheitert -> Klaerfall. {e.eskalation}"),
+            "protokoll": _notiz(
+                zustand, "klassifikation",
+                "Der Beleg konnte nicht ausgewertet werden – eine Person "
+                "muss entscheiden."),
         }
 
     d = e.daten
@@ -95,10 +135,7 @@ def knoten_klassifikation(zustand: Vorgang) -> dict:
         "lieferant": d.lieferant,
         "positionen": d.positionen,
         "kostenstellen_referenz": d.kostenstellen_referenz,
-        "protokoll": _notiz(zustand, "klassifikation",
-                            f"Typ={d.typ.value}, Nummer={d.nummer}, "
-                            f"Betrag={d.betrag_eur}, KST-Ref={d.kostenstellen_referenz} "
-                            f"({e.anbieter}/{e.modell}, Versuch {e.versuche})."),
+        "protokoll": _notiz(zustand, "klassifikation", _gelesene_felder(d)),
     }
 
 
@@ -130,7 +167,7 @@ def knoten_abgleich(zustand: Vorgang) -> dict:
     try:
         e = abgleich.gleiche_ab(con, nummer=zustand.get("nummer"),
                                 betrag_eur=zustand.get("betrag_eur"),
-                                akteur=zustand["akteur"])
+                                akteur=zustand["akteur"], bezug=_bezug(zustand))
     finally:
         con.close()
 
@@ -156,6 +193,7 @@ def knoten_buchung(zustand: Vorgang) -> dict:
             con, nummer=zustand["nummer"], betrag_eur=zustand["betrag_eur"],
             akteur=zustand["akteur"], beleg=zustand["dateiname"],
             freigegeben_von=zustand.get("freigegeben_von"),
+            bezug=_bezug(zustand),
         )
     finally:
         con.close()
@@ -164,8 +202,9 @@ def knoten_buchung(zustand: Vorgang) -> dict:
         return {
             "klaerfall": True,
             "klaerfall_grund": e.begruendung,
-            "protokoll": _notiz(zustand, "buchung",
-                                f"Freigabe erforderlich: {e.begruendung}"),
+            "protokoll": _notiz(
+                zustand, "buchung",
+                "Die Buchung muss von einer Person bestätigt werden."),
         }
 
     return {
@@ -195,7 +234,8 @@ def knoten_kostenstelle(zustand: Vorgang) -> dict:
     try:
         z = kostenstelle.ordne_zu(con, referenz=zustand.get("kostenstellen_referenz"),
                                   akteur=zustand["akteur"],
-                                  positionen=zustand.get("positionen", []))
+                                  positionen=zustand.get("positionen", []),
+                                  bezug=_bezug(zustand))
     finally:
         con.close()
 
@@ -258,6 +298,7 @@ def knoten_freigabe_kostenstelle(zustand: Vorgang) -> dict:
                         f"{antwort.get('kostenstelle_id')} {antwort['entscheidung']}.",
             payload={"kostenstelle_id": antwort.get("kostenstelle_id"),
                      "vorschlag_agent": zustand.get("kostenstelle_id")},
+            bezug=_bezug(zustand), ergebnis=antwort["entscheidung"],
         )
         con.commit()
     finally:
@@ -269,7 +310,7 @@ def knoten_freigabe_kostenstelle(zustand: Vorgang) -> dict:
             "ergebnis": "verworfen",
             "freigegeben_von": antwort["pruefer"],
             "protokoll": _notiz(zustand, "freigabe",
-                                f"{antwort['pruefer']} hat verworfen."),
+                                f"{antwort['pruefer']} hat abgelehnt."),
         }
 
     return {
@@ -277,8 +318,8 @@ def knoten_freigabe_kostenstelle(zustand: Vorgang) -> dict:
         "freigegeben_von": antwort["pruefer"],
         "freigabe_entscheidung": "freigegeben",
         "protokoll": _notiz(zustand, "freigabe",
-                            f"{antwort['pruefer']} hat {antwort['kostenstelle_id']} "
-                            "freigegeben."),
+                            f"{antwort['pruefer']} hat "
+                            f"{antwort['kostenstelle_id']} bestätigt."),
     }
 
 
@@ -297,7 +338,7 @@ def knoten_elo(zustand: Vorgang) -> dict:
     try:
         e = zielsysteme.archiviere(con, dateiname=zustand["dateiname"],
                                    dokument_hash=zustand["dokument_hash"],
-                                   akteur=zustand["akteur"])
+                                   akteur=zustand["akteur"], bezug=_bezug(zustand))
     finally:
         con.close()
 
@@ -312,8 +353,7 @@ def knoten_elo(zustand: Vorgang) -> dict:
         "abgeschlossen": True,
         "ergebnis": "archiviert",
         "archiv_id": e.kennung,
-        "protokoll": _notiz(zustand, "elo",
-                            f"{e.begruendung} Prozessende Prozess B."),
+        "protokoll": _notiz(zustand, "elo", e.begruendung),
     }
 
 
@@ -343,7 +383,8 @@ def knoten_klaerfall(zustand: Vorgang) -> dict:
                           aktion="klaerfall_entschieden",
                           entscheidung=Entscheidung.VERWEIGERT,
                           begruendung=f"{antwort['pruefer']} hat den Vorgang verworfen.",
-                          payload={"nummer": zustand.get("nummer")})
+                          payload={"nummer": zustand.get("nummer")},
+                          bezug=_bezug(zustand), ergebnis="verworfen")
             con.commit()
         finally:
             con.close()
@@ -352,7 +393,7 @@ def knoten_klaerfall(zustand: Vorgang) -> dict:
             "ergebnis": "verworfen",
             "freigegeben_von": antwort["pruefer"],
             "protokoll": _notiz(zustand, "klaerfall",
-                                f"{antwort['pruefer']} hat verworfen."),
+                                f"{antwort['pruefer']} hat abgelehnt."),
         }
 
     # Der Pruefer darf die Nummer korrigieren (Fall 'unbekannte Nummer').
@@ -362,7 +403,7 @@ def knoten_klaerfall(zustand: Vorgang) -> dict:
         "freigabe_entscheidung": "freigegeben",
         "klaerfall": False,
         "protokoll": _notiz(zustand, "klaerfall",
-                            f"{antwort['pruefer']} hat freigegeben."),
+                            f"{antwort['pruefer']} hat bestätigt."),
     }
 
 

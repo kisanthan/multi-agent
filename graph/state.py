@@ -18,6 +18,16 @@ class Vorgang(TypedDict, total=False):
     pfad: str
     akteur: str            # UPN des Einspeisers
     dateiname: str
+    # Thread-ID des Laufs, redundant im Zustand gehalten: die Agenten schreiben
+    # damit ihre Audit-Eintraege, ohne den Checkpointer kennen zu muessen.
+    vorgang_id: str
+    # Die hochgeladene Datei, aus der dieser Vorgang entstanden ist. Eine Datei
+    # kann mehrfach verarbeitet werden -- die Beziehung ist 1:n.
+    upload_id: str | None
+    # ISO-Zeitstempel des Starts. Steht im Zustand und nicht im Checkpoint-
+    # Metadatum, weil LangGraph die Startzeit nicht verlaesslich herausgibt --
+    # die Fallliste braucht sie aber zum Sortieren.
+    gestartet_am: str
 
     # --- Reader ---
     markdown: str
