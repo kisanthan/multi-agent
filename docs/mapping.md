@@ -1,162 +1,168 @@
-# Mapping: Fachkonzept → Code
+# Mapping: functional concept → code
 
-Dieses Dokument bildet die Konzeptartefakte der Arbeit auf den Prototyp-Code ab
-und macht jede Interpretationsentscheidung explizit. Es dient als Grundlage für
-den Fallbeispiel-Fließtext (Kap. 6).
+This document maps the thesis's concept artifacts onto the prototype code
+and makes every interpretation decision explicit. It serves as the basis
+for the case-study prose (chapter 6).
 
-## Vorbemerkung: fehlende Diagramme
+## Preliminary note: missing diagrams
 
-Die sechs Konzeptdiagramme (`uebersicht_gesamt.png`, `mindmap_prozessA/B.png`,
-`teil1_agententypen.png`, `teil2_ki_modelle.png`, `teil3_multiagentensystem.png`)
-lagen bei der Umsetzung **nicht vor**. Der Prototyp wurde daher nach der
-**Agenten-Konfigurationstabelle aus Abschnitt 1 des Planungsprompts** gebaut.
-Wo diese Tabelle Spielraum ließ, sind die Entscheidungen unten als
-*Interpretation* markiert. Vor der Verwendung in der Thesis sollten diese
-Stellen gegen die tatsächlichen Diagramme abgeglichen werden.
+The six concept diagrams (`uebersicht_gesamt.png`, `mindmap_prozessA/B.png`,
+`teil1_agententypen.png`, `teil2_ki_modelle.png`,
+`teil3_multiagentensystem.png`) were **not available** during
+implementation. The prototype was therefore built from the **agent
+configuration table in section 1 of the planning prompt**. Where that table
+left room for interpretation, the decisions below are marked as an
+*interpretation*. Before use in the thesis, these points should be checked
+against the actual diagrams.
 
-## Agenten → Code
+## Agents → code
 
-| Komponente (Konzept) | Code | Typ | Stufe | Aufsicht | Modellklasse |
+| Component (concept) | Code | Type | Level | Oversight | Model class |
 |---|---|---|---|---|---|
-| Reader-Tool | [tools/reader.py](../tools/reader.py) | kein Agent | – | deterministisch | keine |
-| Orchestrator-Agent | `route_dokumenttyp` in [graph/workflow.py](../graph/workflow.py) | Orchestrator | – | Human-on-the-loop | lokal/klein |
-| Klassifikation & Extraktion | [agents/klassifikation.py](../agents/klassifikation.py) | Shared Domain | 2 | Human-on-the-loop | vision |
-| Abgleich-Agent | [agents/abgleich.py](../agents/abgleich.py) | Shared Domain | 1 | Human-on-the-loop | keine *(det., I1)* |
-| Buchungs-Agent | [agents/buchung.py](../agents/buchung.py) | Shared Domain | 3 | **Human-in-the-loop** | Frontier |
-| Kostenstellen-Agent | [agents/kostenstelle.py](../agents/kostenstelle.py) | Shared Domain | 2 | Human-on-the-loop | keine *(det., I1)* |
-| ELO-Agent (Prozessende B) | [agents/zielsysteme.py](../agents/zielsysteme.py) | Shared Domain | 3 | Human-on-the-loop | lokal/klein |
-| Policy-/Governance | [governance/policy.py](../governance/policy.py) | Policy | – | deterministisch | keine |
-| Audit-/Monitoring | [governance/audit.py](../governance/audit.py) | Audit | – | read-only | keine |
+| Reader tool | [tools/reader.py](../tools/reader.py) | not an agent | – | deterministic | none |
+| Orchestrator agent | `route_document_type` in [graph/workflow.py](../graph/workflow.py) | orchestrator | – | human-on-the-loop | local/small |
+| Classification & extraction | [agents/classification.py](../agents/classification.py) | Shared Domain | 2 | human-on-the-loop | vision |
+| Reconciliation agent | [agents/reconciliation.py](../agents/reconciliation.py) | Shared Domain | 1 | human-on-the-loop | none *(det., I1)* |
+| Booking agent | [agents/booking.py](../agents/booking.py) | Shared Domain | 3 | **human-in-the-loop** | frontier |
+| Cost-center agent | [agents/cost_center.py](../agents/cost_center.py) | Shared Domain | 2 | human-on-the-loop | none *(det., I1)* |
+| ELO agent (end of process B) | [agents/archiving.py](../agents/archiving.py) | Shared Domain | 3 | human-on-the-loop | local/small |
+| Policy/governance | [governance/policy.py](../governance/policy.py) | policy | – | deterministic | none |
+| Audit/monitoring | [governance/audit.py](../governance/audit.py) | audit | – | read-only | none |
 
-Die Tabelle ist im Code als wirksame Datenstruktur hinterlegt
-([registry.py](../registry.py)) — die Policy liest daraus. Eine Stufe zu ändern
-ändert das Laufzeitverhalten; sie ist nicht bloß dokumentiert.
+The table is stored in code as effective data
+([registry.py](../registry.py)) -- the policy reads from it. Changing a
+level changes runtime behavior; it is not merely documented.
 
-## Diagramme → Realisierung
+## Diagrams → implementation
 
-- **`uebersicht_gesamt.png` (Fluss A+B)** → ein gemeinsamer Graph
-  ([graph/workflow.py](../graph/workflow.py)) mit geteiltem Reader, Orchestrator,
-  Klassifikation und Datenbasis. Zwei getrennte Graphen hätten die Aussage
-  *gemeinsamer* Komponenten aufgelöst.
-- **`mindmap_prozessA.png`** → Knoten `reader → klassifikation → abgleich →
-  buchung → Navision`, HITL-Knoten `klaerfall` (nur bei unbekannter Nummer /
-  Betragsabweichung). Navision setzt den Status offen → bezahlt.
-- **`mindmap_prozessB.png`** → Knoten `reader → klassifikation → kostenstelle →
-  (bei Mehrdeutigkeit) freigabe_kostenstelle → elo`. **Prozessende bei ELO** —
-  keine Navision-Verbuchung in Prozess B (Diagramm Teil 3).
-- **`teil1_agententypen.png` (Taxonomie)** → [registry.py](../registry.py):
-  `AgentTyp`, `Autonomiestufe`, `Aufsichtsmodus` als Enums.
-- **`teil2_ki_modelle.png` (Modellzuordnung)** → `Modellklasse` je Agent plus
-  [llm/client.py](../llm/client.py) `waehle_modell`: Risikoklasse × Modus → Anbieter.
-- **`teil3_multiagentensystem.png` (Gesamtsynthese, AD + Governance)** → AD-Check
-  in [tools/reader.py](../tools/reader.py), Governance-Schicht in `governance/`,
-  Schichtgrenze per Test erzwungen.
+- **`uebersicht_gesamt.png` (flow A+B)** → one shared graph
+  ([graph/workflow.py](../graph/workflow.py)) with a shared reader,
+  orchestrator, classification, and data layer. Two separate graphs would
+  have dissolved the claim of *shared* components.
+- **`mindmap_prozessA.png`** → nodes `reader → klassifikation → abgleich →
+  buchung → Navision`, HITL node `klaerfall` (only on an unknown number /
+  amount mismatch). Navision sets the status from open to paid.
+- **`mindmap_prozessB.png`** → nodes `reader → klassifikation → kostenstelle
+  → (on ambiguity) freigabe_kostenstelle → elo`. **End of process at ELO**
+  -- no Navision booking in process B (diagram part 3).
+- **`teil1_agententypen.png` (taxonomy)** → [registry.py](../registry.py):
+  `AgentType`, `AutonomyLevel`, `OversightMode` as enums.
+- **`teil2_ki_modelle.png` (model assignment)** → `ModelClass` per agent
+  plus [llm/client.py](../llm/client.py) `choose_model`: risk class × mode
+  → provider.
+- **`teil3_multiagentensystem.png` (overall synthesis, AD + governance)** →
+  AD check in [tools/reader.py](../tools/reader.py), governance layer in
+  `governance/`, layer boundary enforced via test.
 
-## Interpretationsentscheidungen
+## Interpretation decisions
 
-### I1 — Abgleich- und Kostenstellen-Agent ohne Sprachmodell *(mit Nutzer abgestimmt)*
+### I1 — Reconciliation and cost-center agent without a language model *(agreed with the user)*
 
-Thesis §7.4: Sowohl der Nummern-Abgleich (Prozess A) als auch die
-Kostenstellenzuordnung (Prozess B) sind „exakte, referenzielle Nachschläge auf
-strukturierte Stammdaten". Ein Sprachmodell könnte dort nichts beitragen, was ein
-Datenbankzugriff nicht exakt und reproduzierbar leistet — es könnte nur
-halluzinieren, und das an finanz- bzw. buchungsrelevanter Stelle. Der Prototyp
-implementiert beide Agenten deshalb **deterministisch**
-([agents/abgleich.py](../agents/abgleich.py),
-[agents/kostenstelle.py](../agents/kostenstelle.py)); Autonomiestufe und
-Aufsichtsmodus bleiben gültig, die Modellklasse ist `KEINE`. Das Extrahieren der
-Nummer bzw. der Kostenstellenreferenz vom Beleg leistet der vorgelagerte
-Klassifikations-/Extraktions-Agent (der ein Modell nutzt).
+Thesis §7.4: both the number reconciliation (process A) and the
+cost-center assignment (process B) are "exact, referential lookups against
+structured master data" (translated from the German: *„exakte,
+referenzielle Nachschläge auf strukturierte Stammdaten"*). A language model
+could contribute nothing there that a database lookup does not already do
+exactly and reproducibly -- it could only hallucinate, and at a
+financially/booking-relevant point. The prototype therefore implements
+both agents **deterministically**
+([agents/reconciliation.py](../agents/reconciliation.py),
+[agents/cost_center.py](../agents/cost_center.py)); the autonomy level and
+oversight mode remain valid, the model class is `NO_MODEL`. Extracting the
+number or the cost-center reference from the document itself is done by
+the upstream classification/extraction agent (which uses a model).
 
-**Verwertbarer Befund für die Arbeit:** Rolle und Autonomiestufe eines Agenten
-implizieren nicht automatisch Modellinferenz. Die Typologie sagt, *welche Rolle*
-und *welche Autonomiestufe* eine Komponente hat — ob dafür ein Sprachmodell nötig
-ist, ist eine davon getrennte Entscheidung. Deterministische Domain-Agenten
-(Abgleich, Kostenstelle) stehen damit neben den ohnehin deterministischen
-Querschnittskomponenten (Reader, Policy, Audit).
+**Usable finding for the thesis:** an agent's role and autonomy level do
+not automatically imply model inference. The typology states *which role*
+and *which autonomy level* a component has -- whether a language model is
+needed for that is a separate decision. Deterministic domain agents
+(reconciliation, cost center) therefore stand alongside the already
+deterministic cross-cutting components (reader, policy, audit).
 
-### I2 — Buchungs-Agent: immer Human-in-the-loop (Abgleich mit Thesis §7.4)
+### I2 — Booking agent: always human-in-the-loop (aligned with Thesis §7.4)
 
-Der finanzwirksame Buchungsschritt steht nach Thesis §7.4 und Tabelle 11 unter
-**Human-in-the-loop**: jede Buchung erfordert eine menschliche Freigabe,
-unabhängig vom Betrag. Eine frühere Prototyp-Fassung nutzte eine Betragsschwelle
-(darunter automatisch, darüber Freigabe); diese wurde entfernt, weil sie die im
-Konzept geforderte durchgängige Aufsicht abgeschwächt hätte. Realisiert über die
-Aufsichtsmodus-Regel in [governance/policy.py](../governance/policy.py).
+Per Thesis §7.4 and table 11, the financially effective booking step is
+**human-in-the-loop**: every booking requires a human approval, regardless
+of amount. An earlier prototype version used an amount threshold (below it
+automatic, above it approval); this was removed because it would have
+weakened the continuous oversight the concept requires. Implemented via the
+oversight-mode rule in [governance/policy.py](../governance/policy.py).
 
-*(Verbleibende Thesis-interne Spannung: Abb. 6 beschriftet den Buchungs-Agenten
-als „Human-on-the-loop", der Text als „Human-in-the-loop"; die Bewertungstabelle
-nennt zudem für Prozess A „manueller Eingriff nur im Ausnahmefall". Der Code
-folgt dem Text/der Tabelle. Siehe [gap-analyse-thesis.md](gap-analyse-thesis.md)
-G3.)*
+*(Remaining tension within the thesis itself: fig. 6 labels the booking
+agent as "human-on-the-loop", the text as "human-in-the-loop"; the
+evaluation table also names "manual intervention only in exceptional
+cases" for process A. The code follows the text/table. See
+[gap-analyse-thesis.md](gap-analyse-thesis.md) G3.)*
 
-### I3 — Autonomiestufen „1–2"
+### I3 — Autonomy levels "1-2"
 
-Wo die Tabelle einen Bereich nennt, prüft die Policy gegen die **Obergrenze**
-(Klassifikation → 2). Begründung: die Policy muss gegen die höchste beanspruchte
-Stufe prüfen, sonst wäre die Schranke wirkungslos.
+Where the table names a range, the policy checks against the **upper
+bound** (classification → 2). Rationale: the policy must check against the
+highest claimed level, otherwise the barrier would be ineffective.
 
-### I4 — Orchestrator routet ohne erneuten Modellaufruf
+### I4 — Orchestrator routes without another model call
 
-Der Dokumenttyp steht nach dem Klassifikations-Agenten bereits fest. Der
-Orchestrator *routet* danach (Conditional Edge), statt ein zweites Modell zu
-fragen — ein zweiter Aufruf könnte dem ersten widersprechen.
+The document type is already known after the classification agent. The
+orchestrator then *routes* on it (conditional edge) instead of asking a
+second model -- a second call could contradict the first.
 
-### I5 — Kostenstellen-Agent: Human-on-the-loop, HITL nur bei fehlender Referenz
+### I5 — Cost-center agent: human-on-the-loop, HITL only on a missing reference
 
-Nach dem Diagramm Teil 3 ist der Kostenstellen-Agent **Human-on-the-loop**: löst
-die Belegreferenz eindeutig eine Kostenstelle auf, läuft der Vorgang automatisch
-bis zur Archivierung; die Vier-Augen-Freigabe greift nur, wenn die Referenz fehlt
-oder unbekannt ist (Entscheidung „Zuordnung eindeutig?" → nein/Klärfall). Das
-spiegelt exakt Prozess A (Nummer vorhanden?). Realisiert in
-[graph/workflow.py](../graph/workflow.py) über `route_kostenstelle`.
+Per diagram part 3, the cost-center agent is **human-on-the-loop**: if the
+document reference resolves to a unique cost center, the case runs
+automatically through to archiving; the four-eyes approval only kicks in
+if the reference is missing or unknown (the "assignment unique?" decision
+→ no/exception case). This exactly mirrors process A (number present?).
+Implemented in [graph/workflow.py](../graph/workflow.py) via
+`route_cost_center`.
 
-*(Frühere Prototyp-Fassung erzwang an dieser Stelle immer eine Freigabe; das
-Diagramm hat den Aufsichtsmodus auf on-the-loop präzisiert.)*
+*(An earlier prototype version always forced an approval at this point;
+the diagram refined the oversight mode to on-the-loop.)*
 
-### I6 — Prozess B endet bei ELO (keine Navision-Verbuchung)
+### I6 — Process B ends at ELO (no Navision booking)
 
-Nach dem Diagramm Teil 3 ist die revisionssichere Archivierung in ELO das
-**Prozessende** von Prozess B. Eine bilanzwirksame Verbuchung als
-Verbindlichkeit (früherer „Navision-Agent", Stufe 4) findet nicht mehr statt.
-Navision (NAV) wird nur noch in Prozess A angesprochen (Buchungs-Agent, Status
-offen → bezahlt). Der Navision-Agent, der Endpunkt `/liability`, das State-Feld
-`verbindlichkeit_id` und die Tabelle `verbindlichkeiten` wurden entfernt.
+Per diagram part 3, tamper-evident archiving in ELO is the **end of
+process B**. A balance-sheet-effective booking as a liability (the earlier
+"Navision agent", level 4) no longer happens. Navision (NAV) is now only
+addressed in process A (booking agent, status open → paid). The Navision
+agent, the `/liability` endpoint, the state field `verbindlichkeit_id`, and
+the table `verbindlichkeiten` were removed.
 
-### I7 — Gemeinsame Datenbasis: kein RAG (Abgleich mit Thesis 6.4)
+### I7 — Shared data layer: no RAG (aligned with Thesis 6.4)
 
-**Korrektur:** Die Thesis (Abschnitt 6.4, Absatz zu RAG) legt fest, dass die
-gemeinsame Datenbasis **bewusst nicht** als RAG-System ausgeführt wird — und
-zwar für *beide* Nachschläge: „Der Abgleich im Zahlungseingang und die
-Kostenstellenzuordnung in der Eingangsrechnung sind exakte, referenzielle
-Nachschläge auf strukturierte Stammdaten." RAG wird in der Arbeit nur als
-*komplementäre* Ergänzung gesehen, und zwar an anderer Stelle: zur Unterstützung
-des Klassifikations-/Extraktions-Agenten bei ungewöhnlichen Beleglayouts und zur
-Anreicherung der menschlichen Klärfallprüfung um Vertrags-/Richtlinienpassagen.
+**Correction:** the thesis (section 6.4, the paragraph on RAG) establishes
+that the shared data layer is **deliberately not** implemented as a RAG
+system -- for *both* lookups: "the reconciliation in the payment receipt
+and the cost-center assignment in the incoming invoice are exact,
+referential lookups against structured master data" (translated from the
+German original). The thesis sees RAG only as a *complementary* addition,
+and at a different point: to support the classification/extraction agent
+with unusual document layouts, and to enrich the human exception-case
+review with contract/policy passages.
 
-Der Prototyp folgt dieser Linie nun für **beide** Nachschläge: sowohl der
-Abgleich-Agent als auch der Kostenstellen-Agent sind deterministische, exakte
-Referenz-Nachschläge ohne Sprachmodell (siehe I1). Die frühere Prototyp-Fassung
-implementierte die Kostenstellenzuordnung LLM-/schlüsselwortbasiert-semantisch;
-das wurde auf einen Referenz-Nachschlag umgestellt, um mit der Thesis-Aussage
-konsistent zu sein: Die Rechnung trägt eine Kostenstellenreferenz (z. B.
-`KTR-ITINFRA`), der Extraktions-Agent liest sie, der Kostenstellen-Agent schlägt
-sie exakt im Katalog nach. „Nicht eindeutig" heißt jetzt: Referenz fehlt oder
-unbekannt → Klärfall.
+The prototype now follows this line for **both** lookups: both the
+reconciliation agent and the cost-center agent are deterministic, exact
+reference lookups without a language model (see I1). The earlier prototype
+version implemented the cost-center assignment as LLM-/keyword-based and
+semantic; that was switched to a reference lookup to stay consistent with
+the thesis's claim: the invoice carries a cost-center reference (e.g.
+`KTR-ITINFRA`), the extraction agent reads it, the cost-center agent looks
+it up exactly in the catalog. "Not unique" now means: reference missing or
+unknown → exception case.
 
-**Verbleibende analytische Spannung (für die Arbeit):** Der Prozessschritt
-„Zuordnung eindeutig?" mit Klärfall-Pfad passt nun sauber zum Referenz-Nachschlag
-(Referenz vorhanden → eindeutig; fehlt → Klärfall). Die zuvor notierte Spannung
-(„ein exakter Nachschlag ist nie mehrdeutig") ist damit aufgelöst: die
-„Uneindeutigkeit" liegt nicht in einer semantischen Ähnlichkeit, sondern im
-Fehlen der Referenz auf dem Beleg.
+**Remaining analytical tension (for the thesis):** the process step
+"assignment unique?" with an exception-case path now fits cleanly with the
+reference lookup (reference present → unique; missing → exception case).
+The previously noted tension ("an exact lookup is never ambiguous") is
+thereby resolved: the "non-uniqueness" does not lie in a semantic
+similarity, but in the absence of the reference on the document.
 
-## Governance-Durchsetzung
+## Governance enforcement
 
-- **Least Privilege:** Der AD-Check liegt *innerhalb* von `lies_dokument()`, vor
-  jedem Dateizugriff — nicht im aufrufenden Knoten. Beleg:
-  `tests/test_reader.py::test_verweigerter_zugriff_liest_die_datei_nicht`.
-- **Deterministische Governance:** `governance/` importiert keinen LLM-Client;
-  per AST-Analyse erzwungen (`tests/test_schichtgrenze.py`).
-- **Audit-Trail:** hash-verkettet, append-only per DB-Trigger; `verify_chain()`
-  erkennt Änderung, Löschung und Einfügung.
+- **Least Privilege:** the AD check sits *inside* `read_document()`, before
+  any file access -- not in the calling node. Evidence:
+  `tests/test_reader.py::test_denied_access_never_reads_the_file`.
+- **Deterministic governance:** `governance/` imports no LLM client;
+  enforced via AST analysis (`tests/test_layer_boundaries.py`).
+- **Audit trail:** hash-chained, append-only via DB trigger;
+  `verify_chain()` detects change, deletion, and insertion.

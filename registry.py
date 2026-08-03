@@ -1,13 +1,13 @@
-"""Agenten-Konfigurationstabelle des Fachkonzepts als wirksame Datenstruktur.
+"""The agent configuration table from the functional concept, as effective data.
 
-Dieses Modul liegt bewusst auf oberster Ebene und nicht in `agents/`: sowohl die
-Agenten als auch die Governance-Schicht lesen daraus, und `governance/` darf
-nicht von `agents/` abhaengen (siehe tests/test_schichtgrenze.py). Die Tabelle
-ist reine Konfiguration ohne Verhalten und ohne LLM-Bezug.
+This module deliberately lives at the top level and not inside `agents/`: both
+the agents and the governance layer read from it, and `governance/` must not
+depend on `agents/` (see tests/test_layer_boundaries.py). The table is pure
+configuration with no behavior and no LLM dependency.
 
-Autonomiestufen nach Parasuraman et al. (2000); Aufsichtsmodi nach Kap. 2.2 der
-Arbeit. Eine Aenderung hier aendert das Laufzeitverhalten -- die Tabelle ist
-nicht Dokumentation, sondern Durchsetzung.
+Autonomy levels follow Parasuraman et al. (2000); oversight modes follow
+chapter 2.2 of the thesis. A change here changes runtime behavior -- the
+table is enforcement, not documentation.
 """
 
 from __future__ import annotations
@@ -16,190 +16,192 @@ from dataclasses import dataclass
 from enum import Enum
 
 
-class AgentTyp(str, Enum):
-    """Funktionstypen aus Kap. 2.2 / 3.3 / 3.4.
+class AgentType(str, Enum):
+    """Functional types from chapter 2.2 / 3.3 / 3.4 of the thesis.
 
-    Personal Agents kommen in diesen beiden Prozessen nicht vor; alle fachlichen
-    Agenten sind Shared Domain Agents. Einen `System Agent` als Funktionstyp
-    gibt es in der Typologie der Arbeit nicht.
+    Personal Agents do not occur in these two processes; all domain agents
+    are Shared Domain Agents. A `System Agent` as a functional type does not
+    exist in the thesis's typology.
     """
 
     SHARED_DOMAIN = "Shared Domain"
     ORCHESTRATOR = "Orchestrator"
     POLICY = "Policy-Governance"
     AUDIT = "Audit-Monitoring"
-    KEIN_AGENT = "kein Agent (deterministisch)"
+    NOT_AN_AGENT = "kein Agent (deterministisch)"
 
 
-class Autonomiestufe(int, Enum):
-    """Nach Parasuraman et al. (2000), Auspraegung gemaess Kap. 3.4."""
+class AutonomyLevel(int, Enum):
+    """Per Parasuraman et al. (2000), instantiated according to chapter 3.4."""
 
-    LESEZUGRIFF = 1
-    VORSCHLAG = 2
-    REVERSIBLES_SCHREIBEN = 3
-    IRREVERSIBLE_AKTION = 4
+    READ_ACCESS = 1
+    PROPOSAL = 2
+    REVERSIBLE_WRITE = 3
+    IRREVERSIBLE_ACTION = 4
 
 
-class Aufsichtsmodus(str, Enum):
-    """Aufsichtsmodi nach Kap. 2.2."""
+class OversightMode(str, Enum):
+    """Oversight modes per chapter 2.2."""
 
     HUMAN_LED = "Human-led"
     HUMAN_IN_THE_LOOP = "Human-in-the-loop"
     HUMAN_ON_THE_LOOP = "Human-on-the-loop"
-    VOLLAUTOMATISIERT = "vollautomatisiert"
-    DETERMINISTISCH = "deterministisch (kein LLM)"
+    FULLY_AUTOMATED = "vollautomatisiert"
+    DETERMINISTIC = "deterministisch (kein LLM)"
     READ_ONLY = "read-only"
 
 
-class Modellklasse(str, Enum):
-    """Modellzuordnung nach Risiko (Konzeptdiagramm `teil2_ki_modelle.png`).
+class ModelClass(str, Enum):
+    """Model assignment by risk (concept diagram `teil2_ki_modelle.png`).
 
-    Die konkreten Modell-IDs stehen in llm/config.py -- hier steht nur die
-    Risikoklasse, damit die Zuordnung eine Architekturaussage bleibt und keine
-    Abhaengigkeit zu einem Anbieter.
+    The concrete model IDs live in llm/config.py -- only the risk class lives
+    here, so the assignment stays an architectural statement and not a
+    dependency on a specific provider.
     """
 
-    KEINE = "kein Modell"
-    LOKAL_KLEIN = "lokal/klein"
+    NO_MODEL = "kein Modell"
+    LOCAL_SMALL = "lokal/klein"
     VISION = "vision-faehig"
     FRONTIER = "Frontier"
 
 
 @dataclass(frozen=True)
-class AgentKonfiguration:
+class AgentConfig:
     name: str
-    typ: AgentTyp
-    autonomiestufe: Autonomiestufe | None
-    aufsicht: Aufsichtsmodus
-    modellklasse: Modellklasse
-    prozesse: tuple[str, ...]
-    darf_schreiben: bool
-    beschreibung: str
+    type: AgentType
+    autonomy_level: AutonomyLevel | None
+    oversight: OversightMode
+    model_class: ModelClass
+    processes: tuple[str, ...]
+    can_write: bool
+    description: str
 
 
-# Die Tabelle aus Abschnitt 1 des Fachkonzepts, 1:1.
-REGISTRY: dict[str, AgentKonfiguration] = {
-    "reader": AgentKonfiguration(
+# The table from section 1 of the functional concept, 1:1.
+REGISTRY: dict[str, AgentConfig] = {
+    "reader": AgentConfig(
         name="Reader-Tool",
-        typ=AgentTyp.KEIN_AGENT,
-        autonomiestufe=None,
-        aufsicht=Aufsichtsmodus.DETERMINISTISCH,
-        modellklasse=Modellklasse.KEINE,
-        prozesse=("A", "B"),
-        darf_schreiben=False,
-        beschreibung="PDF -> Markdown. Kein KI-Agent. Zugriff nur fuer Mitglieder "
+        type=AgentType.NOT_AN_AGENT,
+        autonomy_level=None,
+        oversight=OversightMode.DETERMINISTIC,
+        model_class=ModelClass.NO_MODEL,
+        processes=("A", "B"),
+        can_write=False,
+        description="PDF -> Markdown. Kein KI-Agent. Zugriff nur fuer Mitglieder "
         "der AD-Sicherheitsgruppe (Least Privilege).",
     ),
-    "orchestrator": AgentKonfiguration(
+    "orchestrator": AgentConfig(
         name="Orchestrator-Agent",
-        typ=AgentTyp.ORCHESTRATOR,
-        autonomiestufe=None,
-        aufsicht=Aufsichtsmodus.HUMAN_ON_THE_LOOP,
-        modellklasse=Modellklasse.LOKAL_KLEIN,
-        prozesse=("A", "B"),
-        darf_schreiben=False,
-        beschreibung="Routet nach Dokumenttyp und steuert den Workflow.",
+        type=AgentType.ORCHESTRATOR,
+        autonomy_level=None,
+        oversight=OversightMode.HUMAN_ON_THE_LOOP,
+        model_class=ModelClass.LOCAL_SMALL,
+        processes=("A", "B"),
+        can_write=False,
+        description="Routet nach Dokumenttyp und steuert den Workflow.",
     ),
-    "klassifikation": AgentKonfiguration(
+    "klassifikation": AgentConfig(
         name="Klassifikations- & Extraktions-Agent",
-        typ=AgentTyp.SHARED_DOMAIN,
-        # Tabelle nennt "1-2"; massgeblich ist die Obergrenze, weil die Policy
-        # gegen die hoechste beanspruchte Stufe prueft.
-        autonomiestufe=Autonomiestufe.VORSCHLAG,
-        aufsicht=Aufsichtsmodus.HUMAN_ON_THE_LOOP,
-        modellklasse=Modellklasse.VISION,
-        prozesse=("A", "B"),
-        darf_schreiben=False,
-        beschreibung="Bestimmt in einem Durchgang Dokumenttyp UND extrahiert die "
+        type=AgentType.SHARED_DOMAIN,
+        # The table names "1-2"; the upper bound governs, because the policy
+        # checks against the highest claimed level.
+        autonomy_level=AutonomyLevel.PROPOSAL,
+        oversight=OversightMode.HUMAN_ON_THE_LOOP,
+        model_class=ModelClass.VISION,
+        processes=("A", "B"),
+        can_write=False,
+        description="Bestimmt in einem Durchgang Dokumenttyp UND extrahiert die "
         "relevanten Felder.",
     ),
-    "abgleich": AgentKonfiguration(
+    "abgleich": AgentConfig(
         name="Abgleich-Agent",
-        typ=AgentTyp.SHARED_DOMAIN,
-        autonomiestufe=Autonomiestufe.LESEZUGRIFF,
-        aufsicht=Aufsichtsmodus.HUMAN_ON_THE_LOOP,
-        # Kein Modell: exakter Primaerschluessel-Nachschlag (Thesis §7.4,
-        # docs/mapping.md I1) -- wie der Kostenstellen-Agent.
-        modellklasse=Modellklasse.KEINE,
-        prozesse=("A",),
-        darf_schreiben=False,
-        beschreibung="Gleicht die extrahierte Rechnungs-/Bestellnummer exakt gegen "
+        type=AgentType.SHARED_DOMAIN,
+        autonomy_level=AutonomyLevel.READ_ACCESS,
+        oversight=OversightMode.HUMAN_ON_THE_LOOP,
+        # No model: exact primary-key lookup (Thesis §7.4, docs/mapping.md I1)
+        # -- same as the cost-center agent.
+        model_class=ModelClass.NO_MODEL,
+        processes=("A",),
+        can_write=False,
+        description="Gleicht die extrahierte Rechnungs-/Bestellnummer exakt gegen "
         "die Stammdatenbasis ab (deterministisch). Nur Lesezugriff.",
     ),
-    "buchung": AgentKonfiguration(
+    "buchung": AgentConfig(
         name="Buchungs-Agent",
-        typ=AgentTyp.SHARED_DOMAIN,
-        autonomiestufe=Autonomiestufe.REVERSIBLES_SCHREIBEN,
-        # Thesis §7.4 / Tabelle 11: der finanzwirksame Buchungsschritt steht
-        # unter Human-in-the-loop -- jede Buchung erfordert eine menschliche
-        # Freigabe. Kopplung "steigende Autonomie -> engere Aufsicht" (Kap. 2.2).
-        aufsicht=Aufsichtsmodus.HUMAN_IN_THE_LOOP,
-        modellklasse=Modellklasse.FRONTIER,
-        prozesse=("A",),
-        darf_schreiben=True,
-        beschreibung="Verbucht die Zahlung im ERP, Status offen -> bezahlt. "
+        type=AgentType.SHARED_DOMAIN,
+        autonomy_level=AutonomyLevel.REVERSIBLE_WRITE,
+        # Thesis §7.4 / Table 11: the financially effective booking step is
+        # human-in-the-loop -- every booking requires human approval.
+        # Coupling "rising autonomy -> tighter oversight" (chapter 2.2).
+        oversight=OversightMode.HUMAN_IN_THE_LOOP,
+        model_class=ModelClass.FRONTIER,
+        processes=("A",),
+        can_write=True,
+        description="Verbucht die Zahlung im ERP, Status offen -> bezahlt. "
         "Finanzwirksam, daher immer freigabepflichtig (Human-in-the-loop).",
     ),
-    "kostenstelle": AgentKonfiguration(
+    "kostenstelle": AgentConfig(
         name="Kostenstellen-Agent",
-        typ=AgentTyp.SHARED_DOMAIN,
-        autonomiestufe=Autonomiestufe.VORSCHLAG,
-        # Diagramm Teil 3: Human-on-the-loop. Loest die Belegreferenz eindeutig
-        # auf, laeuft der Vorgang automatisch zur Archivierung; fehlt/unbekannt
-        # die Referenz, greift die Vier-Augen-Freigabe (Klaerfall). Spiegelt A.
-        aufsicht=Aufsichtsmodus.HUMAN_ON_THE_LOOP,
-        # Kein Modell: die Zuordnung ist ein exakter referenzieller Nachschlag
-        # (Thesis §7.4), kein semantisches Matching -- wie der Abgleich-Agent.
-        # Das Extrahieren der Referenz leistet der Klassifikations-Agent.
-        modellklasse=Modellklasse.KEINE,
-        prozesse=("B",),
-        darf_schreiben=False,
-        beschreibung="Schlaegt die Kostenstellenreferenz des Belegs exakt im "
+        type=AgentType.SHARED_DOMAIN,
+        autonomy_level=AutonomyLevel.PROPOSAL,
+        # Diagram part 3: human-on-the-loop. If the document reference
+        # resolves to exactly one cost center, the case proceeds
+        # automatically to archiving; if the reference is missing or
+        # unknown, the four-eyes approval kicks in (exception case). Mirrors
+        # process A.
+        oversight=OversightMode.HUMAN_ON_THE_LOOP,
+        # No model: the assignment is an exact referential lookup (Thesis
+        # §7.4), not semantic matching -- same as the reconciliation agent.
+        # Extracting the reference itself is done by the classification agent.
+        model_class=ModelClass.NO_MODEL,
+        processes=("B",),
+        can_write=False,
+        description="Schlaegt die Kostenstellenreferenz des Belegs exakt im "
         "Katalog nach (deterministisch). Fehlt sie, Vier-Augen-Freigabe.",
     ),
-    "elo": AgentKonfiguration(
+    "elo": AgentConfig(
         name="ELO-Agent",
-        typ=AgentTyp.SHARED_DOMAIN,
-        autonomiestufe=Autonomiestufe.REVERSIBLES_SCHREIBEN,
-        aufsicht=Aufsichtsmodus.HUMAN_ON_THE_LOOP,
-        modellklasse=Modellklasse.LOKAL_KLEIN,
-        prozesse=("B",),
-        darf_schreiben=True,
-        beschreibung="Archiviert die Rechnung revisionssicher im DMS. "
+        type=AgentType.SHARED_DOMAIN,
+        autonomy_level=AutonomyLevel.REVERSIBLE_WRITE,
+        oversight=OversightMode.HUMAN_ON_THE_LOOP,
+        model_class=ModelClass.LOCAL_SMALL,
+        processes=("B",),
+        can_write=True,
+        description="Archiviert die Rechnung revisionssicher im DMS. "
         "Prozessende von Prozess B (Diagramm Teil 3).",
     ),
-    "policy": AgentKonfiguration(
+    "policy": AgentConfig(
         name="Policy-/Governance-Komponente",
-        typ=AgentTyp.POLICY,
-        autonomiestufe=None,
-        aufsicht=Aufsichtsmodus.DETERMINISTISCH,
-        modellklasse=Modellklasse.KEINE,
-        prozesse=("A", "B"),
-        darf_schreiben=False,
-        beschreibung="Deterministisches RBAC/ABAC-Enforcement. Kein LLM.",
+        type=AgentType.POLICY,
+        autonomy_level=None,
+        oversight=OversightMode.DETERMINISTIC,
+        model_class=ModelClass.NO_MODEL,
+        processes=("A", "B"),
+        can_write=False,
+        description="Deterministisches RBAC/ABAC-Enforcement. Kein LLM.",
     ),
-    "audit": AgentKonfiguration(
+    "audit": AgentConfig(
         name="Audit-/Monitoring-Komponente",
-        typ=AgentTyp.AUDIT,
-        autonomiestufe=None,
-        aufsicht=Aufsichtsmodus.READ_ONLY,
-        modellklasse=Modellklasse.KEINE,
-        prozesse=("A", "B"),
-        darf_schreiben=False,
-        beschreibung="Manipulationsgeschuetzter, hash-verketteter Audit-Trail.",
+        type=AgentType.AUDIT,
+        autonomy_level=None,
+        oversight=OversightMode.READ_ONLY,
+        model_class=ModelClass.NO_MODEL,
+        processes=("A", "B"),
+        can_write=False,
+        description="Manipulationsgeschuetzter, hash-verketteter Audit-Trail.",
     ),
 }
 
 
-def konfiguration(agent_id: str) -> AgentKonfiguration:
-    """Liefert die Konfiguration eines Agenten.
+def get_config(agent_id: str) -> AgentConfig:
+    """Returns the configuration for an agent.
 
-    Ein unbekannter Agent ist ein Programmierfehler, kein Laufzeitfall: die
-    Policy darf niemals gegen eine geratene Default-Konfiguration pruefen.
+    An unknown agent is a programming error, not a runtime case: the policy
+    must never check against a guessed default configuration.
     """
     try:
         return REGISTRY[agent_id]
     except KeyError:
         raise KeyError(
-            f"Unbekannter Agent {agent_id!r}. Bekannt: {sorted(REGISTRY)}"
+            f"Unknown agent {agent_id!r}. Known: {sorted(REGISTRY)}"
         ) from None

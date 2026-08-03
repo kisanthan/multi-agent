@@ -1,139 +1,139 @@
--- Gemeinsame Datenbasis beider Prozesse (Abschnitt 1 des Fachkonzepts) sowie
--- AD-Mock und Audit-Trail.
+-- Shared master data for both processes (section 1 of the functional
+-- concept), plus the AD mock and the audit trail.
 --
--- Bewusst eine einzige SQLite-Datei: die Arbeit argumentiert mit einer
--- *gemeinsamen* Stammdatenbasis, auf die beide Prozesse zugreifen. Getrennte
--- Dateien wuerden diese Aussage im Code aufloesen.
+-- Deliberately a single SQLite file: the thesis argues for a *shared*
+-- master-data basis that both processes access. Separate files would
+-- dissolve that statement in the code.
 
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
--- ---------------------------------------------------------------- Stammdaten
+-- ---------------------------------------------------------------- Master data
 
--- Offene Rechnungen/Bestellungen (Prozess A gleicht hiergegen ab).
-CREATE TABLE IF NOT EXISTS rechnungen (
-    nummer       TEXT PRIMARY KEY,
-    betrag_eur   REAL    NOT NULL CHECK (betrag_eur > 0),
-    faellig_am   TEXT    NOT NULL,
+-- Open invoices/orders (process A reconciles against this).
+CREATE TABLE IF NOT EXISTS invoices (
+    number       TEXT PRIMARY KEY,
+    amount_eur   REAL    NOT NULL CHECK (amount_eur > 0),
+    due_date     TEXT    NOT NULL,
     status       TEXT    NOT NULL CHECK (status IN ('offen', 'bezahlt')),
-    lieferant_id TEXT    REFERENCES lieferanten (id),
-    bezahlt_am   TEXT
+    supplier_id  TEXT    REFERENCES suppliers (id),
+    paid_at      TEXT
 );
 
--- Kostenstellenkatalog (Prozess B ordnet hiergegen zu).
-CREATE TABLE IF NOT EXISTS kostenstellen (
+-- Cost-center catalog (process B assigns against this).
+CREATE TABLE IF NOT EXISTS cost_centers (
     id            TEXT PRIMARY KEY,
-    bezeichnung   TEXT NOT NULL,
-    -- Eindeutige Referenz, die auf dem Beleg steht und exakt nachgeschlagen
-    -- wird (Thesis §7.4: "exakter referenzieller Nachschlag"). Der
-    -- Kostenstellen-Agent gleicht die vom Beleg extrahierte Referenz gegen
-    -- diese Spalte ab -- deterministisch, kein Sprachmodell.
-    referenz      TEXT NOT NULL UNIQUE,
-    -- Beschreibende Schluesselwoerter (Metadaten fuer die Klaerfall-Anzeige;
-    -- werden fuer die Zuordnung NICHT als Aehnlichkeitsmass verwendet).
-    schluesselwoerter TEXT NOT NULL
+    name          TEXT NOT NULL,
+    -- Unique reference printed on the document and looked up exactly
+    -- (Thesis §7.4: "exact referential lookup"). The cost-center agent
+    -- matches the reference extracted from the document against this
+    -- column -- deterministic, no language model.
+    reference     TEXT NOT NULL UNIQUE,
+    -- Descriptive keywords (metadata for the exception-case display; NOT
+    -- used as a similarity measure for the assignment itself).
+    keywords      TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS lieferanten (
-    id     TEXT PRIMARY KEY,
-    name   TEXT NOT NULL,
-    ustid  TEXT,
-    adresse TEXT
+CREATE TABLE IF NOT EXISTS suppliers (
+    id      TEXT PRIMARY KEY,
+    name    TEXT NOT NULL,
+    vat_id  TEXT,
+    address TEXT
 );
 
--- ------------------------------------------------------ AD-Mock (Least Privilege)
+-- ------------------------------------------------------ AD mock (Least Privilege)
 
-CREATE TABLE IF NOT EXISTS ad_nutzer (
-    upn      TEXT PRIMARY KEY,   -- User Principal Name, z.B. m.mustermann@chg-meridian.com
-    anzeigename TEXT NOT NULL,
-    rolle    TEXT NOT NULL       -- 'einspeiser' | 'pruefer' | 'beobachter'
+CREATE TABLE IF NOT EXISTS ad_users (
+    upn          TEXT PRIMARY KEY,   -- User Principal Name, e.g. m.mustermann@chg-meridian.com
+    display_name TEXT NOT NULL,
+    role         TEXT NOT NULL       -- 'einspeiser' | 'pruefer' | 'beobachter'
 );
 
-CREATE TABLE IF NOT EXISTS ad_gruppen (
+CREATE TABLE IF NOT EXISTS ad_groups (
     name        TEXT PRIMARY KEY,
-    beschreibung TEXT NOT NULL
+    description TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS ad_mitgliedschaften (
-    upn    TEXT NOT NULL REFERENCES ad_nutzer (upn),
-    gruppe TEXT NOT NULL REFERENCES ad_gruppen (name),
-    PRIMARY KEY (upn, gruppe)
+CREATE TABLE IF NOT EXISTS ad_memberships (
+    upn        TEXT NOT NULL REFERENCES ad_users (upn),
+    group_name TEXT NOT NULL REFERENCES ad_groups (name),
+    PRIMARY KEY (upn, group_name)
 );
 
--- ------------------------------------------------------------------- Eingang
+-- ------------------------------------------------------------------- Intake
 
--- Eine hochgeladene Datei. Bewusst eine eigene Entitaet und nicht dasselbe wie
--- ein Vorgang: dieselbe Datei kann mehrfach verarbeitet werden (erneuter
--- Start), und wer sie wann eingespeist hat, laesst sich aus dem Dateisystem
--- nicht rekonstruieren.
+-- An uploaded file. Deliberately its own entity and not the same thing as a
+-- case: the same file can be processed more than once (re-run), and who
+-- submitted it and when cannot be reconstructed from the filesystem alone.
 --
--- Der *Vorgang* selbst steht bewusst NICHT hier, sondern bleibt im
--- LangGraph-Checkpoint -- er ueberlebt dort den Prozess und wartet auf den
--- Menschen. Eine Vorgangstabelle waere eine zweite Wahrheit.
+-- The *case* itself deliberately does NOT live here -- it stays in the
+-- LangGraph checkpoint, where it survives the process and waits for the
+-- human. A case table here would be a second source of truth.
 CREATE TABLE IF NOT EXISTS uploads (
-    upload_id      TEXT PRIMARY KEY,
-    dateiname      TEXT NOT NULL,
-    pfad           TEXT NOT NULL,
-    dateityp       TEXT NOT NULL,
-    groesse_bytes  INTEGER NOT NULL CHECK (groesse_bytes > 0),
-    inhalt_hash    TEXT NOT NULL,   -- SHA-256, erkennt erneute Uploads derselben Datei
-    hochgeladen_von TEXT NOT NULL,
-    hochgeladen_am TEXT NOT NULL,
-    pruefergebnis  TEXT NOT NULL
+    upload_id     TEXT PRIMARY KEY,
+    filename      TEXT NOT NULL,
+    path          TEXT NOT NULL,
+    file_type     TEXT NOT NULL,
+    size_bytes    INTEGER NOT NULL CHECK (size_bytes > 0),
+    content_hash  TEXT NOT NULL,   -- SHA-256, detects re-uploads of the same file
+    uploaded_by   TEXT NOT NULL,
+    uploaded_at   TEXT NOT NULL,
+    check_result  TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_uploads_hash ON uploads (inhalt_hash);
+CREATE INDEX IF NOT EXISTS idx_uploads_hash ON uploads (content_hash);
 
--- ------------------------------------------------------------- Zielsysteme (Mocks)
+-- ------------------------------------------------------------- Target systems (mocks)
 
--- Navision (Prozess A) wirkt auf die Tabelle `rechnungen` (Status offen ->
--- bezahlt); eine eigene Buchungstabelle braucht es dafuer nicht.
+-- Navision (process A) acts on the `invoices` table (status open ->
+-- paid); it needs no booking table of its own for that.
 --
--- ELO (Prozess B): revisionssichere Ablage. Prozessende von Prozess B.
-CREATE TABLE IF NOT EXISTS archiv (
-    archiv_id    TEXT PRIMARY KEY,
-    dateiname    TEXT NOT NULL,
-    dokument_hash TEXT NOT NULL,
-    abgelegt_am  TEXT NOT NULL
+-- ELO (process B): tamper-evident archive. End of process B.
+CREATE TABLE IF NOT EXISTS archive (
+    archive_id    TEXT PRIMARY KEY,
+    filename      TEXT NOT NULL,
+    document_hash TEXT NOT NULL,
+    filed_at      TEXT NOT NULL
 );
 
--- --------------------------------------------------------------- Audit-Trail
+-- --------------------------------------------------------------- Audit trail
 
--- Append-only mit Hash-Verkettung: jeder Eintrag hasht den vorherigen.
--- Die Unveraenderlichkeit wird zusaetzlich per Trigger erzwungen (unten), damit
--- ein UPDATE/DELETE nicht bloss "nicht vorgesehen", sondern unmoeglich ist.
--- Die Feldliste folgt dem Wortlaut der Arbeit: Auftraggeber (akteur), Agent,
--- Datenquelle, Werkzeugaufruf (aktion), Policy-Entscheidung und Ergebnis.
--- `vorgang_id`, `datenquelle` und `ergebnis` gehen in den Hash ein -- laegen sie
--- daneben, waeren genau die Felder faelschbar, die den Nachweis tragen.
+-- Append-only with hash chaining: every entry hashes its predecessor.
+-- Immutability is additionally enforced via trigger (below), so that an
+-- UPDATE/DELETE is not merely "not intended" but impossible.
+-- The field list follows the thesis's wording: requester (actor), agent,
+-- source, tool call (action), policy decision, and outcome.
+-- `case_id`, `source`, and `outcome` feed into the hash -- if they were
+-- excluded, exactly the fields that carry the evidentiary value could be
+-- forged.
 CREATE TABLE IF NOT EXISTS audit (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     ts           TEXT NOT NULL,
-    akteur       TEXT NOT NULL,   -- UPN oder Agent-ID
-    agent        TEXT,            -- Agent-ID aus registry.py, NULL bei Systemereignissen
-    aktion       TEXT NOT NULL,
-    entscheidung TEXT NOT NULL CHECK (entscheidung IN ('erlaubt', 'verweigert', 'info')),
-    begruendung  TEXT NOT NULL,
-    vorgang_id   TEXT,            -- Thread-ID des Vorgangs, NULL bei Systemereignissen
-    datenquelle  TEXT,            -- Beleg/Datei, auf die sich die Aktion bezieht
-    ergebnis     TEXT,            -- fachlicher Ausgang der Aktion
+    actor        TEXT NOT NULL,   -- UPN or agent ID
+    agent        TEXT,            -- agent ID from registry.py, NULL for system events
+    action       TEXT NOT NULL,
+    decision     TEXT NOT NULL CHECK (decision IN ('erlaubt', 'verweigert', 'info')),
+    reason       TEXT NOT NULL,
+    case_id      TEXT,            -- thread ID of the case, NULL for system events
+    source       TEXT,            -- document/file the action relates to
+    outcome      TEXT,            -- business outcome of the action
     payload_hash TEXT NOT NULL,
     prev_hash    TEXT NOT NULL,
     hash         TEXT NOT NULL UNIQUE
 );
 
-CREATE TRIGGER IF NOT EXISTS audit_kein_update
+CREATE TRIGGER IF NOT EXISTS audit_no_update
 BEFORE UPDATE ON audit
 BEGIN
     SELECT RAISE(ABORT, 'Audit-Trail ist append-only: UPDATE nicht zulaessig');
 END;
 
-CREATE TRIGGER IF NOT EXISTS audit_kein_delete
+CREATE TRIGGER IF NOT EXISTS audit_no_delete
 BEFORE DELETE ON audit
 BEGIN
     SELECT RAISE(ABORT, 'Audit-Trail ist append-only: DELETE nicht zulaessig');
 END;
 
-CREATE INDEX IF NOT EXISTS idx_rechnungen_status ON rechnungen (status);
+CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices (status);
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit (ts);
-CREATE INDEX IF NOT EXISTS idx_audit_vorgang ON audit (vorgang_id);
+CREATE INDEX IF NOT EXISTS idx_audit_case ON audit (case_id);

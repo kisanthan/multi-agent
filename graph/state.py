@@ -1,9 +1,9 @@
-"""Zustandsmodell des Workflows.
+"""State model of the workflow.
 
-LangGraph fuehrt diesen Zustand ueber alle Knoten und persistiert ihn im
-Checkpointer. Genau das macht die HITL-Unterbrechung moeglich: der Vorgang
-haelt an einem Freigabepunkt an, der Zustand ueberlebt den Prozess, und ein
-Mensch setzt ihn Stunden spaeter fort.
+LangGraph carries this state through every node and persists it in the
+checkpointer. That is exactly what makes the HITL interruption possible:
+the case pauses at an approval point, the state survives the process, and a
+human resumes it hours later.
 """
 
 from __future__ import annotations
@@ -11,57 +11,57 @@ from __future__ import annotations
 from typing import Any, TypedDict
 
 
-class Vorgang(TypedDict, total=False):
-    """Ein Dokumentendurchlauf durch Prozess A oder B."""
+class Case(TypedDict, total=False):
+    """A single document's pass through process A or B."""
 
-    # --- Eingang ---
-    pfad: str
-    akteur: str            # UPN des Einspeisers
-    dateiname: str
-    # Thread-ID des Laufs, redundant im Zustand gehalten: die Agenten schreiben
-    # damit ihre Audit-Eintraege, ohne den Checkpointer kennen zu muessen.
-    vorgang_id: str
-    # Die hochgeladene Datei, aus der dieser Vorgang entstanden ist. Eine Datei
-    # kann mehrfach verarbeitet werden -- die Beziehung ist 1:n.
+    # --- Intake ---
+    path: str
+    actor: str              # UPN of the submitter
+    filename: str
+    # Thread ID of the run, kept redundantly in the state: the agents use it
+    # to write their audit entries without needing to know the checkpointer.
+    case_id: str
+    # The uploaded file this case originated from. A file can be processed
+    # more than once -- the relationship is 1:n.
     upload_id: str | None
-    # ISO-Zeitstempel des Starts. Steht im Zustand und nicht im Checkpoint-
-    # Metadatum, weil LangGraph die Startzeit nicht verlaesslich herausgibt --
-    # die Fallliste braucht sie aber zum Sortieren.
-    gestartet_am: str
+    # ISO timestamp of the start. Lives in the state and not in the
+    # checkpoint metadata, because LangGraph does not reliably expose the
+    # start time -- but the case list needs it for sorting.
+    started_at: str
 
     # --- Reader ---
     markdown: str
-    dokument_hash: str
+    document_hash: str
 
-    # --- Klassifikation ---
-    typ: str               # 'zahlungsbestaetigung' | 'eingangsrechnung' | 'unbekannt'
-    nummer: str | None
-    betrag_eur: float | None
-    lieferant: str | None
-    positionen: list[str]
-    kostenstellen_referenz: str | None   # vom Beleg extrahiert (Prozess B)
+    # --- Classification ---
+    document_type: str     # 'zahlungsbestaetigung' | 'eingangsrechnung' | 'unbekannt'
+    number: str | None
+    amount_eur: float | None
+    supplier: str | None
+    line_items: list[str]
+    cost_center_reference: str | None   # extracted from the document (process B)
 
-    # --- Prozess A: Abgleich ---
-    befund: str
-    soll_betrag_eur: float | None
+    # --- Process A: reconciliation ---
+    finding: str
+    expected_amount_eur: float | None
 
-    # --- Prozess B: Kostenstelle ---
-    kostenstelle_id: str | None
-    kostenstelle_begruendung: str
-    kostenstelle_eindeutig: bool
-    archiv_id: str | None
+    # --- Process B: cost center ---
+    cost_center_id: str | None
+    cost_center_reason: str
+    cost_center_unique: bool
+    archive_id: str | None
 
     # --- HITL ---
-    freigegeben_von: str | None
-    freigabe_entscheidung: str        # 'freigegeben' | 'verworfen'
-    klaerfall: bool
-    klaerfall_grund: str
+    approved_by: str | None
+    approval_decision: str        # 'freigegeben' | 'verworfen'
+    exception_case: bool
+    exception_reason: str
 
-    # --- Ergebnis ---
-    abgeschlossen: bool
-    ergebnis: str
-    fehler: str | None
-    eskalation: str | None
+    # --- Outcome ---
+    completed: bool
+    outcome: str
+    error: str | None
+    escalation: str | None
 
-    # --- Nachvollziehbarkeit ---
-    protokoll: list[dict[str, Any]]
+    # --- Traceability ---
+    log: list[dict[str, Any]]

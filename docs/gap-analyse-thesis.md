@@ -1,152 +1,176 @@
-# Gap-Analyse: Prototyp ↔ Thesis Abschnitt 6.4
+# Gap analysis: prototype ↔ thesis section 6.4
 
-Abgleich der praktischen Umsetzung gegen den Fließtext in `Masterarbeit.docx`,
-Abschnitt **6.4 „Anwendung und Analyse der Prozessdomänen"** und die
-Evaluationstabelle (7.2, Tabelle 10). Stand: 21.07.2026.
+Comparison of the practical implementation against the prose in
+`Masterarbeit.docx`, section **6.4 "Application and analysis of the process
+domains"** and the evaluation table (7.2, table 10). As of: 2026-07-21.
 
-Legende: ✅ deckungsgleich · ⚠️ Divergenz/Klärungsbedarf · ➕ im Prototyp
-zusätzlich (nicht in der Thesis).
+Legend: ✅ congruent · ⚠️ divergence/needs clarification · ➕ additional in
+the prototype (not in the thesis).
 
 ---
 
-## Deckungsgleich (kein Handlungsbedarf)
+## Congruent (no action needed)
 
-| Thesis 6.4 | Prototyp | |
+| Thesis 6.4 | Prototype | |
 |---|---|---|
-| Zwei Prozesse A (Zahlungseingang) / B (Eingangsrechnung), gemeinsame Ingestionsstrecke | ein gemeinsamer Graph, geteilter Reader/Orchestrator/Datenbasis | ✅ |
-| Fachliche Bearbeitung nur durch **Shared Domain Agents** | Registry: alle fachlichen Agenten Shared Domain | ✅ |
-| Klassifikations-/Extraktions-Agent bestimmt Typ + liest Felder | `agents/klassifikation.py` (Typ + Felder in einem Durchgang) | ✅ |
-| Orchestrator „ohne eigene fachliche Vollrechte", nur Weiterleitung | Routing-Funktion, kein Schreibrecht | ✅ |
-| Reader-Tool **kein KI-Agent**, PDF→Markdown deterministisch | `tools/reader.py`, kein LLM | ✅ |
-| **Prozess B: eindeutig → direkt ELO; sonst Klärfall (Vier-Augen, HITL)** | `route_kostenstelle` + `freigabe_kostenstelle` | ✅ |
-| **Prozess B endet bei ELO** (revisionssichere Archivierung) | `elo → END`, keine Navision-Buchung in B | ✅ |
-| Prozess A: Abgleich → Buchung setzt in Navision offen→bezahlt | `agents/buchung.py` → Navision-Mock `/booking` | ✅ |
-| AD-Sicherheitsgruppe am Prozesseingang (Least Privilege) | AD-Check *innerhalb* `lies_dokument()` | ✅ |
-| Policy prüft „deterministisch außerhalb des Sprachmodells" | `governance/policy.py`, per AST-Test erzwungen | ✅ |
-| Audit „manipulationsgeschützt" | hash-verketteter Trail, append-only | ✅ |
-| Modellunabhängige Abstraktionsschicht (5.1.5), Agent/Modell austauschbar | `llm/client.py::waehle_modell` | ✅ |
-| Personal Agents treten nicht auf | keine im System | ✅ |
+| Two processes A (payment receipt) / B (incoming invoice), shared intake stretch | one shared graph, shared reader/orchestrator/data layer | ✅ |
+| Business processing only by **Shared Domain Agents** | registry: all business agents are Shared Domain | ✅ |
+| Classification/extraction agent determines type + reads fields | `agents/classification.py` (type + fields in one pass) | ✅ |
+| Orchestrator "without its own full business rights", routing only | routing function, no write access | ✅ |
+| Reader tool **not an AI agent**, PDF→Markdown deterministic | `tools/reader.py`, no LLM | ✅ |
+| **Process B: unique → straight to ELO; otherwise exception case (four-eyes, HITL)** | `route_cost_center` + `node_cost_center_approval` | ✅ |
+| **Process B ends at ELO** (tamper-evident archiving) | `elo → END`, no Navision booking in B | ✅ |
+| Process A: reconciliation → booking sets open→paid in Navision | `agents/booking.py` → Navision mock `/booking` | ✅ |
+| AD security group at the process entry point (Least Privilege) | AD check *inside* `read_document()` | ✅ |
+| Policy checks "deterministically outside the language model" | `governance/policy.py`, enforced via AST test | ✅ |
+| Audit "tamper-evident" | hash-chained trail, append-only | ✅ |
+| Provider-independent abstraction layer (5.1.5), agent/model swappable | `llm/client.py::choose_model` | ✅ |
+| Personal Agents do not occur | none in the system | ✅ |
 
-Der Prozess-B-Umbau dieser Session hat den Prototyp **exakt auf den Thesis-Text
-gebracht**: eindeutige Zuordnung → direkt ELO, sonst Klärfall; ELO als
-Prozessende.
-
----
-
-## Divergenzen / Klärungsbedarf
-
-### G1 — RAG: meine frühere Auskunft war falsch ⚠️ *(behoben in Doku)*
-
-Die Thesis (6.4) entscheidet die RAG-Frage **bereits und eindeutig**: die
-gemeinsame Datenbasis ist „bewusst nicht als semantisches Retrieval-System …
-ausgeführt"; **beide** Nachschläge (Abgleich A *und* Kostenstellenzuordnung B)
-gelten als „exakte, referenzielle Nachschläge auf strukturierte Stammdaten". RAG
-ist nur komplementär vorgesehen — für den Extraktions-Agenten bei schwierigen
-Layouts und zur Anreicherung der Klärfallprüfung.
-
-→ Damit ist die Frage „RAG einbauen?" aus Thesis-Sicht **beantwortet: nicht in
-die Datenbasis.** Meine frühere Einschätzung (RAG passe für die
-Kostenstellen-Zuordnung) widersprach der Arbeit; `docs/mapping.md` I7 ist
-korrigiert. Falls RAG überhaupt gebaut wird, dann dort, wo die Thesis es verortet
-(Extraktions-Unterstützung / Klärfall-Anreicherung), nicht am Stammdatenabgleich.
-
-### G2 — Kostenstellen-Agent: Thesis „exakter Nachschlag" vs. Prototyp „semantisch" ⚠️
-
-Die Thesis beschreibt die Kostenstellenzuordnung als **exakten referenziellen
-Nachschlag** (deterministisch). Der Prototyp implementiert sie **LLM-/schlüssel­
-wortbasiert-semantisch** (`agents/kostenstelle.py`, Docstring: „eine semantische
-Aufgabe, die sich nicht als exakte Abfrage formulieren lässt").
-
-Das ist ein echter Widerspruch. Zwei Wege:
-
-- **(a) Prototyp an Thesis angleichen:** Kostenstelle als deterministischen
-  Nachschlag über eine explizite **Kostenstellen-Referenz** auf dem Beleg
-  umsetzen (der Extraktions-Agent liest die Referenz, der Kostenstellen-Agent
-  schlägt sie exakt nach). Damit würde der Agent — wie der Abgleich-Agent (I1) —
-  ohne eigenes Sprachmodell arbeiten; „Mehrdeutigkeit" = Referenz fehlt/uneindeutig.
-- **(b) Thesis-Text präzisieren:** Der eigene Prozessschritt „Zuordnung
-  eindeutig?" mit Klärfall-Pfad zeigt, dass die Zuordnung einen
-  **Klassifikationscharakter** hat — ein exakter Nachschlag ist nie „mehrdeutig".
-  Die Formulierung „exakter referenzieller Nachschlag" trägt für die Kostenstelle
-  also weniger weit als für die Rechnungsnummer. Ein, zwei Sätze in 6.4 würden das
-  auflösen (z. B.: Kostenstellenzuordnung = referenzgestützt, aber mit
-  Klassifikationsanteil bei fehlender/uneindeutiger Referenz).
-
-**Empfehlung:** (b) — der Prototyp bildet die Realität (Zuordnung ist ein
-Urteils-/Klassifikationsschritt) sauber ab, und die Existenz des Klärfall-Pfads
-gibt dir das Argument. Falls die Betreuung strikte Determinismus-Kohärenz
-verlangt, ist (a) der Weg; sag Bescheid, dann baue ich es um.
-
-### G3 — Buchungs-Agent: Aufsichtsmodus widersprüchlich ⚠️
-
-Hier ist die **Thesis selbst uneinheitlich**:
-
-- **Thesis-Text** (Charakterisierungs-Absatz + Tabelle 10, Zeile
-  Kontrollierbarkeit A): Buchungs-Agent „unter **Human-in-the-loop**"
-  (finanzwirksames Schreibrecht).
-- **Thesis-Abbildung 5** (`teil3_multiagentensystem.png`): Buchungs-Agent-Kachel
-  beschriftet mit **Human-on-the-loop**; die HITL-Stelle ist die „Klärfall-Prüfung"
-  (nur bei fehlender Nummer).
-- **Prototyp:** `HUMAN_ON_THE_LOOP` als Default + **Betragsschwelle**
-  (`BUCHUNG_SCHWELLE_EUR`: darunter automatisch, darüber HITL) — ein Konstrukt,
-  das in der Thesis **gar nicht vorkommt** (➕).
-
-→ **Zwei Dinge zu entscheiden:**
-1. Text vs. Abbildung in der Arbeit angleichen (Buchungs-Agent: in-the-loop
-   *oder* on-the-loop — durchgängig).
-2. Prototyp danach ausrichten. Wenn die Arbeit **Human-in-the-loop** wählt
-   (wie der Text nahelegt, finanzwirksam), sollte der Buchungs-Agent **immer**
-   eine Freigabe verlangen; die Betragsschwelle entfiele oder würde als bewusste
-   Prototyp-Erweiterung deklariert. Wenn **Human-on-the-loop** (wie die
-   Abbildung), passt der Prototyp bereits, aber die Schwelle bleibt Prototyp-Zusatz.
-
-**Empfehlung:** In der Arbeit für den finanzwirksamen Buchungsschritt
-**Human-in-the-loop** wählen (konsistent mit „steigende Autonomie → engere
-Aufsicht"), Abbildung 5 entsprechend anpassen, und im Prototyp die Schwelle als
-optionale, dokumentierte Erweiterung behalten oder auf reines HITL umstellen.
-
-### G4 — Dynamische Cloud-Eskalation der Extraktion fehlt ⚠️ *(klein)*
-
-Thesis: Extraktion „vorrangig on-premise … nur bei **schwierigen Layouts** in die
-Cloud eskalieren" — also eine *dynamische* Eskalation. Prototyp: **statische**
-Modellzuordnung (Klassifikations-Agent = Vision-Klasse → im Hybrid-Modus immer
-Cloud). Der beschriebene „on-prem zuerst, bei Schwierigkeit eskalieren"-Mechanismus
-ist nicht umgesetzt.
-
-→ Optional nachrüstbar: lokales VLM zuerst, bei niedrigem Konfidenz-/
-Validierungssignal (R1-Retry greift schon!) auf Cloud eskalieren. Der
-Eskalationspfad ist über die bestehende Validierungsschicht (`llm/extraktion.py`)
-gut andockbar. Für die Kern-Demo nicht nötig, aber es würde Unterfrage 2 stärker
-*vorführbar* machen.
-
-### G5 — Audit-Felder nicht 1:1 wie im Text benannt ⚠️ *(klein)*
-
-Thesis nennt als zu protokollierende Felder explizit: **Auftraggeber, Agent,
-Datenquelle, Werkzeugaufruf, Policy-Entscheidung, Ergebnis**. Prototyp-Audit-
-Spalten: `akteur` (=Auftraggeber ✅), `agent` ✅, `aktion` (~Werkzeugaufruf),
-`entscheidung` (=Policy-Entscheidung ✅), `begruendung`, `payload` (enthält
-Datenquelle/Datei + Ergebnis).
-
-→ „Datenquelle" und „Ergebnis" stecken im `payload`, nicht als eigene Spalten.
-Funktional vollständig, aber für einen **1:1-Nachweis gegen den Thesis-Wortlaut**
-(Kriterium „Nachvollziehbarkeit", Tabelle 10) wäre es sauberer, sie als explizite
-Felder zu führen. Kleiner Eingriff in `governance/audit.py` + Schema.
+This session's process-B rework brought the prototype **exactly in line
+with the thesis text**: a unique assignment → straight to ELO, otherwise an
+exception case; ELO as the end of the process.
 
 ---
 
-## Fazit
+## Divergences / needs clarification
 
-Der Prototyp deckt den Thesis-Abschnitt 6.4 in der **Struktur vollständig** ab;
-der jüngste Prozess-B-Umbau hat die letzte größere Abweichung beseitigt. Offen
-sind:
+### G1 -- RAG: my earlier advice was wrong ⚠️ *(fixed in the docs)*
 
-- **G1/G2 (inhaltlich wichtig):** RAG-Frage ist durch die Thesis entschieden
-  (kein RAG in der Datenbasis) — meine frühere Auskunft war falsch und ist
-  korrigiert. Der Kostenstellen-Agent ist im Prototyp semantischer, als die
-  Thesis ihn beschreibt; das ist über eine Textpräzisierung (empfohlen) oder eine
-  Prototyp-Umstellung auflösbar.
-- **G3 (wichtig, betrifft die Arbeit selbst):** Buchungs-Agent — Text (HITL) und
-  Abbildung 5 (on-the-loop) widersprechen sich; das gehört in der Arbeit
-  vereinheitlicht, dann der Prototyp danach.
-- **G4/G5 (klein, optional):** dynamische Cloud-Eskalation und explizite
-  Audit-Felder — nachrüstbar, für die Kernaussagen nicht erforderlich.
+The thesis (6.4) **already and unambiguously** decides the RAG question:
+the shared data layer is "deliberately not implemented as a semantic
+retrieval system" (translated from the German); **both** lookups
+(reconciliation A *and* cost-center assignment B) count as "exact,
+referential lookups against structured master data." RAG is only intended
+complementarily -- for the extraction agent on difficult layouts and to
+enrich the exception-case review.
+
+→ That answers the question "build in RAG?" from the thesis's point of
+view: **not into the data layer.** My earlier assessment (RAG would suit
+the cost-center assignment) contradicted the thesis; `docs/mapping.md` I7
+is corrected. If RAG is built at all, then where the thesis places it
+(extraction support / exception-case enrichment), not at the master-data
+reconciliation.
+
+### G2 -- Cost-center agent: thesis "exact lookup" vs. prototype "semantic" ⚠️
+
+The thesis describes the cost-center assignment as an **exact referential
+lookup** (deterministic). The prototype (at the time of this analysis)
+implemented it as **LLM-/keyword-based, semantic**
+(`agents/kostenstelle.py`, docstring: "a semantic task that cannot be
+formulated as an exact query", translated from the German).
+
+That is a real contradiction. Two paths:
+
+- **(a) Align the prototype with the thesis:** implement the cost center as
+  a deterministic lookup via an explicit **cost-center reference** on the
+  document (the extraction agent reads the reference, the cost-center
+  agent looks it up exactly). That would make the agent -- like the
+  reconciliation agent (I1) -- work without its own language model;
+  "ambiguity" = reference missing/not unique.
+- **(b) Refine the thesis text:** the process's own step "assignment
+  unique?" with an exception-case path shows that the assignment has a
+  **classification character** -- an exact lookup is never "ambiguous."
+  The phrase "exact referential lookup" therefore carries less far for the
+  cost center than for the invoice number. One or two sentences in 6.4
+  would resolve this (e.g.: cost-center assignment = reference-based, but
+  with a classification component when the reference is missing or not
+  unique).
+
+**Recommendation:** (b) -- the prototype cleanly reflects reality (the
+assignment is a judgment/classification step), and the existence of the
+exception-case path gives you the argument. If the supervision requires
+strict determinism coherence, (a) is the way; say so and it will be
+reworked.
+
+*(Resolution note: option (a) was ultimately implemented -- see D2 in
+[abschlussbericht-thesis-angleichung.md](abschlussbericht-thesis-angleichung.md)
+and I1/I7 in [mapping.md](mapping.md). The cost-center agent is now a
+deterministic reference lookup, consistent with the reconciliation agent.)*
+
+### G3 -- Booking agent: oversight mode contradictory ⚠️
+
+Here the **thesis itself is inconsistent**:
+
+- **Thesis text** (characterization paragraph + table 10, row
+  "controllability A"): booking agent "under **human-in-the-loop**"
+  (financially effective write access).
+- **Thesis figure 5** (`teil3_multiagentensystem.png`): the booking-agent
+  tile is labeled **human-on-the-loop**; the HITL point is the "exception-
+  case review" (only on a missing number).
+- **Prototype:** `HUMAN_ON_THE_LOOP` as the default plus an **amount
+  threshold** (`BUCHUNG_SCHWELLE_EUR`: below it automatic, above it HITL) --
+  a construct that **does not appear in the thesis at all** (➕).
+
+→ **Two things to decide:**
+1. Align text vs. figure in the thesis (booking agent: in-the-loop *or*
+   on-the-loop -- consistently).
+2. Align the prototype accordingly. If the thesis chooses
+   **human-in-the-loop** (as the text suggests, financially effective), the
+   booking agent should **always** require an approval; the amount
+   threshold would go away or be declared a deliberate prototype extension.
+   If **human-on-the-loop** (as the figure), the prototype already fits,
+   but the threshold remains a prototype addition.
+
+**Recommendation:** choose **human-in-the-loop** in the thesis for the
+financially effective booking step (consistent with "rising autonomy →
+tighter oversight"), adjust figure 5 accordingly, and in the prototype
+either keep the threshold as an optional, documented extension or switch
+to pure HITL.
+
+*(Resolution note: pure HITL was ultimately implemented, with the
+threshold removed -- see D1 in
+[abschlussbericht-thesis-angleichung.md](abschlussbericht-thesis-angleichung.md).)*
+
+### G4 -- Dynamic cloud escalation of extraction is missing ⚠️ *(small)*
+
+Thesis: extraction "primarily on-premise ... only escalate to the cloud on
+**difficult layouts**" (translated from the German) -- i.e. a *dynamic*
+escalation. Prototype: **static** model assignment (classification agent =
+vision class → always cloud in hybrid mode). The described "on-prem first,
+escalate on difficulty" mechanism is not implemented.
+
+→ Optionally retrofittable: local VLM first, escalate to the cloud on a
+low confidence/validation signal (the R1 retry already exists!). The
+escalation path docks well onto the existing validation layer
+(`llm/extraction.py`). Not necessary for the core demo, but it would make
+sub-question 2 more demonstrable.
+
+### G5 -- Audit fields not named 1:1 as in the text ⚠️ *(small)*
+
+The thesis explicitly names the fields to be logged: **requester, agent,
+source, tool call, policy decision, outcome** (translated from the
+German). Prototype audit columns (at the time of this analysis): `akteur`
+(=requester ✅), `agent` ✅, `aktion` (~tool call), `entscheidung` (=policy
+decision ✅), `begruendung`, `payload` (contains source/file + outcome).
+
+→ "Source" and "outcome" were stuck in the `payload`, not as their own
+columns. Functionally complete, but for a **1:1 proof against the thesis's
+exact wording** (the "traceability" criterion, table 10), it would be
+cleaner to carry them as explicit fields. A small change to
+`governance/audit.py` + the schema.
+
+*(Resolution note: implemented -- `case_id`, `source`, and `outcome` are
+now dedicated, hashed columns in the `audit` table. See
+[abschlussbericht-thesis-angleichung.md](abschlussbericht-thesis-angleichung.md)
+O2 and [grenzen.md](grenzen.md) L9.)*
+
+---
+
+## Conclusion
+
+The prototype covers thesis section 6.4 **completely in structure**; the
+most recent process-B rework eliminated the last major divergence. Still
+open:
+
+- **G1/G2 (substantively important):** the RAG question is decided by the
+  thesis (no RAG in the data layer) -- my earlier advice was wrong and has
+  been corrected. The cost-center agent was more semantic in the prototype
+  than the thesis describes; that is resolvable via a text refinement
+  (recommended) or a prototype change (both meanwhile implemented in code,
+  see the resolution notes above).
+- **G3 (important, concerns the thesis itself):** booking agent -- text
+  (HITL) and figure 5 (on-the-loop) contradict each other; this belongs
+  unified in the thesis, with the prototype following.
+- **G4/G5 (small, optional):** dynamic cloud escalation and explicit audit
+  fields -- retrofittable, not required for the core claims.

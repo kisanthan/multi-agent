@@ -1,8 +1,9 @@
-"""Tests der LLM-Abstraktion und der Validierungsschicht (Risiko R1).
+"""Tests of the LLM abstraction and the validation layer (risk R1).
 
-Alle Tests laufen ohne echtes Modell: der Transport ist gemockt. Das ist
-Absicht -- geprueft wird das *Verhalten bei* Modellantworten, nicht das Modell.
-Genau diese Trennung macht die Architektur pruefbar.
+All tests run without a real model: the transport is mocked. That is
+deliberate -- what is tested is the *behavior in response to* model
+answers, not the model. Exactly this separation is what makes the
+architecture testable.
 """
 
 from __future__ import annotations
@@ -13,179 +14,180 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import BaseModel, Field
 
-from config import ModellModus, einstellungen
-from governance.audit import lies_alle, verify_chain
-from llm.client import LLMNichtErreichbar, Modellwahl, waehle_modell
-from llm.extraktion import MAX_VERSUCHE, extrahiere
+from config import ModelMode, settings
+from governance.audit import read_all, verify_chain
+from llm.client import LLMUnreachable, ModelChoice, choose_model
+from llm.extraction import MAX_ATTEMPTS, extract
 
-AKTEUR = "einspeiser@chg-meridian.com"
+ACTOR = "einspeiser@chg-meridian.com"
 
 
-class Zahlung(BaseModel):
-    nummer: str = Field(description="Rechnungs- oder Bestellnummer")
-    betrag_eur: float
+class Payment(BaseModel):
+    number: str = Field(description="Rechnungs- oder Bestellnummer")
+    amount_eur: float
 
 
 @contextmanager
-def modell_antwortet(*antworten, modell: str = "qwen3:8b", anbieter: str = "ollama"):
-    """Ersetzt den Transport durch feste Antworten.
+def model_responds(*responses, model: str = "qwen3:8b", provider: str = "ollama"):
+    """Replaces the transport with fixed responses.
 
-    `client_fuer` liefert ein Tupel (Client, Modellwahl); der Mock muss daher
-    ein echtes Tupel mit einer echten Modellwahl zurueckgeben -- ein MagicMock
-    laesst sich nicht entpacken.
+    `client_for` returns a tuple (client, ModelChoice); the mock must
+    therefore return a real tuple with a real ModelChoice -- a MagicMock
+    cannot be unpacked.
 
-    Mehrere Argumente = aufeinanderfolgende Antworten. Eine Exception-Instanz
-    wird geworfen statt zurueckgegeben.
+    Multiple arguments = consecutive responses. An exception instance is
+    raised instead of returned.
     """
     client = MagicMock()
-    if len(antworten) == 1 and not isinstance(antworten[0], BaseException):
-        client.frage_json.return_value = antworten[0]
+    if len(responses) == 1 and not isinstance(responses[0], BaseException):
+        client.ask_json.return_value = responses[0]
     else:
-        client.frage_json.side_effect = list(antworten)
+        client.ask_json.side_effect = list(responses)
 
-    wahl = Modellwahl(anbieter=anbieter, modell_id=modell, risikoklasse="test")
-    with patch("llm.extraktion.client_fuer", return_value=(client, wahl)) as fabrik:
-        yield client, fabrik
+    choice = ModelChoice(provider=provider, model_id=model, risk_class="test")
+    with patch("llm.extraction.client_for", return_value=(client, choice)) as factory:
+        yield client, factory
 
 
-# ------------------------------------------------- Modellzuordnung (teil2)
+# ------------------------------------------------- Model assignment (part 2)
 
-def test_lokaler_modus_nutzt_ueberall_ollama():
-    with patch.object(einstellungen, "modell_modus", ModellModus.LOKAL):
+def test_local_mode_uses_ollama_everywhere():
+    with patch.object(settings, "model_mode", ModelMode.LOCAL):
         for agent in ("orchestrator", "klassifikation", "buchung", "elo"):
-            assert waehle_modell(agent).anbieter == "ollama"
+            assert choose_model(agent).provider == "ollama"
 
 
-def test_hybrid_modus_trennt_nach_risikoklasse():
-    """Die Kernaussage von teil2_ki_modelle.png, im Code nachvollzogen."""
-    with patch.object(einstellungen, "modell_modus", ModellModus.HYBRID):
-        # Lesende/unkritische Rollen bleiben lokal -> Datenhoheit.
-        assert waehle_modell("orchestrator").anbieter == "ollama"
-        assert waehle_modell("elo").anbieter == "ollama"
-        # Risikobehaftete Rollen bekommen ein Frontier-Modell.
-        assert waehle_modell("buchung").anbieter == "anthropic"
-        assert waehle_modell("klassifikation").anbieter == "anthropic"
+def test_hybrid_mode_splits_by_risk_class():
+    """The core claim of teil2_ki_modelle.png, followed through in code."""
+    with patch.object(settings, "model_mode", ModelMode.HYBRID):
+        # Reading/uncritical roles stay local -> data sovereignty.
+        assert choose_model("orchestrator").provider == "ollama"
+        assert choose_model("elo").provider == "ollama"
+        # Risk-bearing roles get a frontier model.
+        assert choose_model("buchung").provider == "anthropic"
+        assert choose_model("klassifikation").provider == "anthropic"
 
 
-def test_cloud_modus_nutzt_ueberall_anthropic():
-    with patch.object(einstellungen, "modell_modus", ModellModus.CLOUD):
-        assert waehle_modell("klassifikation").anbieter == "anthropic"
-        assert waehle_modell("buchung").anbieter == "anthropic"
+def test_cloud_mode_uses_anthropic_everywhere():
+    with patch.object(settings, "model_mode", ModelMode.CLOUD):
+        assert choose_model("klassifikation").provider == "anthropic"
+        assert choose_model("buchung").provider == "anthropic"
 
 
-def test_frontier_agent_bekommt_frontier_modell():
-    with patch.object(einstellungen, "modell_modus", ModellModus.HYBRID):
-        assert waehle_modell("buchung").modell_id == einstellungen.cloud_modell_frontier
+def test_frontier_agent_gets_frontier_model():
+    with patch.object(settings, "model_mode", ModelMode.HYBRID):
+        assert choose_model("buchung").model_id == settings.cloud_model_frontier
 
 
 @pytest.mark.parametrize("agent_id", ["reader", "policy", "audit", "abgleich", "kostenstelle"])
-def test_deterministische_komponenten_bekommen_kein_modell(agent_id):
-    """Reader/Policy/Audit UND die deterministisch arbeitenden Domain-Agenten
-    (Abgleich, Kostenstelle -- exakter Nachschlag) rufen kein Sprachmodell auf."""
+def test_deterministic_components_get_no_model(agent_id):
+    """Reader/Policy/Audit AND the deterministically working domain agents
+    (reconciliation, cost-center -- exact lookup) never call a language
+    model."""
     with pytest.raises(ValueError, match="kein Sprachmodell"):
-        waehle_modell(agent_id)
+        choose_model(agent_id)
 
 
-# ------------------------------------- Validierung / Retry / Eskalation (R1)
+# ------------------------------------- Validation / retry / escalation (R1)
 
-def test_gueltige_antwort_im_ersten_versuch(con):
-    with modell_antwortet('{"nummer": "RE-2026-4200", "betrag_eur": 1341.96}'):
-        e = extrahiere(con, agent_id="klassifikation", akteur=AKTEUR,
-                       system="s", prompt="p", schema=Zahlung)
+def test_valid_response_on_first_attempt(con):
+    with model_responds('{"number": "RE-2026-4200", "amount_eur": 1341.96}'):
+        e = extract(con, agent_id="klassifikation", actor=ACTOR,
+                    system="s", prompt="p", schema=Payment)
 
-    assert e.gelungen
-    assert e.versuche == 1
-    assert e.daten.nummer == "RE-2026-4200"
-    assert e.daten.betrag_eur == 1341.96
-    assert e.eskalation is None
+    assert e.succeeded
+    assert e.attempts == 1
+    assert e.data.number == "RE-2026-4200"
+    assert e.data.amount_eur == 1341.96
+    assert e.escalation is None
 
 
-def test_schemaverletzung_wird_einmal_nachgefasst(con):
-    """R1: erst korrigieren lassen, dann erst eskalieren."""
-    with modell_antwortet(
-        '{"nummer": "RE-2026-4200"}',                        # betrag_eur fehlt
-        '{"nummer": "RE-2026-4200", "betrag_eur": 1341.96}',  # Korrektur
+def test_schema_violation_gets_one_retry(con):
+    """R1: first allow a correction, only then escalate."""
+    with model_responds(
+        '{"number": "RE-2026-4200"}',                        # amount_eur missing
+        '{"number": "RE-2026-4200", "amount_eur": 1341.96}',  # correction
     ) as (client, _):
-        e = extrahiere(con, agent_id="klassifikation", akteur=AKTEUR,
-                       system="s", prompt="p", schema=Zahlung)
+        e = extract(con, agent_id="klassifikation", actor=ACTOR,
+                    system="s", prompt="p", schema=Payment)
 
-    assert e.gelungen
-    assert e.versuche == 2
-    assert client.frage_json.call_count == 2
+    assert e.succeeded
+    assert e.attempts == 2
+    assert client.ask_json.call_count == 2
 
 
-def test_nachfassen_nennt_den_konkreten_fehler(con):
-    """Der Retry-Prompt muss das fehlende Feld benennen, sonst rate das Modell nur."""
-    with modell_antwortet(
-        '{"nummer": "RE-2026-4200"}',
-        '{"nummer": "RE-2026-4200", "betrag_eur": 1341.96}',
+def test_retry_names_the_concrete_error(con):
+    """The retry prompt must name the missing field, otherwise the model just guesses."""
+    with model_responds(
+        '{"number": "RE-2026-4200"}',
+        '{"number": "RE-2026-4200", "amount_eur": 1341.96}',
     ) as (client, _):
-        extrahiere(con, agent_id="klassifikation", akteur=AKTEUR,
-                   system="s", prompt="p", schema=Zahlung)
+        extract(con, agent_id="klassifikation", actor=ACTOR,
+               system="s", prompt="p", schema=Payment)
 
-    zweiter_prompt = client.frage_json.call_args_list[1].kwargs["prompt"]
-    assert "betrag_eur" in zweiter_prompt
+    second_prompt = client.ask_json.call_args_list[1].kwargs["prompt"]
+    assert "amount_eur" in second_prompt
 
 
-def test_dauerhafte_schemaverletzung_eskaliert_statt_zu_raten(con):
-    """Der entscheidende Test fuer R1.
+def test_persistent_schema_violation_escalates_instead_of_guessing(con):
+    """The decisive test for R1.
 
-    Scheitert das Modell zweimal, wird kein Teilergebnis geliefert und nichts
-    geraten -- der Fall geht an den Menschen. Ein Modellfehler wird damit zum
-    Freigabefall, nicht zum stillen Datenfehler.
+    If the model fails twice, no partial result is delivered and nothing is
+    guessed -- the case goes to a human. A model failure thereby becomes an
+    approval case, not a silent data error.
     """
-    with modell_antwortet('{"quatsch": true}', modell="gemma4:26b") as (client, _):
-        e = extrahiere(con, agent_id="klassifikation", akteur=AKTEUR,
-                       system="s", prompt="p", schema=Zahlung)
+    with model_responds('{"quatsch": true}', model="gemma4:26b") as (client, _):
+        e = extract(con, agent_id="klassifikation", actor=ACTOR,
+                    system="s", prompt="p", schema=Payment)
 
-    assert not e.gelungen
-    assert e.daten is None
-    assert e.eskalation is not None
-    assert e.versuche == MAX_VERSUCHE
-    assert client.frage_json.call_count == MAX_VERSUCHE  # kein dritter Versuch
-
-
-def test_kein_json_eskaliert(con):
-    """Ollama liefert laut #15540 gelegentlich Prosa statt JSON."""
-    with modell_antwortet("Klar! Die Nummer lautet RE-2026-4200."):
-        e = extrahiere(con, agent_id="klassifikation", akteur=AKTEUR,
-                       system="s", prompt="p", schema=Zahlung)
-
-    assert not e.gelungen
+    assert not e.succeeded
+    assert e.data is None
+    assert e.escalation is not None
+    assert e.attempts == MAX_ATTEMPTS
+    assert client.ask_json.call_count == MAX_ATTEMPTS  # no third attempt
 
 
-def test_nicht_erreichbares_modell_wird_nicht_wiederholt(con):
-    """Transportfehler ist ein Betriebsproblem -- Retry hilft da nicht."""
-    with modell_antwortet(LLMNichtErreichbar("ollama serve laeuft nicht")) as (client, _):
-        e = extrahiere(con, agent_id="klassifikation", akteur=AKTEUR,
-                       system="s", prompt="p", schema=Zahlung)
+def test_non_json_escalates(con):
+    """Per #15540, Ollama occasionally returns prose instead of JSON."""
+    with model_responds("Klar! Die Nummer lautet RE-2026-4200."):
+        e = extract(con, agent_id="klassifikation", actor=ACTOR,
+                    system="s", prompt="p", schema=Payment)
 
-    assert not e.gelungen
-    assert "nicht erreichbar" in e.eskalation
-    assert client.frage_json.call_count == 1
+    assert not e.succeeded
 
 
-# ------------------------------------------------------ Audit-Kopplung
+def test_unreachable_model_is_not_retried(con):
+    """A transport error is an operational problem -- retrying does not help."""
+    with model_responds(LLMUnreachable("ollama serve laeuft nicht")) as (client, _):
+        e = extract(con, agent_id="klassifikation", actor=ACTOR,
+                    system="s", prompt="p", schema=Payment)
 
-def test_eskalation_ist_im_audit_nachvollziehbar(con):
-    """Auch ein Modellversagen muss im Trail stehen -- sonst fehlt es der Revision."""
-    with modell_antwortet('{"quatsch": true}', modell="gemma4:26b"):
-        extrahiere(con, agent_id="klassifikation", akteur=AKTEUR,
-                   system="s", prompt="p", schema=Zahlung)
-
-    aktionen = [e.aktion for e in lies_alle(con)]
-    assert aktionen.count("llm_schemaverletzung") == MAX_VERSUCHE
-    assert "llm_eskalation" in aktionen
-    assert verify_chain(con).gueltig
+    assert not e.succeeded
+    assert "nicht erreichbar" in e.escalation
+    assert client.ask_json.call_count == 1
 
 
-def test_erfolgreiche_extraktion_protokolliert_das_modell(con):
-    """Nachvollziehbarkeit: welches Modell hat welches Ergebnis geliefert?"""
-    with modell_antwortet('{"nummer": "RE-2026-4200", "betrag_eur": 1341.96}'):
-        extrahiere(con, agent_id="klassifikation", akteur=AKTEUR,
-                   system="s", prompt="p", schema=Zahlung)
+# ------------------------------------------------------ Audit coupling
 
-    eintrag = lies_alle(con)[-1]
-    assert eintrag.aktion == "llm_extraktion"
-    assert eintrag.agent == "klassifikation"
-    assert verify_chain(con).gueltig
+def test_escalation_is_traceable_in_the_audit_trail(con):
+    """A model failure must be in the trail too -- otherwise the audit is missing it."""
+    with model_responds('{"quatsch": true}', model="gemma4:26b"):
+        extract(con, agent_id="klassifikation", actor=ACTOR,
+               system="s", prompt="p", schema=Payment)
+
+    actions = [e.action for e in read_all(con)]
+    assert actions.count("llm_schemaverletzung") == MAX_ATTEMPTS
+    assert "llm_eskalation" in actions
+    assert verify_chain(con).valid
+
+
+def test_successful_extraction_logs_the_model(con):
+    """Traceability: which model delivered which result?"""
+    with model_responds('{"number": "RE-2026-4200", "amount_eur": 1341.96}'):
+        extract(con, agent_id="klassifikation", actor=ACTOR,
+               system="s", prompt="p", schema=Payment)
+
+    entry = read_all(con)[-1]
+    assert entry.action == "llm_extraktion"
+    assert entry.agent == "klassifikation"
+    assert verify_chain(con).valid

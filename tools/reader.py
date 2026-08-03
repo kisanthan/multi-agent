@@ -1,16 +1,16 @@
-"""Reader-Tool: PDF -> Markdown. Deterministisch, KEIN KI-Agent.
+"""Reader tool: PDF -> Markdown. Deterministic, NOT an AI agent.
 
-Zwei Aussagen der Arbeit stecken in diesem Modul:
+Two of the thesis's claims are embedded in this module:
 
-1. **Kein Frontier-LLM fuers Parsing.** Ein spezialisierter, on-premise-faehiger
-   Parser genuegt. Der Parser ist per Konfiguration umschaltbar
-   (PyMuPDF4LLM | Docling), damit die Alternative demonstrierbar bleibt.
+1. **No frontier LLM for parsing.** A specialized, on-premise-capable parser
+   is sufficient. The parser is switchable via configuration
+   (PyMuPDF4LLM | Docling), so the alternative remains demonstrable.
 
-2. **Least Privilege als Eintrittsbedingung.** Der AD-Check liegt *innerhalb*
-   von `lies_dokument()` und nicht davor. Laege er im aufrufenden Graph-Knoten,
-   gaebe es einen Pfad, das PDF ohne Berechtigungspruefung zu parsen -- und
-   Szenario 5 wuerde nur belegen, dass der Graph brav ist, nicht dass das Tool
-   geschuetzt ist.
+2. **Least Privilege as an entry condition.** The AD check lives *inside*
+   `read_document()`, not before it. If it lived in the calling graph node,
+   there would be a path to parse the PDF without a permission check -- and
+   scenario 5 would only prove that the graph behaves, not that the tool
+   itself is protected.
 """
 
 from __future__ import annotations
@@ -20,49 +20,48 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from config import ReaderParser, einstellungen
+from config import ReaderParser, settings
 from governance import policy
-from governance.audit import OHNE_BEZUG, Entscheidung, Vorgangsbezug, protokolliere
+from governance.audit import NO_REFERENCE, CaseReference, Decision, log_entry
 
 
-class ZugriffVerweigert(Exception):
-    """Der Einspeiser ist nicht Mitglied der AD-Sicherheitsgruppe.
+class AccessDenied(Exception):
+    """The submitter is not a member of the AD security group.
 
-    Bewusst eine Exception: ein leeres Ergebnis koennte ein Aufrufer
-    versehentlich als "Dokument war halt leer" weiterverarbeiten.
+    Deliberately an exception: an empty result could accidentally be
+    processed further by a caller as "the document was just empty".
     """
 
 
 @dataclass(frozen=True)
-class Dokumentinhalt:
-    dateiname: str
+class DocumentContent:
+    filename: str
     markdown: str
-    dokument_hash: str
+    document_hash: str
     parser: str
-    seiten: int
+    pages: int
 
 
-def _hash(pfad: Path) -> str:
-    """SHA-256 des Rohdokuments -- Grundlage der revisionssicheren Ablage."""
-    return hashlib.sha256(pfad.read_bytes()).hexdigest()
+def _hash(path: Path) -> str:
+    """SHA-256 of the raw document -- the basis for tamper-evident filing."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _parse_pymupdf4llm(pfad: Path) -> tuple[str, int]:
+def _parse_pymupdf4llm(path: Path) -> tuple[str, int]:
     import pymupdf
     import pymupdf4llm
 
-    with pymupdf.open(pfad) as doc:
-        seiten = doc.page_count
-    return pymupdf4llm.to_markdown(str(pfad), show_progress=False), seiten
+    with pymupdf.open(path) as doc:
+        pages = doc.page_count
+    return pymupdf4llm.to_markdown(str(path), show_progress=False), pages
 
 
-def _parse_docling(pfad: Path) -> tuple[str, int]:
-    """Alternativer Pfad: spezialisierter On-Premise-Parser (IBM Docling, MIT).
+def _parse_docling(path: Path) -> tuple[str, int]:
+    """Alternative path: specialized on-premise parser (IBM Docling, MIT).
 
-    Nicht der Default -- Docling laedt beim ersten Lauf 1-2 GB Modellgewichte,
-    was fuer die hier verwendeten nativen (nicht gescannten) PDFs keinen
-    Mehrwert bringt. Der Umschalter existiert, damit die Arbeit den Vergleich
-    zeigen kann.
+    Not the default -- Docling downloads 1-2 GB of model weights on first
+    run, which adds no value for the native (not scanned) PDFs used here.
+    The switch exists so the thesis can show the comparison.
     """
     try:
         from docling.document_converter import DocumentConverter
@@ -72,55 +71,54 @@ def _parse_docling(pfad: Path) -> tuple[str, int]:
             "Installation: pip install docling  (laedt ~1-2 GB Modellgewichte)."
         ) from e
 
-    ergebnis = DocumentConverter().convert(str(pfad))
-    return ergebnis.document.export_to_markdown(), len(ergebnis.document.pages)
+    result = DocumentConverter().convert(str(path))
+    return result.document.export_to_markdown(), len(result.document.pages)
 
 
-def lies_dokument(con: sqlite3.Connection, pfad: Path | str, *, akteur: str,
-                  bezug: Vorgangsbezug = OHNE_BEZUG) -> Dokumentinhalt:
-    """Nimmt ein PDF entgegen und liefert LLM-taugliches Markdown.
+def read_document(con: sqlite3.Connection, path: Path | str, *, actor: str,
+                  reference: CaseReference = NO_REFERENCE) -> DocumentContent:
+    """Accepts a PDF and returns LLM-ready markdown.
 
-    Der AD-Check ist die erste Anweisung -- vor jedem Dateizugriff. Ein
-    verweigerter Zugriff erzeugt einen Audit-Eintrag und wirft; es wird weder
-    gelesen noch geparst noch ein Modell aufgerufen.
+    The AD check is the first instruction -- before any file access. A
+    denied access produces an audit entry and raises; nothing is read,
+    parsed, or sent to a model.
     """
-    pfad = Path(pfad)
-    # Die Datenquelle steht fest, sobald der Pfad bekannt ist -- auch bei
-    # verweigertem Zugriff muss im Trail stehen, *worauf* zugegriffen werden
-    # sollte.
-    bezug = Vorgangsbezug(bezug.vorgang_id, bezug.datenquelle or pfad.name)
+    path = Path(path)
+    # The source is fixed as soon as the path is known -- even on denied
+    # access, the trail must record *what* access was attempted.
+    reference = CaseReference(reference.case_id, reference.source or path.name)
 
-    entscheid = policy.pruefe_reader_zugriff(con, akteur=akteur)
-    if not entscheid.erlaubt:
-        protokolliere(
-            con, akteur=akteur, agent="reader", aktion="dokument_einspeisen",
-            entscheidung=Entscheidung.VERWEIGERT, begruendung=entscheid.begruendung,
-            payload={"datei": pfad.name, "regel": entscheid.regel},
-            bezug=bezug, ergebnis="zugriff_verweigert",
+    decision = policy.check_reader_access(con, actor=actor)
+    if not decision.allowed:
+        log_entry(
+            con, actor=actor, agent="reader", action="dokument_einspeisen",
+            decision=Decision.DENIED, reason=decision.reason,
+            payload={"datei": path.name, "regel": decision.rule},
+            reference=reference, outcome="zugriff_verweigert",
         )
         con.commit()
-        raise ZugriffVerweigert(entscheid.begruendung)
+        raise AccessDenied(decision.reason)
 
-    if not pfad.is_file():
-        raise FileNotFoundError(f"Dokument nicht gefunden: {pfad}")
+    if not path.is_file():
+        raise FileNotFoundError(f"Dokument nicht gefunden: {path}")
 
-    parser = einstellungen.reader_parser
+    parser = settings.reader_parser
     if parser is ReaderParser.DOCLING:
-        markdown, seiten = _parse_docling(pfad)
+        markdown, pages = _parse_docling(path)
     else:
-        markdown, seiten = _parse_pymupdf4llm(pfad)
+        markdown, pages = _parse_pymupdf4llm(path)
 
-    dok_hash = _hash(pfad)
-    protokolliere(
-        con, akteur=akteur, agent="reader", aktion="dokument_eingespeist",
-        entscheidung=Entscheidung.ERLAUBT, begruendung=entscheid.begruendung,
-        payload={"datei": pfad.name, "dokument_hash": dok_hash,
-                 "parser": parser.value, "seiten": seiten},
-        bezug=bezug, ergebnis=f"{seiten} Seite(n) gelesen",
+    doc_hash = _hash(path)
+    log_entry(
+        con, actor=actor, agent="reader", action="dokument_eingespeist",
+        decision=Decision.ALLOWED, reason=decision.reason,
+        payload={"datei": path.name, "dokument_hash": doc_hash,
+                 "parser": parser.value, "seiten": pages},
+        reference=reference, outcome=f"{pages} Seite(n) gelesen",
     )
     con.commit()
 
-    return Dokumentinhalt(
-        dateiname=pfad.name, markdown=markdown, dokument_hash=dok_hash,
-        parser=parser.value, seiten=seiten,
+    return DocumentContent(
+        filename=path.name, markdown=markdown, document_hash=doc_hash,
+        parser=parser.value, pages=pages,
     )

@@ -1,14 +1,14 @@
-"""ERP-Mock: Microsoft Dynamics NAV ("Navision").
+"""ERP mock: Microsoft Dynamics NAV ("Navision").
 
-Bildet die Buchungsschnittstelle nach, die Prozess A braucht:
-`POST /booking` (Zahlung verbuchen, Status offen -> bezahlt). Navision wird nach
-dem Diagramm Teil 3 nur in Prozess A angesprochen; Prozess B endet bei der
-revisionssicheren Archivierung in ELO.
+Models the booking interface process A needs: `POST /booking` (book a
+payment, status open -> paid). Per diagram part 3, Navision is only
+addressed in process A; process B ends with tamper-evident archiving in
+ELO.
 
-Der Mock ist bewusst *streng*: er prueft fachliche Vorbedingungen selbst und
-weist unzulaessige Buchungen ab. Ein Mock, der alles annimmt, wuerde die
-Governance-Aussage der Arbeit untergraben -- die Demo saehe erfolgreich aus,
-obwohl das Zielsystem in Wirklichkeit abgelehnt haette.
+The mock is deliberately *strict*: it checks its own business preconditions
+and rejects invalid bookings. A mock that accepts everything would
+undermine the thesis's governance claim -- the demo would look successful
+even though the real target system would have rejected the booking.
 
 Start:  uvicorn mocks.navision:app --port 8001
 """
@@ -21,26 +21,26 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from config import DB_PFAD
-from governance.audit import Entscheidung, Vorgangsbezug, protokolliere
+from config import DB_PATH
+from governance.audit import CaseReference, Decision, log_entry
 
 app = FastAPI(title="Navision-Mock (Dynamics NAV)", version="1.0")
 
 
 def _con() -> sqlite3.Connection:
-    con = sqlite3.connect(DB_PFAD)
+    con = sqlite3.connect(DB_PATH)
     con.execute("PRAGMA foreign_keys = ON")
     return con
 
 
-class Buchung(BaseModel):
-    """Prozess A: Verbuchung einer eingegangenen Zahlung."""
+class Booking(BaseModel):
+    """Process A: booking a received payment."""
 
-    nummer: str = Field(description="Rechnungs-/Bestellnummer")
-    betrag_eur: float = Field(gt=0)
-    akteur: str = Field(description="UPN des verantwortlichen Nutzers")
-    beleg: str = Field(description="Dateiname der Zahlungsbestaetigung")
-    vorgang_id: str | None = Field(
+    number: str = Field(description="Rechnungs-/Bestellnummer")
+    amount_eur: float = Field(gt=0)
+    actor: str = Field(description="UPN des verantwortlichen Nutzers")
+    document: str = Field(description="Dateiname der Zahlungsbestaetigung")
+    case_id: str | None = Field(
         default=None, description="Vorgang, zu dem die Buchung gehoert")
 
 
@@ -50,53 +50,53 @@ def health() -> dict:
 
 
 @app.post("/booking")
-def verbuche_zahlung(b: Buchung) -> dict:
-    """Setzt den Status einer offenen Rechnung auf 'bezahlt'.
+def book_payment(b: Booking) -> dict:
+    """Sets the status of an open invoice to 'bezahlt'.
 
-    Zwei Vorbedingungen werden hier erneut geprueft, obwohl der Abgleich-Agent
-    sie bereits geprueft hat: die Nummer muss existieren und darf nicht bereits
-    bezahlt sein. Das ist keine Redundanz, sondern die Rolle des Zielsystems --
-    es verlaesst sich nicht darauf, dass der Aufrufer sauber gearbeitet hat.
+    Two preconditions are checked here again, even though the
+    reconciliation agent already checked them: the number must exist and
+    must not already be paid. This is not redundancy but the role of the
+    target system -- it does not rely on the caller having done clean work.
     """
     con = _con()
-    bezug = Vorgangsbezug(b.vorgang_id, b.beleg)
+    reference = CaseReference(b.case_id, b.document)
     try:
         row = con.execute(
-            "SELECT status, betrag_eur FROM rechnungen WHERE nummer = ?", (b.nummer,)
+            "SELECT status, amount_eur FROM invoices WHERE number = ?", (b.number,)
         ).fetchone()
 
         if row is None:
-            protokolliere(con, akteur=b.akteur, agent="buchung", aktion="zahlung_verbuchen",
-                          entscheidung=Entscheidung.VERWEIGERT,
-                          begruendung=f"Navision: Nummer {b.nummer} unbekannt.",
-                          payload={"nummer": b.nummer, "beleg": b.beleg},
-                          bezug=bezug, ergebnis="abgelehnt: unbekannt")
+            log_entry(con, actor=b.actor, agent="buchung", action="zahlung_verbuchen",
+                      decision=Decision.DENIED,
+                      reason=f"Navision: Nummer {b.number} unbekannt.",
+                      payload={"number": b.number, "document": b.document},
+                      reference=reference, outcome="abgelehnt: unbekannt")
             con.commit()
-            raise HTTPException(404, f"Rechnung {b.nummer} nicht gefunden")
+            raise HTTPException(404, f"Rechnung {b.number} nicht gefunden")
 
-        status, soll_betrag = row
+        status, expected_amount = row
         if status == "bezahlt":
-            # Dublettenschutz im Zielsystem (Stoerfall 'dublette').
-            protokolliere(con, akteur=b.akteur, agent="buchung", aktion="zahlung_verbuchen",
-                          entscheidung=Entscheidung.VERWEIGERT,
-                          begruendung=f"Navision: {b.nummer} ist bereits bezahlt.",
-                          payload={"nummer": b.nummer, "beleg": b.beleg},
-                          bezug=bezug, ergebnis="abgelehnt: Dublette")
+            # Duplicate protection in the target system (incident 'duplicate').
+            log_entry(con, actor=b.actor, agent="buchung", action="zahlung_verbuchen",
+                      decision=Decision.DENIED,
+                      reason=f"Navision: {b.number} ist bereits bezahlt.",
+                      payload={"number": b.number, "document": b.document},
+                      reference=reference, outcome="abgelehnt: Dublette")
             con.commit()
-            raise HTTPException(409, f"Rechnung {b.nummer} ist bereits bezahlt")
+            raise HTTPException(409, f"Rechnung {b.number} ist bereits bezahlt")
 
-        bezahlt_am = datetime.now(timezone.utc).isoformat()
+        paid_at = datetime.now(timezone.utc).isoformat()
         con.execute(
-            "UPDATE rechnungen SET status = 'bezahlt', bezahlt_am = ? WHERE nummer = ?",
-            (bezahlt_am, b.nummer),
+            "UPDATE invoices SET status = 'bezahlt', paid_at = ? WHERE number = ?",
+            (paid_at, b.number),
         )
-        protokolliere(con, akteur=b.akteur, agent="buchung", aktion="zahlung_verbuchen",
-                      entscheidung=Entscheidung.ERLAUBT,
-                      begruendung=f"Navision: {b.nummer} offen -> bezahlt.",
-                      payload={"nummer": b.nummer, "betrag_eur": b.betrag_eur,
-                               "soll_betrag_eur": soll_betrag, "beleg": b.beleg},
-                      bezug=bezug, ergebnis="verbucht")
+        log_entry(con, actor=b.actor, agent="buchung", action="zahlung_verbuchen",
+                  decision=Decision.ALLOWED,
+                  reason=f"Navision: {b.number} offen -> bezahlt.",
+                  payload={"number": b.number, "amount_eur": b.amount_eur,
+                           "expected_amount_eur": expected_amount, "document": b.document},
+                  reference=reference, outcome="verbucht")
         con.commit()
-        return {"nummer": b.nummer, "status": "bezahlt", "bezahlt_am": bezahlt_am}
+        return {"number": b.number, "status": "bezahlt", "paid_at": paid_at}
     finally:
         con.close()

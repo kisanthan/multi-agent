@@ -1,8 +1,7 @@
-"""Tests des Audit-Trails -- der Manipulationsnachweis der Arbeit.
+"""Tests of the audit trail -- the thesis's tamper-evidence proof.
 
-Der Kern ist test_verify_chain_erkennt_*: die Kette muss eine nachtraegliche
-Aenderung erkennen. Ohne diesen Nachweis waere "manipulationsgeschuetzt" eine
-Behauptung.
+The core is test_verify_chain_detects_*: the chain must detect a subsequent
+change. Without this proof, "tamper-evident" would just be a claim.
 """
 
 from __future__ import annotations
@@ -11,191 +10,191 @@ import pytest
 
 from governance.audit import (
     GENESIS_HASH,
-    Entscheidung,
-    Vorgangsbezug,
-    lies_alle,
-    protokolliere,
+    CaseReference,
+    Decision,
+    cases_in_trail,
+    log_entry,
+    read_all,
     verify_chain,
-    vorgaenge_im_trail,
 )
 
 
-BEZUG = Vorgangsbezug("vorgang-1", "a.pdf")
+REFERENCE = CaseReference("vorgang-1", "a.pdf")
 
 
-def _drei_eintraege(con):
-    protokolliere(con, akteur="einspeiser@chg-meridian.com", agent="reader",
-                  aktion="dokument_eingespeist", entscheidung=Entscheidung.ERLAUBT,
-                  begruendung="AD-Check bestanden", payload={"datei": "a.pdf"},
-                  bezug=BEZUG, ergebnis="1 Seite(n) gelesen")
-    protokolliere(con, akteur="einspeiser@chg-meridian.com", agent="abgleich",
-                  aktion="nummer_abgeglichen", entscheidung=Entscheidung.INFO,
-                  begruendung="RE-2026-4200 gefunden", payload={"nummer": "RE-2026-4200"},
-                  bezug=BEZUG, ergebnis="ok")
-    protokolliere(con, akteur="einspeiser@chg-meridian.com", agent="buchung",
-                  aktion="zahlung_verbucht", entscheidung=Entscheidung.ERLAUBT,
-                  begruendung="freigegeben", payload={"betrag": 1234.56},
-                  bezug=BEZUG, ergebnis="verbucht")
+def _three_entries(con):
+    log_entry(con, actor="einspeiser@chg-meridian.com", agent="reader",
+             action="dokument_eingespeist", decision=Decision.ALLOWED,
+             reason="AD-Check bestanden", payload={"datei": "a.pdf"},
+             reference=REFERENCE, outcome="1 Seite(n) gelesen")
+    log_entry(con, actor="einspeiser@chg-meridian.com", agent="abgleich",
+             action="nummer_abgeglichen", decision=Decision.INFO,
+             reason="RE-2026-4200 gefunden", payload={"nummer": "RE-2026-4200"},
+             reference=REFERENCE, outcome="ok")
+    log_entry(con, actor="einspeiser@chg-meridian.com", agent="buchung",
+             action="zahlung_verbucht", decision=Decision.ALLOWED,
+             reason="freigegeben", payload={"betrag": 1234.56},
+             reference=REFERENCE, outcome="verbucht")
     con.commit()
 
 
-def test_erster_eintrag_verweist_auf_genesis(con):
-    e = protokolliere(con, akteur="a@b.c", aktion="start",
-                      entscheidung=Entscheidung.INFO, begruendung="Systemstart")
+def test_first_entry_points_to_genesis(con):
+    e = log_entry(con, actor="a@b.c", action="start",
+                 decision=Decision.INFO, reason="Systemstart")
     assert e.prev_hash == GENESIS_HASH
 
 
-def test_kette_verkettet_fortlaufend(con):
-    _drei_eintraege(con)
-    eintraege = lies_alle(con)
+def test_chain_links_continuously(con):
+    _three_entries(con)
+    entries = read_all(con)
 
-    assert len(eintraege) == 3
-    assert eintraege[0].prev_hash == GENESIS_HASH
-    # Jeder Eintrag verweist auf den Hash seines Vorgaengers.
-    assert eintraege[1].prev_hash == eintraege[0].hash
-    assert eintraege[2].prev_hash == eintraege[1].hash
-
-
-def test_intakte_kette_wird_als_gueltig_erkannt(con):
-    _drei_eintraege(con)
-    ergebnis = verify_chain(con)
-    assert ergebnis.gueltig
-    assert ergebnis.geprueft == 3
+    assert len(entries) == 3
+    assert entries[0].prev_hash == GENESIS_HASH
+    # Every entry points to the hash of its predecessor.
+    assert entries[1].prev_hash == entries[0].hash
+    assert entries[2].prev_hash == entries[1].hash
 
 
-def test_leere_kette_ist_gueltig(con):
-    assert verify_chain(con).gueltig
+def test_intact_chain_is_recognized_as_valid(con):
+    _three_entries(con)
+    result = verify_chain(con)
+    assert result.valid
+    assert result.checked == 3
 
 
-def test_trigger_verhindert_update(con):
-    """Die Datenbank selbst weist ein UPDATE ab -- append-only ist erzwungen."""
-    _drei_eintraege(con)
+def test_empty_chain_is_valid(con):
+    assert verify_chain(con).valid
+
+
+def test_trigger_prevents_update(con):
+    """The database itself rejects an UPDATE -- append-only is enforced."""
+    _three_entries(con)
     import sqlite3
     with pytest.raises(sqlite3.IntegrityError, match="append-only"):
-        con.execute("UPDATE audit SET begruendung = 'manipuliert' WHERE id = 2")
+        con.execute("UPDATE audit SET reason = 'manipuliert' WHERE id = 2")
 
 
-def test_trigger_verhindert_delete(con):
-    _drei_eintraege(con)
+def test_trigger_prevents_delete(con):
+    _three_entries(con)
     import sqlite3
     with pytest.raises(sqlite3.IntegrityError, match="append-only"):
         con.execute("DELETE FROM audit WHERE id = 2")
 
 
-def test_verify_chain_erkennt_inhaltliche_manipulation(con):
-    """Kernnachweis: eine nachtraegliche Aenderung bricht die Kette.
+def test_verify_chain_detects_content_tampering(con):
+    """Core proof: a subsequent change breaks the chain.
 
-    Die Trigger werden hier bewusst umgangen, um den Fall zu simulieren, dass
-    jemand mit direktem Datenbankzugriff (also unter Umgehung der Anwendung)
-    einen Eintrag faelscht. Genau dagegen schuetzt die Hash-Verkettung -- der
-    Trigger allein wuerde das nicht auffangen.
+    The triggers are deliberately bypassed here to simulate the case that
+    someone with direct database access (i.e. bypassing the application)
+    forges an entry. That is exactly what the hash chaining protects
+    against -- the trigger alone would not catch it.
     """
-    _drei_eintraege(con)
-    con.execute("DROP TRIGGER audit_kein_update")
-    con.execute("UPDATE audit SET begruendung = 'war schon immer erlaubt' WHERE id = 2")
+    _three_entries(con)
+    con.execute("DROP TRIGGER audit_no_update")
+    con.execute("UPDATE audit SET reason = 'war schon immer erlaubt' WHERE id = 2")
     con.commit()
 
-    ergebnis = verify_chain(con)
-    assert not ergebnis.gueltig
-    assert ergebnis.bruch_bei == 2
-    assert "Aenderung" in ergebnis.grund
+    result = verify_chain(con)
+    assert not result.valid
+    assert result.broken_at == 2
+    assert "Aenderung" in result.reason
 
 
-def test_verify_chain_erkennt_geaenderten_akteur(con):
-    """Auch der Akteur ist gehasht -- eine Zuschreibung laesst sich nicht faelschen."""
-    _drei_eintraege(con)
-    con.execute("DROP TRIGGER audit_kein_update")
-    con.execute("UPDATE audit SET akteur = 'jemand.anderes@chg-meridian.com' WHERE id = 3")
+def test_verify_chain_detects_changed_actor(con):
+    """The actor is hashed too -- an attribution cannot be forged."""
+    _three_entries(con)
+    con.execute("DROP TRIGGER audit_no_update")
+    con.execute("UPDATE audit SET actor = 'jemand.anderes@chg-meridian.com' WHERE id = 3")
     con.commit()
 
-    assert not verify_chain(con).gueltig
+    assert not verify_chain(con).valid
 
 
-def test_verify_chain_erkennt_geloeschten_eintrag(con):
-    """Ein entfernter Eintrag hinterlaesst eine Luecke in der Verkettung."""
-    _drei_eintraege(con)
-    con.execute("DROP TRIGGER audit_kein_delete")
+def test_verify_chain_detects_deleted_entry(con):
+    """A removed entry leaves a gap in the chain."""
+    _three_entries(con)
+    con.execute("DROP TRIGGER audit_no_delete")
     con.execute("DELETE FROM audit WHERE id = 2")
     con.commit()
 
-    ergebnis = verify_chain(con)
-    assert not ergebnis.gueltig
-    # Eintrag 3 verweist jetzt auf einen Vorgaenger, den es nicht mehr gibt.
-    assert ergebnis.bruch_bei == 3
-    assert "geloeschten oder eingefuegten" in ergebnis.grund
+    result = verify_chain(con)
+    assert not result.valid
+    # Entry 3 now points to a predecessor that no longer exists.
+    assert result.broken_at == 3
+    assert "geloeschten oder eingefuegten" in result.reason
 
 
-def test_verify_chain_erkennt_umgehaengten_vorgang(con):
-    """Der Vorgangsbezug ist gehasht -- ein Eintrag laesst sich nicht umwidmen.
+def test_verify_chain_detects_reassigned_case(con):
+    """The case reference is hashed -- an entry cannot be reassigned.
 
-    Waere `vorgang_id` vom Hash ausgenommen, koennte man eine verweigerte
-    Aktion nachtraeglich einem anderen Vorgang zuschreiben, ohne dass die Kette
-    bricht -- und der gefilterte Trail wuerde luegen.
+    If `case_id` were excluded from the hash, a denied action could be
+    attributed to a different case afterwards without breaking the chain --
+    and the filtered trail would lie.
     """
-    _drei_eintraege(con)
-    con.execute("DROP TRIGGER audit_kein_update")
-    con.execute("UPDATE audit SET vorgang_id = 'ein-anderer-vorgang' WHERE id = 2")
+    _three_entries(con)
+    con.execute("DROP TRIGGER audit_no_update")
+    con.execute("UPDATE audit SET case_id = 'ein-anderer-vorgang' WHERE id = 2")
     con.commit()
 
-    assert not verify_chain(con).gueltig
+    assert not verify_chain(con).valid
 
 
-def test_verify_chain_erkennt_geaenderte_datenquelle(con):
-    _drei_eintraege(con)
-    con.execute("DROP TRIGGER audit_kein_update")
-    con.execute("UPDATE audit SET datenquelle = 'ein_anderer_beleg.pdf' WHERE id = 1")
+def test_verify_chain_detects_changed_source(con):
+    _three_entries(con)
+    con.execute("DROP TRIGGER audit_no_update")
+    con.execute("UPDATE audit SET source = 'ein_anderer_beleg.pdf' WHERE id = 1")
     con.commit()
 
-    assert not verify_chain(con).gueltig
+    assert not verify_chain(con).valid
 
 
-def test_verify_chain_erkennt_geaendertes_ergebnis(con):
-    """Ein nachtraeglich geschoentes Ergebnis muss auffallen.
+def test_verify_chain_detects_changed_outcome(con):
+    """A subsequently whitewashed outcome must be noticed.
 
-    Eintrag 3 steht auf 'verbucht'; hier wird er auf 'abgelehnt' umgeschrieben
-    -- die Richtung ist gleichgueltig, jede Aenderung muss die Kette brechen.
+    Entry 3 is 'verbucht'; here it gets rewritten to 'abgelehnt' -- the
+    direction does not matter, any change must break the chain.
     """
-    _drei_eintraege(con)
-    con.execute("DROP TRIGGER audit_kein_update")
-    con.execute("UPDATE audit SET ergebnis = 'abgelehnt' WHERE id = 3")
+    _three_entries(con)
+    con.execute("DROP TRIGGER audit_no_update")
+    con.execute("UPDATE audit SET outcome = 'abgelehnt' WHERE id = 3")
     con.commit()
 
-    assert not verify_chain(con).gueltig
+    assert not verify_chain(con).valid
 
 
-def test_eintraege_lassen_sich_nach_vorgang_filtern(con):
-    _drei_eintraege(con)
-    protokolliere(con, akteur="a@b.c", agent="reader", aktion="dokument_eingespeist",
-                  entscheidung=Entscheidung.ERLAUBT, begruendung="anderer Lauf",
-                  bezug=Vorgangsbezug("vorgang-2", "b.pdf"))
+def test_entries_can_be_filtered_by_case(con):
+    _three_entries(con)
+    log_entry(con, actor="a@b.c", agent="reader", action="dokument_eingespeist",
+             decision=Decision.ALLOWED, reason="anderer Lauf",
+             reference=CaseReference("vorgang-2", "b.pdf"))
     con.commit()
 
-    eintraege = lies_alle(con, vorgang_id="vorgang-1")
+    entries = read_all(con, case_id="vorgang-1")
 
-    assert len(eintraege) == 3
-    assert {e.vorgang_id for e in eintraege} == {"vorgang-1"}
-    assert sorted(vorgaenge_im_trail(con)) == ["vorgang-1", "vorgang-2"]
+    assert len(entries) == 3
+    assert {e.case_id for e in entries} == {"vorgang-1"}
+    assert sorted(cases_in_trail(con)) == ["vorgang-1", "vorgang-2"]
 
 
-def test_eintraege_ohne_vorgang_stoeren_den_filter_nicht(con):
-    """Ein Upload gehoert zu keinem Vorgang und darf in keinem auftauchen."""
-    protokolliere(con, akteur="a@b.c", aktion="datei_hochgeladen",
-                  entscheidung=Entscheidung.ERLAUBT, begruendung="abgelegt",
-                  bezug=Vorgangsbezug(None, "c.pdf"))
+def test_entries_without_a_case_dont_disturb_the_filter(con):
+    """An upload belongs to no case and must not show up in any."""
+    log_entry(con, actor="a@b.c", action="datei_hochgeladen",
+             decision=Decision.ALLOWED, reason="abgelegt",
+             reference=CaseReference(None, "c.pdf"))
     con.commit()
 
-    assert lies_alle(con, vorgang_id="vorgang-1") == []
-    assert vorgaenge_im_trail(con) == []
-    assert verify_chain(con).gueltig
+    assert read_all(con, case_id="vorgang-1") == []
+    assert cases_in_trail(con) == []
+    assert verify_chain(con).valid
 
 
-def test_payload_hash_ist_reihenfolgeunabhaengig(con):
-    """Gleicher Inhalt, andere dict-Reihenfolge -> gleicher Hash.
+def test_payload_hash_is_order_independent(con):
+    """Same content, different dict order -> same hash.
 
-    Sonst waere die Kette nicht reproduzierbar pruefbar.
+    Otherwise the chain would not be reproducibly verifiable.
     """
-    a = protokolliere(con, akteur="a@b.c", aktion="x", entscheidung=Entscheidung.INFO,
-                      begruendung="-", payload={"eins": 1, "zwei": 2})
-    b = protokolliere(con, akteur="a@b.c", aktion="x", entscheidung=Entscheidung.INFO,
-                      begruendung="-", payload={"zwei": 2, "eins": 1})
+    a = log_entry(con, actor="a@b.c", action="x", decision=Decision.INFO,
+                 reason="-", payload={"eins": 1, "zwei": 2})
+    b = log_entry(con, actor="a@b.c", action="x", decision=Decision.INFO,
+                 reason="-", payload={"zwei": 2, "eins": 1})
     assert a.payload_hash == b.payload_hash

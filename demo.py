@@ -1,11 +1,11 @@
-"""CLI-Runner fuer die fuenf Demonstrationsszenarien.
+"""CLI runner for the five demonstration scenarios.
 
-Faehrt einen Vorgang durch den Graphen und zeigt jeden Schritt samt
-Audit-Auszug. An HITL-Punkten haelt der Graph an; im CLI wird die
-Freigabeentscheidung entweder per --pruefer/--entscheidung mitgegeben oder
-interaktiv erfragt. Die Streamlit-UI (ui/app.py) nutzt denselben Mechanismus.
+Runs a case through the graph and shows every step along with an audit
+excerpt. At HITL points the graph pauses; in the CLI the approval decision
+is either supplied via --pruefer/--entscheidung or asked for interactively.
+The Streamlit UI (ui/app.py) uses the same mechanism.
 
-Aufruf:
+Usage:
     python demo.py --liste
     python demo.py --szenario 1
     python demo.py --szenario 5
@@ -23,136 +23,137 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from config import DB_PFAD, EINGANG_DIR, MANIFEST_PFAD, einstellungen
-from governance.audit import lies_alle, verify_chain
-from graph.wirkung import lies_wirkung
+from config import DB_PATH, INTAKE_DIR, MANIFEST_PATH, settings
+from governance.audit import read_all, verify_chain
+from graph.effects import read_effect
 
-# Prueferkonten aus dem AD-Mock (Mitglieder von SG-CHG-Freigabe).
-STANDARD_PRUEFER = "s.hofmann@chg-meridian.com"
+# Approver accounts from the AD mock (members of SG-CHG-Freigabe).
+DEFAULT_APPROVER = "s.hofmann@chg-meridian.com"
 
 
 def _manifest() -> list[dict]:
-    if not MANIFEST_PFAD.is_file():
+    if not MANIFEST_PATH.is_file():
         sys.exit("Testdaten fehlen. Zuerst ausfuehren:  python -m data.generate")
-    return json.loads(MANIFEST_PFAD.read_text(encoding="utf-8"))
+    return json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
 
-def _trenner(text: str = "") -> None:
+def _separator(text: str = "") -> None:
     print(f"\n{'=' * 78}")
     if text:
         print(text)
         print("=" * 78)
 
 
-def liste() -> None:
+def list_documents() -> None:
     print("Verfuegbare Dokumente:\n")
     for d in _manifest():
-        stoer = f"  [Stoerfall: {d['stoerfall']}]" if d["stoerfall"] else ""
-        print(f"  {d['szenario']:28s} {d['dateiname']:36s} Prozess {d['prozess']}{stoer}")
-        print(f"  {'':28s} Erwartung: {d['erwartung']}")
+        incident = f"  [Stoerfall: {d['incident']}]" if d["incident"] else ""
+        print(f"  {d['scenario']:28s} {d['filename']:36s} Prozess {d['process']}{incident}")
+        print(f"  {'':28s} Erwartung: {d['expectation']}")
         print()
 
 
-def _antwort_auf(anfrage: dict, pruefer: str, entscheidung: str) -> dict:
-    """Baut die Freigabeantwort fuer einen Interrupt."""
-    art = anfrage.get("art")
-    if art == "kostenstellen_freigabe":
-        # Fehlt die Belegreferenz, waehlt der Pruefer aus dem Katalog. Im
-        # nicht-interaktiven Lauf nehmen wir die erste Katalogposition.
-        katalog = anfrage.get("katalog") or []
-        kst = katalog[0]["id"] if katalog else None
-        return {"entscheidung": entscheidung, "pruefer": pruefer, "kostenstelle_id": kst}
-    return {"entscheidung": entscheidung, "pruefer": pruefer,
-            "nummer": anfrage.get("nummer")}
+def _response_to(request: dict, approver: str, decision: str) -> dict:
+    """Builds the approval response for an interrupt."""
+    kind = request.get("kind")
+    if kind == "kostenstellen_freigabe":
+        # If the document reference is missing, the approver picks from the
+        # catalog. In the non-interactive run we take the first catalog
+        # entry.
+        catalog = request.get("catalog") or []
+        cost_center_id = catalog[0]["id"] if catalog else None
+        return {"decision": decision, "approver": approver, "cost_center_id": cost_center_id}
+    return {"decision": decision, "approver": approver,
+            "number": request.get("number")}
 
 
-def fuehre_aus(dok: dict, *, pruefer: str, entscheidung: str, interaktiv: bool) -> None:
+def run_case(doc: dict, *, approver: str, decision: str, interactive: bool) -> None:
     from langgraph.types import Command
 
-    from graph.workflow import kompiliere
+    from graph.workflow import compile_graph
 
-    app, cp_con = kompiliere()
-    vorgang_id = f"{dok['dateiname']}-{uuid.uuid4().hex[:8]}"
-    thread = {"configurable": {"thread_id": vorgang_id}}
+    app, cp_con = compile_graph()
+    case_id = f"{doc['filename']}-{uuid.uuid4().hex[:8]}"
+    thread = {"configurable": {"thread_id": case_id}}
 
-    _trenner(f"SZENARIO {dok['szenario']}  |  {dok['dateiname']}")
-    print(f"Einspeiser: {dok['einspeiser']}")
-    print(f"Erwartung:  {dok['erwartung']}")
-    if dok["stoerfall"]:
-        print(f"Stoerfall:  {dok['stoerfall']}")
-    print(f"Modus:      MODELL_MODUS={einstellungen.modell_modus.value}")
+    _separator(f"SZENARIO {doc['scenario']}  |  {doc['filename']}")
+    print(f"Einspeiser: {doc['submitter']}")
+    print(f"Erwartung:  {doc['expectation']}")
+    if doc["incident"]:
+        print(f"Stoerfall:  {doc['incident']}")
+    print(f"Modus:      MODELL_MODUS={settings.model_mode.value}")
     print("-" * 78)
 
     try:
-        zustand = app.invoke(
-            {"pfad": str(EINGANG_DIR / dok["dateiname"]), "akteur": dok["einspeiser"],
-             "vorgang_id": vorgang_id,
-             "gestartet_am": datetime.now(timezone.utc).isoformat(), "protokoll": []},
+        state = app.invoke(
+            {"path": str(INTAKE_DIR / doc["filename"]), "actor": doc["submitter"],
+             "case_id": case_id,
+             "started_at": datetime.now(timezone.utc).isoformat(), "log": []},
             thread,
         )
 
-        # Solange der Graph an einem HITL-Punkt haengt, entscheiden lassen.
-        while "__interrupt__" in zustand:
-            anfrage = zustand["__interrupt__"][0].value
-            print(f"\n  >>> HUMAN-IN-THE-LOOP: {anfrage.get('art')}")
-            for k, v in anfrage.items():
-                if k != "art" and v not in (None, [], ""):
+        # As long as the graph is stuck at a HITL point, keep asking for a decision.
+        while "__interrupt__" in state:
+            request = state["__interrupt__"][0].value
+            print(f"\n  >>> HUMAN-IN-THE-LOOP: {request.get('kind')}")
+            for k, v in request.items():
+                if k != "kind" and v not in (None, [], ""):
                     print(f"      {k}: {v}")
 
-            if interaktiv:
-                eingabe = input(f"\n      Freigeben? [j/n] (als {pruefer}): ").strip().lower()
-                ent = "freigegeben" if eingabe in ("j", "ja", "y", "") else "verworfen"
+            if interactive:
+                answer = input(f"\n      Freigeben? [j/n] (als {approver}): ").strip().lower()
+                dec = "freigegeben" if answer in ("j", "ja", "y", "") else "verworfen"
             else:
-                ent = entscheidung
-                print(f"\n      -> automatisch '{ent}' durch {pruefer}")
+                dec = decision
+                print(f"\n      -> automatisch '{dec}' durch {approver}")
 
-            zustand = app.invoke(
-                Command(resume=_antwort_auf(anfrage, pruefer, ent)), thread
+            state = app.invoke(
+                Command(resume=_response_to(request, approver, dec)), thread
             )
 
         print("\n  Ablauf:")
-        for s in zustand.get("protokoll", []):
-            print(f"    [{s['knoten']:12s}] {s['text']}")
+        for s in state.get("log", []):
+            print(f"    [{s['node']:12s}] {s['text']}")
 
-        print(f"\n  ERGEBNIS: {zustand.get('ergebnis', 'unbekannt')}")
-        if zustand.get("fehler"):
-            print(f"  FEHLER:   {zustand['fehler']}")
-        _zeige_wirkung(dok, zustand)
+        print(f"\n  ERGEBNIS: {state.get('outcome', 'unbekannt')}")
+        if state.get("error"):
+            print(f"  FEHLER:   {state['error']}")
+        _show_effect(doc, state)
     finally:
         cp_con.close()
 
 
-def _zeige_wirkung(dok: dict, zustand: dict) -> None:
-    """Zeigt die Wirkung im Zielsystem -- der eigentliche Nachweis."""
-    con = sqlite3.connect(DB_PFAD)
+def _show_effect(doc: dict, state: dict) -> None:
+    """Shows the effect in the target system -- the actual evidence."""
+    con = sqlite3.connect(DB_PATH)
     try:
-        # Dieselbe Abfrage nutzt die Bestaetigungskarte der Oberflaeche.
-        wirkung = lies_wirkung(con, zustand)
-        if wirkung.navision_status:
-            print(f"  NAVISION: {wirkung.navision_nummer} -> "
-                  f"Status '{wirkung.navision_status}'")
-        if wirkung.elo_archiv_id:
-            print(f"  ELO:      {wirkung.elo_archiv_id} "
+        # The UI's confirmation card uses the same query.
+        effect = read_effect(con, state)
+        if effect.navision_status:
+            print(f"  NAVISION: {effect.navision_number} -> "
+                  f"Status '{effect.navision_status}'")
+        if effect.elo_archive_id:
+            print(f"  ELO:      {effect.elo_archive_id} "
                   "(revisionssicher, Prozessende B)")
 
-        eintraege = lies_alle(con)
+        entries = read_all(con)
         print(f"\n  Audit-Trail (letzte Eintraege dieses Laufs):")
-        for e in eintraege[-6:]:
-            print(f"    #{e.id:03d} [{e.entscheidung.value:10s}] {e.agent or '-':14s} "
-                  f"{e.aktion:26s} {e.begruendung[:60]}")
+        for e in entries[-6:]:
+            print(f"    #{e.id:03d} [{e.decision.value:10s}] {e.agent or '-':14s} "
+                  f"{e.action:26s} {e.reason[:60]}")
         print(f"  {verify_chain(con)}")
     finally:
         con.close()
 
 
-def zeige_audit() -> None:
-    con = sqlite3.connect(DB_PFAD)
+def show_audit() -> None:
+    con = sqlite3.connect(DB_PATH)
     try:
-        _trenner("AUDIT-TRAIL (vollstaendig)")
-        for e in lies_alle(con):
-            print(f"#{e.id:03d} {e.ts[:19]} [{e.entscheidung.value:10s}] "
-                  f"{e.akteur:34s} {e.agent or '-':14s} {e.aktion:26s}")
-            print(f"     {e.begruendung}")
+        _separator("AUDIT-TRAIL (vollstaendig)")
+        for e in read_all(con):
+            print(f"#{e.id:03d} {e.ts[:19]} [{e.decision.value:10s}] "
+                  f"{e.actor:34s} {e.agent or '-':14s} {e.action:26s}")
+            print(f"     {e.reason}")
             print(f"     hash={e.hash[:16]}...  prev={e.prev_hash[:16]}...")
         print()
         print(verify_chain(con))
@@ -160,14 +161,14 @@ def zeige_audit() -> None:
         con.close()
 
 
-def pruefe_modelle() -> bool:
-    """Zeigt den Bereitstellungsstatus. Laedt nichts -- das macht `ollama pull`."""
-    from llm.preflight import pruefe
+def check_models() -> bool:
+    """Shows the deployment status. Loads nothing -- `ollama pull` does that."""
+    from llm.preflight import check
 
-    befund = pruefe()
-    _trenner("MODELL-BEREITSTELLUNG")
-    print(befund.bericht())
-    return befund.bereit
+    readiness = check()
+    _separator("MODELL-BEREITSTELLUNG")
+    print(readiness.report())
+    return readiness.ready
 
 
 def main() -> None:
@@ -178,44 +179,44 @@ def main() -> None:
     p.add_argument("--audit", action="store_true", help="Audit-Trail ausgeben")
     p.add_argument("--check", action="store_true",
                    help="Modell-Bereitstellung pruefen (Ollama-Verbindung/Modelle)")
-    p.add_argument("--pruefer", default=STANDARD_PRUEFER, help="UPN fuer Freigaben")
+    p.add_argument("--pruefer", default=DEFAULT_APPROVER, help="UPN fuer Freigaben")
     p.add_argument("--entscheidung", default="freigegeben",
                    choices=["freigegeben", "verworfen"])
     p.add_argument("--interaktiv", action="store_true", help="Freigaben abfragen")
     args = p.parse_args()
 
     if args.liste:
-        return liste()
+        return list_documents()
     if args.audit:
-        return zeige_audit()
+        return show_audit()
     if args.check:
-        sys.exit(0 if pruefe_modelle() else 1)
+        sys.exit(0 if check_models() else 1)
 
     docs = _manifest()
     if args.alle:
         for d in docs:
-            fuehre_aus(d, pruefer=args.pruefer, entscheidung=args.entscheidung,
-                       interaktiv=args.interaktiv)
+            run_case(d, approver=args.pruefer, decision=args.entscheidung,
+                     interactive=args.interaktiv)
         return
     if not args.szenario:
         return p.print_help()
 
-    treffer = [d for d in docs
-               if d["szenario"].startswith(args.szenario) or d["dateiname"] == args.szenario]
-    if not treffer:
+    matches = [d for d in docs
+               if d["scenario"].startswith(args.szenario) or d["filename"] == args.szenario]
+    if not matches:
         sys.exit(f"Kein Dokument zu {args.szenario!r}. `--liste` zeigt alle.")
 
-    # Szenario 5 endet am AD-Check und braucht kein Modell -- dafuer soll die
-    # Governance-Demo nicht an einer fehlenden Ollama-Instanz scheitern.
-    braucht_modell = any(d["szenario"] != "5_ad_check_verweigert" for d in treffer)
-    if braucht_modell and not pruefe_modelle():
+    # Scenario 5 ends at the AD check and needs no model -- the governance
+    # demo should not fail just because no Ollama instance is available.
+    needs_model = any(d["scenario"] != "5_ad_check_verweigert" for d in matches)
+    if needs_model and not check_models():
         print("\nHinweis: Szenario 5 (Governance-Demo) laeuft auch ohne Modell:")
         print("  python demo.py --szenario 5")
         sys.exit(1)
 
-    for d in treffer:
-        fuehre_aus(d, pruefer=args.pruefer, entscheidung=args.entscheidung,
-                   interaktiv=args.interaktiv)
+    for d in matches:
+        run_case(d, approver=args.pruefer, decision=args.entscheidung,
+                 interactive=args.interaktiv)
 
 
 if __name__ == "__main__":

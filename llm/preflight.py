@@ -1,108 +1,108 @@
-"""Preflight: prueft die Modell-Bereitstellung, bevor ein Vorgang startet.
+"""Preflight: checks model availability before a case starts.
 
-Der Prototyp laedt keine Modelle und startet keine Dienste -- er verbindet sich
-gegen eine Ollama-Instanz, deren Adresse in .env steht. Diese Trennung ist
-Absicht: die Modellbereitstellung ist Betrieb, nicht Anwendung. Dann muss die
-Anwendung aber praezise sagen koennen, *was* fehlt, statt an einem
-Verbindungsfehler zu sterben.
+The prototype does not load models and does not start services -- it
+connects to an Ollama instance whose address is in .env. This separation is
+deliberate: model provisioning is operations, not application. But then the
+application must be able to say precisely *what* is missing, instead of
+dying on a connection error.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from config import ModellModus, einstellungen
-from llm.client import waehle_modell
-from registry import REGISTRY, Modellklasse
+from config import ModelMode, settings
+from llm.client import choose_model
+from registry import REGISTRY, ModelClass
 
 
 @dataclass
-class Befund:
-    bereit: bool
-    meldungen: list[str] = field(default_factory=list)
-    benoetigte_modelle: list[str] = field(default_factory=list)
-    verfuegbare_modelle: list[str] = field(default_factory=list)
+class Readiness:
+    ready: bool
+    messages: list[str] = field(default_factory=list)
+    required_models: list[str] = field(default_factory=list)
+    available_models: list[str] = field(default_factory=list)
 
-    def bericht(self) -> str:
-        kopf = "Modell-Bereitstellung: OK" if self.bereit else "Modell-Bereitstellung: NICHT BEREIT"
-        return "\n".join([kopf, *(f"  - {m}" for m in self.meldungen)])
+    def report(self) -> str:
+        head = "Modell-Bereitstellung: OK" if self.ready else "Modell-Bereitstellung: NICHT BEREIT"
+        return "\n".join([head, *(f"  - {m}" for m in self.messages)])
 
 
-def benoetigte_modelle() -> list[str]:
-    """Welche Modelle braucht die aktuelle Konfiguration?
+def required_models() -> list[str]:
+    """Which models does the current configuration need?
 
-    Leitet sich aus der Registry ab: nur Agenten mit Modellklasse != KEINE
-    rufen ueberhaupt ein Modell auf.
+    Derived from the registry: only agents with model_class != NO_MODEL
+    call a model at all.
     """
     ids = set()
     for agent_id, cfg in REGISTRY.items():
-        if cfg.modellklasse is Modellklasse.KEINE:
+        if cfg.model_class is ModelClass.NO_MODEL:
             continue
-        wahl = waehle_modell(agent_id)
-        if wahl.anbieter == "ollama":
-            ids.add(wahl.modell_id)
+        choice = choose_model(agent_id)
+        if choice.provider == "ollama":
+            ids.add(choice.model_id)
     return sorted(ids)
 
 
-def pruefe() -> Befund:
-    """Prueft Erreichbarkeit und geladene Modelle. Laedt selbst nichts."""
-    modus = einstellungen.modell_modus
+def check() -> Readiness:
+    """Checks reachability and loaded models. Loads nothing itself."""
+    mode = settings.model_mode
 
-    if modus is ModellModus.CLOUD:
-        if not einstellungen.anthropic_api_key:
-            return Befund(False, ["MODELL_MODUS=cloud, aber ANTHROPIC_API_KEY ist leer."])
-        return Befund(True, ["Cloud-Modus, API-Key vorhanden."])
+    if mode is ModelMode.CLOUD:
+        if not settings.anthropic_api_key:
+            return Readiness(False, ["MODELL_MODUS=cloud, aber ANTHROPIC_API_KEY ist leer."])
+        return Readiness(True, ["Cloud-Modus, API-Key vorhanden."])
 
-    noetig = benoetigte_modelle()
-    if not noetig:
-        return Befund(True, ["Keine lokalen Modelle noetig."])
+    needed = required_models()
+    if not needed:
+        return Readiness(True, ["Keine lokalen Modelle noetig."])
 
     import httpx
 
-    url = einstellungen.ollama_base_url
+    url = settings.ollama_base_url
     try:
-        antwort = httpx.get(f"{url}/api/tags", timeout=5.0)
-        antwort.raise_for_status()
+        response = httpx.get(f"{url}/api/tags", timeout=5.0)
+        response.raise_for_status()
     except httpx.HTTPError as e:
-        return Befund(
+        return Readiness(
             False,
             [f"Ollama unter {url} nicht erreichbar ({type(e).__name__}).",
              "Dienst starten: `ollama serve`",
              "Andere Adresse: OLLAMA_BASE_URL in .env setzen.",
-             f"Benoetigte Modelle: {', '.join(noetig)}"],
-            benoetigte_modelle=noetig,
+             f"Benoetigte Modelle: {', '.join(needed)}"],
+            required_models=needed,
         )
 
-    verfuegbar = [m["name"] for m in antwort.json().get("models", [])]
-    # Ollama fuehrt Tags als 'name:tag'; ein Eintrag ohne Tag meint ':latest'.
-    normalisiert = {n.split(":")[0] if n.endswith(":latest") else n for n in verfuegbar}
+    available = [m["name"] for m in response.json().get("models", [])]
+    # Ollama lists tags as 'name:tag'; an entry without a tag means ':latest'.
+    normalized = {n.split(":")[0] if n.endswith(":latest") else n for n in available}
 
-    fehlend = [m for m in noetig if m not in verfuegbar and m not in normalisiert]
-    if fehlend:
-        return Befund(
+    missing = [m for m in needed if m not in available and m not in normalized]
+    if missing:
+        return Readiness(
             False,
             [f"Ollama unter {url} erreichbar.",
-             f"Nicht geladen: {', '.join(fehlend)}",
-             *[f"Laden mit: `ollama pull {m}`" for m in fehlend],
-             f"Verfuegbar waeren: {', '.join(verfuegbar) or '(keine)'}",
+             f"Nicht geladen: {', '.join(missing)}",
+             *[f"Laden mit: `ollama pull {m}`" for m in missing],
+             f"Verfuegbar waeren: {', '.join(available) or '(keine)'}",
              "Alternativ in .env ein vorhandenes Modell eintragen "
              "(OLLAMA_MODELL_KLEIN / OLLAMA_MODELL_VISION)."],
-            benoetigte_modelle=noetig, verfuegbare_modelle=verfuegbar,
+            required_models=needed, available_models=available,
         )
 
-    if modus is ModellModus.HYBRID and not einstellungen.anthropic_api_key:
-        return Befund(
+    if mode is ModelMode.HYBRID and not settings.anthropic_api_key:
+        return Readiness(
             False,
-            [f"Ollama unter {url} bereit ({', '.join(noetig)}).",
+            [f"Ollama unter {url} bereit ({', '.join(needed)}).",
              "MODELL_MODUS=hybrid verlangt zusaetzlich ANTHROPIC_API_KEY fuer die "
              "risikobehafteten Agenten (Buchung, Navision, Klassifikation).",
              "Fuer reinen Offline-Betrieb: MODELL_MODUS=lokal setzen."],
-            benoetigte_modelle=noetig, verfuegbare_modelle=verfuegbar,
+            required_models=needed, available_models=available,
         )
 
-    return Befund(
+    return Readiness(
         True,
         [f"Ollama unter {url} erreichbar.",
-         f"Modelle geladen: {', '.join(noetig)}"],
-        benoetigte_modelle=noetig, verfuegbare_modelle=verfuegbar,
+         f"Modelle geladen: {', '.join(needed)}"],
+        required_models=needed, available_models=available,
     )
