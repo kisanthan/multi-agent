@@ -1,11 +1,12 @@
-"""Audit-/Monitoring-Komponente: hash-verketteter, append-only Audit-Trail.
+"""Audit/monitoring component: hash-chained, append-only audit trail.
 
-Belegt das Evaluationskriterium "Nachvollziehbarkeit" der Arbeit. Jeder Eintrag
-hasht seinen Vorgaenger; `verify_chain()` erkennt daher jede nachtraegliche
-Aenderung, jede Loeschung und jede Einfuegung -- nicht nur die Aenderung selbst,
-sondern auch, ab welcher Stelle die Kette bricht.
+Satisfies the thesis's "traceability" evaluation criterion. Every entry
+hashes its predecessor; `verify_chain()` therefore detects any subsequent
+change, any deletion, and any insertion -- not just the change itself, but
+also the point from which the chain breaks.
 
-Kein LLM. Reine Python-Logik (Kap. 3.4 / Abschnitt 7 des Fachkonzepts).
+No LLM. Pure Python logic (chapter 3.4 / section 7 of the functional
+concept).
 """
 
 from __future__ import annotations
@@ -20,207 +21,208 @@ from enum import Enum
 GENESIS_HASH = "0" * 64
 
 
-class Entscheidung(str, Enum):
-    ERLAUBT = "erlaubt"
-    VERWEIGERT = "verweigert"
+class Decision(str, Enum):
+    ALLOWED = "erlaubt"
+    DENIED = "verweigert"
     INFO = "info"
 
 
 @dataclass(frozen=True)
-class Vorgangsbezug:
-    """Woher ein Eintrag stammt: welcher Vorgang, welche Datenquelle.
+class CaseReference:
+    """Where an entry comes from: which case, which source.
 
-    Als eigenes Objekt und nicht als zwei Parameter, weil der Bezug durch die
-    gesamte Agentenkette gereicht wird -- ein Argument je Funktion statt zwei.
+    Its own object rather than two parameters, because the reference is
+    passed through the entire agent chain -- one argument per function
+    instead of two.
 
-    Ein Vorgang ist ein einzelner Lauf, nicht ein Dokument: dieselbe Datei kann
-    mehrfach verarbeitet werden. Deshalb genuegt die Datenquelle allein nicht,
-    um die Eintraege eines Laufs zu finden.
+    A case is a single run, not a document: the same file can be processed
+    more than once. So the source alone is not enough to find the entries
+    of one run.
     """
 
-    vorgang_id: str | None = None
-    datenquelle: str | None = None
+    case_id: str | None = None
+    source: str | None = None
 
 
-# Fuer Eintraege, die zu keinem Vorgang gehoeren (Systemereignisse, Tests).
-OHNE_BEZUG = Vorgangsbezug()
+# For entries that belong to no case (system events, tests).
+NO_REFERENCE = CaseReference()
 
 
 @dataclass(frozen=True)
-class AuditEintrag:
+class AuditEntry:
     id: int
     ts: str
-    akteur: str
+    actor: str
     agent: str | None
-    aktion: str
-    entscheidung: Entscheidung
-    begruendung: str
-    vorgang_id: str | None
-    datenquelle: str | None
-    ergebnis: str | None
+    action: str
+    decision: Decision
+    reason: str
+    case_id: str | None
+    source: str | None
+    outcome: str | None
     payload_hash: str
     prev_hash: str
     hash: str
 
 
-def _kanonisch(payload: dict) -> str:
-    """Serialisiert deterministisch.
+def _canonical(payload: dict) -> str:
+    """Serializes deterministically.
 
-    sort_keys ist hier nicht Kosmetik: ohne stabile Schluesselreihenfolge
-    haengt der Hash von der Einfuegereihenfolge im dict ab und die Kette waere
-    nicht reproduzierbar pruefbar.
+    sort_keys is not cosmetic here: without a stable key order, the hash
+    would depend on the dict's insertion order and the chain would not be
+    reproducibly verifiable.
     """
     return json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 
 
 def _payload_hash(payload: dict) -> str:
-    return hashlib.sha256(_kanonisch(payload).encode("utf-8")).hexdigest()
+    return hashlib.sha256(_canonical(payload).encode("utf-8")).hexdigest()
 
 
-def _eintrag_hash(ts: str, akteur: str, agent: str | None, aktion: str,
-                  entscheidung: str, begruendung: str, vorgang_id: str | None,
-                  datenquelle: str | None, ergebnis: str | None,
-                  payload_hash: str, prev_hash: str) -> str:
-    """Hasht den vollstaendigen Eintragsinhalt inklusive Vorgaenger-Hash.
+def _entry_hash(ts: str, actor: str, agent: str | None, action: str,
+                decision: str, reason: str, case_id: str | None,
+                source: str | None, outcome: str | None,
+                payload_hash: str, prev_hash: str) -> str:
+    """Hashes the complete entry content, including the predecessor hash.
 
-    Alle inhaltlichen Felder gehen ein -- wuerde nur payload_hash verkettet,
-    liessen sich Akteur oder Entscheidung unbemerkt aendern. Das gilt
-    ausdruecklich auch fuer Vorgangsbezug, Datenquelle und Ergebnis: waeren sie
-    ausgenommen, koennte man einen Eintrag einem anderen Vorgang zuschreiben,
-    ohne dass die Kette bricht.
+    All content fields go into it -- if only payload_hash were chained,
+    actor or decision could be changed unnoticed. This explicitly also
+    holds for case reference, source, and outcome: if they were excluded,
+    an entry could be attributed to a different case without breaking the
+    chain.
     """
     material = "|".join([
-        ts, akteur, agent or "", aktion, entscheidung, begruendung,
-        vorgang_id or "", datenquelle or "", ergebnis or "",
+        ts, actor, agent or "", action, decision, reason,
+        case_id or "", source or "", outcome or "",
         payload_hash, prev_hash,
     ])
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
-def letzter_hash(con: sqlite3.Connection) -> str:
+def last_hash(con: sqlite3.Connection) -> str:
     row = con.execute("SELECT hash FROM audit ORDER BY id DESC LIMIT 1").fetchone()
     return row[0] if row else GENESIS_HASH
 
 
-def protokolliere(con: sqlite3.Connection, *, akteur: str, aktion: str,
-                  entscheidung: Entscheidung, begruendung: str,
-                  agent: str | None = None, payload: dict | None = None,
-                  bezug: Vorgangsbezug = OHNE_BEZUG,
-                  ergebnis: str | None = None) -> AuditEintrag:
-    """Haengt einen Eintrag an die Kette an.
+def log_entry(con: sqlite3.Connection, *, actor: str, action: str,
+              decision: Decision, reason: str,
+              agent: str | None = None, payload: dict | None = None,
+              reference: CaseReference = NO_REFERENCE,
+              outcome: str | None = None) -> AuditEntry:
+    """Appends an entry to the chain.
 
-    Bewusst ohne `commit()`: der Aufrufer entscheidet ueber die
-    Transaktionsgrenze, damit Buchung und Audit-Eintrag gemeinsam gueltig
-    werden oder gemeinsam zurueckrollen.
+    Deliberately without `commit()`: the caller decides the transaction
+    boundary, so that the booking and the audit entry become valid together
+    or roll back together.
     """
     payload = payload or {}
     ts = datetime.now(timezone.utc).isoformat()
     p_hash = _payload_hash(payload)
-    prev = letzter_hash(con)
-    h = _eintrag_hash(ts, akteur, agent, aktion, entscheidung.value, begruendung,
-                      bezug.vorgang_id, bezug.datenquelle, ergebnis, p_hash, prev)
+    prev = last_hash(con)
+    h = _entry_hash(ts, actor, agent, action, decision.value, reason,
+                    reference.case_id, reference.source, outcome, p_hash, prev)
 
     cur = con.execute(
-        "INSERT INTO audit (ts, akteur, agent, aktion, entscheidung, begruendung,"
-        " vorgang_id, datenquelle, ergebnis, payload_hash, prev_hash, hash)"
+        "INSERT INTO audit (ts, actor, agent, action, decision, reason,"
+        " case_id, source, outcome, payload_hash, prev_hash, hash)"
         " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-        (ts, akteur, agent, aktion, entscheidung.value, begruendung,
-         bezug.vorgang_id, bezug.datenquelle, ergebnis, p_hash, prev, h),
+        (ts, actor, agent, action, decision.value, reason,
+         reference.case_id, reference.source, outcome, p_hash, prev, h),
     )
-    return AuditEintrag(
-        id=cur.lastrowid, ts=ts, akteur=akteur, agent=agent, aktion=aktion,
-        entscheidung=entscheidung, begruendung=begruendung,
-        vorgang_id=bezug.vorgang_id, datenquelle=bezug.datenquelle,
-        ergebnis=ergebnis, payload_hash=p_hash, prev_hash=prev, hash=h,
+    return AuditEntry(
+        id=cur.lastrowid, ts=ts, actor=actor, agent=agent, action=action,
+        decision=decision, reason=reason,
+        case_id=reference.case_id, source=reference.source,
+        outcome=outcome, payload_hash=p_hash, prev_hash=prev, hash=h,
     )
 
 
 @dataclass(frozen=True)
-class Pruefergebnis:
-    gueltig: bool
-    geprueft: int
-    bruch_bei: int | None = None
-    grund: str | None = None
+class VerificationResult:
+    valid: bool
+    checked: int
+    broken_at: int | None = None
+    reason: str | None = None
 
     def __str__(self) -> str:
-        if self.gueltig:
-            return f"Audit-Kette intakt ({self.geprueft} Eintraege)"
-        return f"Audit-Kette gebrochen bei Eintrag {self.bruch_bei}: {self.grund}"
+        if self.valid:
+            return f"Audit-Kette intakt ({self.checked} Eintraege)"
+        return f"Audit-Kette gebrochen bei Eintrag {self.broken_at}: {self.reason}"
 
 
-def verify_chain(con: sqlite3.Connection) -> Pruefergebnis:
-    """Prueft die Hash-Kette vollstaendig.
+def verify_chain(con: sqlite3.Connection) -> VerificationResult:
+    """Verifies the hash chain in full.
 
-    Der Manipulationsnachweis der Arbeit. Zwei Pruefungen pro Eintrag:
-    1. Verweist prev_hash auf den tatsaechlichen Vorgaenger? (Loeschen/Einfuegen)
-    2. Passt der gespeicherte Hash zum Inhalt?               (Aendern)
+    The thesis's tamper-evidence proof. Two checks per entry:
+    1. Does prev_hash point to the actual predecessor?  (delete/insert)
+    2. Does the stored hash match the content?           (change)
     """
     rows = con.execute(
-        "SELECT id, ts, akteur, agent, aktion, entscheidung, begruendung,"
-        " vorgang_id, datenquelle, ergebnis, payload_hash, prev_hash, hash"
+        "SELECT id, ts, actor, agent, action, decision, reason,"
+        " case_id, source, outcome, payload_hash, prev_hash, hash"
         " FROM audit ORDER BY id"
     ).fetchall()
 
-    erwarteter_prev = GENESIS_HASH
+    expected_prev = GENESIS_HASH
     for i, r in enumerate(rows):
-        (eid, ts, akteur, agent, aktion, entscheidung, begruendung,
-         vorgang_id, datenquelle, ergebnis, p_hash, prev_hash, h) = r
+        (eid, ts, actor, agent, action, decision, reason,
+         case_id, source, outcome, p_hash, prev_hash, h) = r
 
-        if prev_hash != erwarteter_prev:
-            return Pruefergebnis(
+        if prev_hash != expected_prev:
+            return VerificationResult(
                 False, i, eid,
                 f"prev_hash verweist nicht auf den Vorgaenger "
-                f"(erwartet {erwarteter_prev[:12]}..., gefunden {prev_hash[:12]}...). "
+                f"(erwartet {expected_prev[:12]}..., gefunden {prev_hash[:12]}...). "
                 "Deutet auf einen geloeschten oder eingefuegten Eintrag hin.",
             )
 
-        neu = _eintrag_hash(ts, akteur, agent, aktion, entscheidung, begruendung,
-                            vorgang_id, datenquelle, ergebnis, p_hash, prev_hash)
-        if neu != h:
-            return Pruefergebnis(
+        new = _entry_hash(ts, actor, agent, action, decision, reason,
+                          case_id, source, outcome, p_hash, prev_hash)
+        if new != h:
+            return VerificationResult(
                 False, i, eid,
                 f"Inhalt passt nicht zum gespeicherten Hash "
-                f"(erwartet {neu[:12]}..., gefunden {h[:12]}...). "
+                f"(erwartet {new[:12]}..., gefunden {h[:12]}...). "
                 "Deutet auf eine nachtraegliche Aenderung hin.",
             )
-        erwarteter_prev = h
+        expected_prev = h
 
-    return Pruefergebnis(True, len(rows))
+    return VerificationResult(True, len(rows))
 
 
-def lies_alle(con: sqlite3.Connection, limit: int | None = None, *,
-              vorgang_id: str | None = None) -> list[AuditEintrag]:
-    """Read-only-Zugriff auf den Trail (Aufsichtsmodus der Audit-Komponente).
+def read_all(con: sqlite3.Connection, limit: int | None = None, *,
+             case_id: str | None = None) -> list[AuditEntry]:
+    """Read-only access to the trail (the audit component's oversight mode).
 
-    `vorgang_id` schraenkt auf einen einzelnen Lauf ein. Achtung: eine
-    gefilterte Sicht taugt nicht als Unversehrtheitsnachweis -- `verify_chain()`
-    prueft immer die vollstaendige Kette.
+    `case_id` restricts to a single run. Careful: a filtered view is not
+    proof of integrity -- `verify_chain()` always checks the complete
+    chain.
     """
-    sql = ("SELECT id, ts, akteur, agent, aktion, entscheidung, begruendung,"
-           " vorgang_id, datenquelle, ergebnis, payload_hash, prev_hash, hash"
+    sql = ("SELECT id, ts, actor, agent, action, decision, reason,"
+           " case_id, source, outcome, payload_hash, prev_hash, hash"
            " FROM audit")
-    parameter: tuple = ()
-    if vorgang_id:
-        sql += " WHERE vorgang_id = ?"
-        parameter = (vorgang_id,)
+    params: tuple = ()
+    if case_id:
+        sql += " WHERE case_id = ?"
+        params = (case_id,)
     sql += " ORDER BY id"
     if limit:
         sql += f" LIMIT {int(limit)}"
 
     return [
-        AuditEintrag(
-            id=r[0], ts=r[1], akteur=r[2], agent=r[3], aktion=r[4],
-            entscheidung=Entscheidung(r[5]), begruendung=r[6],
-            vorgang_id=r[7], datenquelle=r[8], ergebnis=r[9],
+        AuditEntry(
+            id=r[0], ts=r[1], actor=r[2], agent=r[3], action=r[4],
+            decision=Decision(r[5]), reason=r[6],
+            case_id=r[7], source=r[8], outcome=r[9],
             payload_hash=r[10], prev_hash=r[11], hash=r[12],
         )
-        for r in con.execute(sql, parameter).fetchall()
+        for r in con.execute(sql, params).fetchall()
     ]
 
 
-def vorgaenge_im_trail(con: sqlite3.Connection) -> list[str]:
-    """Alle Vorgangs-IDs, zu denen es Eintraege gibt (fuer den Filter)."""
+def cases_in_trail(con: sqlite3.Connection) -> list[str]:
+    """All case IDs that have entries (for the filter)."""
     return [r[0] for r in con.execute(
-        "SELECT DISTINCT vorgang_id FROM audit WHERE vorgang_id IS NOT NULL"
-        " ORDER BY vorgang_id"
+        "SELECT DISTINCT case_id FROM audit WHERE case_id IS NOT NULL"
+        " ORDER BY case_id"
     ).fetchall()]

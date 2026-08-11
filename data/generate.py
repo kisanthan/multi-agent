@@ -1,11 +1,11 @@
-"""Generator fuer synthetische Stammdaten und Eingangsdokumente.
+"""Generator for synthetic master data and intake documents.
 
-Es gibt keine Echtdaten (Abschnitt 7 des Fachkonzepts). Alles hier ist erzeugt.
-Der Seed ist fix, damit Laeufe reproduzierbar sind -- eine Anforderung der
-Arbeit, aber auch praktisch: die End-to-End-Szenarien pruefen gegen konkrete
-Belegnummern, die stabil bleiben muessen.
+There is no real data (section 7 of the functional concept). Everything
+here is generated. The seed is fixed so runs are reproducible -- a
+requirement of the thesis, but also practical: the end-to-end scenarios
+check against concrete document numbers that must stay stable.
 
-Aufruf:  python -m data.generate
+Usage:  python -m data.generate
 """
 
 from __future__ import annotations
@@ -22,20 +22,20 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 
-from config import DATA_DIR, DB_PFAD, EINGANG_DIR, MANIFEST_PFAD
+from config import DATA_DIR, DB_PATH, INTAKE_DIR, MANIFEST_PATH
 
 SEED = 20260717
-STICHTAG = date(2026, 7, 17)
+CUTOFF_DATE = date(2026, 7, 17)
 
 fake = Faker("de_DE")
 
 
-# ------------------------------------------------------------------ Stammdaten
+# ------------------------------------------------------------------ Master data
 
-# Realistische CHG-Kostenstellen. Die Referenz (3. Spalte) ist der eindeutige
-# Code, der auf dem Beleg steht und exakt nachgeschlagen wird; die
-# Schluesselwoerter dienen nur der Klaerfall-Anzeige.
-KOSTENSTELLEN = [
+# Realistic CHG cost centers. The reference (3rd column) is the unique code
+# printed on the document and looked up exactly; the keywords serve only
+# the exception-case display.
+COST_CENTERS = [
     ("KST-1000", "IT-Infrastruktur", "KTR-ITINFRA", "server,cloud,azure,rechenzentrum,lizenz,software,hosting"),
     ("KST-1100", "Telekommunikation", "KTR-TELCO", "telefon,mobilfunk,festnetz,internet,datenleitung,voip"),
     ("KST-2000", "Vertrieb", "KTR-SALES", "crm,messe,vertrieb,kundenbesuch,provision"),
@@ -48,9 +48,9 @@ KOSTENSTELLEN = [
     ("KST-7000", "Facility Management", "KTR-FM", "miete,strom,reinigung,gebaeude,instandhaltung"),
 ]
 
-# Feste Lieferanten mit Bezug zu den Prozessbeispielen der Arbeit, plus
-# plausible weitere IT-Lieferanten.
-LIEFERANTEN = [
+# Fixed suppliers tied to the thesis's process examples, plus plausible
+# additional IT suppliers.
+SUPPLIERS = [
     ("LIF-0001", "Deutsche Telekom AG", "DE123475223", "Friedrich-Ebert-Allee 140, 53113 Bonn"),
     ("LIF-0002", "Microsoft Deutschland GmbH", "DE129415943", "Walter-Gropius-Str. 5, 80807 Muenchen"),
     ("LIF-0003", "Dell Technologies GmbH", "DE813335825", "Unterschweinstiege 10, 60549 Frankfurt"),
@@ -61,131 +61,132 @@ LIEFERANTEN = [
     ("LIF-0008", "Salesforce Germany GmbH", "DE259164145", "Erika-Mann-Str. 31, 80636 Muenchen"),
 ]
 
-# AD-Nutzer. Nur Mitglieder von SG-CHG-DocIngest duerfen einspeisen
-# (Least Privilege) -- 'e.extern' ist bewusst kein Mitglied.
-AD_GRUPPEN = [
+# AD users. Only members of SG-CHG-DocIngest may submit documents (Least
+# Privilege) -- 'e.extern' is deliberately not a member.
+AD_GROUPS = [
     ("SG-CHG-DocIngest", "Darf Dokumente in das Reader-Tool einspeisen"),
     ("SG-CHG-Freigabe", "Darf Klaerfaelle und Kostenstellen-Zuordnungen freigeben"),
 ]
 
-AD_NUTZER = [
-    # (upn, anzeigename, rolle, gruppen)
+AD_USERS = [
+    # (upn, display_name, role, groups)
     ("m.keller@chg-meridian.com", "Martina Keller", "einspeiser", ["SG-CHG-DocIngest"]),
     ("t.brandt@chg-meridian.com", "Tobias Brandt", "einspeiser", ["SG-CHG-DocIngest"]),
     ("s.hofmann@chg-meridian.com", "Sabine Hofmann", "pruefer",
      ["SG-CHG-DocIngest", "SG-CHG-Freigabe"]),
     ("r.wagner@chg-meridian.com", "Robert Wagner", "pruefer", ["SG-CHG-Freigabe"]),
-    # Kein Mitglied der Reader-Gruppe -> Szenario 5 (Governance-Demo).
+    # Not a member of the reader group -> scenario 5 (governance demo).
     ("e.extern@partner-consulting.de", "Erik Extern", "beobachter", []),
 ]
 
 
 @dataclass
-class Dokument:
-    """Ein generiertes Eingangsdokument samt Erwartungshaltung.
+class Document:
+    """A generated intake document, along with its expectation.
 
-    Das Manifest ist die Bruecke zwischen Generator und Demo: der CLI-Runner
-    liest daraus, welches Szenario ein Dokument belegt und was herauskommen
-    soll. So steht die Erwartung an einer Stelle statt verstreut im Testcode.
+    The manifest is the bridge between the generator and the demo: the CLI
+    runner reads from it which scenario a document represents and what the
+    outcome should be. That way, the expectation lives in one place instead
+    of being scattered through test code.
     """
 
-    dateiname: str
-    prozess: str            # 'A' | 'B'
-    szenario: str
-    einspeiser: str         # UPN
-    stoerfall: str | None
-    erwartung: str
-    # Fachliche Nutzdaten, gegen die geprueft werden kann:
-    nummer: str | None = None
-    betrag_eur: float | None = None
-    lieferant: str | None = None
-    erwartete_kostenstelle: str | None = None
-    kostenstellen_referenz: str | None = None
+    filename: str
+    process: str            # 'A' | 'B'
+    scenario: str
+    submitter: str          # UPN
+    incident: str | None
+    expectation: str
+    # Business payload to check against:
+    number: str | None = None
+    amount_eur: float | None = None
+    supplier: str | None = None
+    expected_cost_center: str | None = None
+    cost_center_reference: str | None = None
 
 
-def _rechnungsnummer(i: int) -> str:
+def _invoice_number(i: int) -> str:
     return f"RE-2026-{4200 + i:04d}"
 
 
-def erzeuge_stammdaten(con: sqlite3.Connection, rng: random.Random) -> list[dict]:
-    """Legt Lieferanten, Kostenstellen, AD und 50 offene Rechnungen an."""
-    con.executemany("INSERT INTO lieferanten VALUES (?,?,?,?)", LIEFERANTEN)
-    con.executemany("INSERT INTO kostenstellen VALUES (?,?,?,?)", KOSTENSTELLEN)
-    con.executemany("INSERT INTO ad_gruppen VALUES (?,?)", AD_GRUPPEN)
+def generate_master_data(con: sqlite3.Connection, rng: random.Random) -> list[dict]:
+    """Creates suppliers, cost centers, AD data, and 50 open invoices."""
+    con.executemany("INSERT INTO suppliers VALUES (?,?,?,?)", SUPPLIERS)
+    con.executemany("INSERT INTO cost_centers VALUES (?,?,?,?)", COST_CENTERS)
+    con.executemany("INSERT INTO ad_groups VALUES (?,?)", AD_GROUPS)
 
-    for upn, name, rolle, gruppen in AD_NUTZER:
-        con.execute("INSERT INTO ad_nutzer VALUES (?,?,?)", (upn, name, rolle))
-        for g in gruppen:
-            con.execute("INSERT INTO ad_mitgliedschaften VALUES (?,?)", (upn, g))
+    for upn, name, role, groups in AD_USERS:
+        con.execute("INSERT INTO ad_users VALUES (?,?,?)", (upn, name, role))
+        for g in groups:
+            con.execute("INSERT INTO ad_memberships VALUES (?,?)", (upn, g))
 
-    rechnungen = []
+    invoices = []
     for i in range(50):
-        lieferant = rng.choice(LIEFERANTEN)[0]
-        # Breite Betragsspanne, damit die Buchungsschwelle beide Seiten sieht.
-        betrag = round(rng.uniform(150.0, 45_000.0), 2)
-        faellig = STICHTAG + timedelta(days=rng.randint(-30, 60))
+        supplier = rng.choice(SUPPLIERS)[0]
+        # Wide amount range, so the booking threshold sees both sides.
+        amount = round(rng.uniform(150.0, 45_000.0), 2)
+        due = CUTOFF_DATE + timedelta(days=rng.randint(-30, 60))
         r = {
-            "nummer": _rechnungsnummer(i),
-            "betrag_eur": betrag,
-            "faellig_am": faellig.isoformat(),
+            "number": _invoice_number(i),
+            "amount_eur": amount,
+            "due_date": due.isoformat(),
             "status": "offen",
-            "lieferant_id": lieferant,
-            "bezahlt_am": None,
+            "supplier_id": supplier,
+            "paid_at": None,
         }
-        rechnungen.append(r)
+        invoices.append(r)
         con.execute(
-            "INSERT INTO rechnungen VALUES (:nummer,:betrag_eur,:faellig_am,"
-            ":status,:lieferant_id,:bezahlt_am)",
+            "INSERT INTO invoices VALUES (:number,:amount_eur,:due_date,"
+            ":status,:supplier_id,:paid_at)",
             r,
         )
-    return rechnungen
+    return invoices
 
 
 # --------------------------------------------------------------------- PDFs
 
-def _eur(betrag: float) -> str:
-    """Formatiert einen Betrag in deutscher Notation: 1.341,96
+def _format_eur(amount: float) -> str:
+    """Formats an amount in German notation: 1.341,96
 
-    Python formatiert englisch (1,341.96). Ein blosses replace(',', '.') erzeugt
-    '1.341.96' -- zwei Punkte, kein Komma -- und macht den Betrag fuer den
-    Extraktions-Agenten unlesbar. Daher der Umweg ueber ein Platzhalterzeichen.
+    Python formats in English (1,341.96). A plain replace(',', '.') would
+    produce '1.341.96' -- two dots, no comma -- making the amount unreadable
+    for the extraction agent. Hence the detour via a placeholder character.
     """
-    return f"{betrag:,.2f}".translate(str.maketrans({",": ".", ".": ","}))
+    return f"{amount:,.2f}".translate(str.maketrans({",": ".", ".": ","}))
 
 
-def _kopf(c: canvas.Canvas, titel: str, absender: str) -> float:
-    breite, hoehe = A4
-    y = hoehe - 25 * mm
+def _header(c: canvas.Canvas, title: str, sender: str) -> float:
+    width, height = A4
+    y = height - 25 * mm
     c.setFont("Helvetica-Bold", 9)
-    c.drawString(20 * mm, y, absender)
+    c.drawString(20 * mm, y, sender)
     y -= 12 * mm
     c.setFont("Helvetica-Bold", 15)
-    c.drawString(20 * mm, y, titel)
+    c.drawString(20 * mm, y, title)
     y -= 10 * mm
     c.setLineWidth(0.5)
-    c.line(20 * mm, y, breite - 20 * mm, y)
+    c.line(20 * mm, y, width - 20 * mm, y)
     return y - 10 * mm
 
 
-def _zeile(c: canvas.Canvas, y: float, label: str, wert: str, fett: bool = False) -> float:
+def _row(c: canvas.Canvas, y: float, label: str, value: str, bold: bool = False) -> float:
     c.setFont("Helvetica", 10)
     c.drawString(20 * mm, y, label)
-    c.setFont("Helvetica-Bold" if fett else "Helvetica", 10)
-    c.drawString(75 * mm, y, wert)
+    c.setFont("Helvetica-Bold" if bold else "Helvetica", 10)
+    c.drawString(75 * mm, y, value)
     return y - 6 * mm
 
 
-def zahlungsbestaetigung(pfad: Path, *, nummer: str, betrag: float,
-                         lieferant_name: str, bank: str, datum: date) -> None:
-    """Prozess A: Zahlungsbestaetigung mit Rechnungs-/Bestellnummer."""
-    c = canvas.Canvas(str(pfad), pagesize=A4)
-    y = _kopf(c, "Zahlungsbestaetigung", bank)
-    y = _zeile(c, y, "Buchungsdatum:", datum.strftime("%d.%m.%Y"))
-    y = _zeile(c, y, "Auftraggeber:", "CHG-MERIDIAN AG")
-    y = _zeile(c, y, "Empfaenger:", lieferant_name)
+def payment_confirmation(path: Path, *, number: str, amount: float,
+                         supplier_name: str, bank: str, date_: date) -> None:
+    """Process A: payment confirmation with an invoice/order number."""
+    c = canvas.Canvas(str(path), pagesize=A4)
+    y = _header(c, "Zahlungsbestaetigung", bank)
+    y = _row(c, y, "Buchungsdatum:", date_.strftime("%d.%m.%Y"))
+    y = _row(c, y, "Auftraggeber:", "CHG-MERIDIAN AG")
+    y = _row(c, y, "Empfaenger:", supplier_name)
     y -= 4 * mm
-    y = _zeile(c, y, "Verwendungszweck:", nummer, fett=True)
-    y = _zeile(c, y, "Betrag:", f"{_eur(betrag)} EUR", fett=True)
+    y = _row(c, y, "Verwendungszweck:", number, bold=True)
+    y = _row(c, y, "Betrag:", f"{_format_eur(amount)} EUR", bold=True)
     y -= 8 * mm
     c.setFont("Helvetica", 8)
     c.drawString(20 * mm, y, "Diese Bestaetigung wurde maschinell erstellt und ist ohne "
@@ -194,24 +195,24 @@ def zahlungsbestaetigung(pfad: Path, *, nummer: str, betrag: float,
     c.save()
 
 
-def eingangsrechnung(pfad: Path, *, nummer: str, betrag: float, lieferant: tuple,
-                     positionen: list[tuple[str, float]], datum: date,
-                     kostenstellen_referenz: str | None = None) -> None:
-    """Prozess B: Lieferantenrechnung mit Positionen und Kostenstellen-Referenz.
+def incoming_invoice(path: Path, *, number: str, amount: float, supplier: tuple,
+                     line_items: list[tuple[str, float]], date_: date,
+                     cost_center_reference: str | None = None) -> None:
+    """Process B: supplier invoice with line items and cost-center reference.
 
-    Die Kostenstellen-Referenz ist der eindeutige Code, gegen den der
-    Kostenstellen-Agent exakt nachschlaegt. Fehlt sie (None), entsteht ein
-    Klaerfall -- die Zuordnung ist dann nicht eindeutig und geht an den Menschen.
+    The cost-center reference is the unique code the cost-center agent
+    looks up exactly. If it is missing (None), an exception case results --
+    the assignment is then not unique and goes to a human.
     """
-    _, name, ustid, adresse = lieferant
-    c = canvas.Canvas(str(pfad), pagesize=A4)
-    y = _kopf(c, "Rechnung", f"{name} | {adresse}")
-    y = _zeile(c, y, "Rechnungsnummer:", nummer, fett=True)
-    y = _zeile(c, y, "Rechnungsdatum:", datum.strftime("%d.%m.%Y"))
-    y = _zeile(c, y, "USt-IdNr.:", ustid)
-    y = _zeile(c, y, "Rechnungsempfaenger:", "CHG-MERIDIAN AG, Franz-Beer-Str. 111, 88250 Weingarten")
-    if kostenstellen_referenz:
-        y = _zeile(c, y, "Kostenstellenreferenz:", kostenstellen_referenz, fett=True)
+    _, name, vat_id, address = supplier
+    c = canvas.Canvas(str(path), pagesize=A4)
+    y = _header(c, "Rechnung", f"{name} | {address}")
+    y = _row(c, y, "Rechnungsnummer:", number, bold=True)
+    y = _row(c, y, "Rechnungsdatum:", date_.strftime("%d.%m.%Y"))
+    y = _row(c, y, "USt-IdNr.:", vat_id)
+    y = _row(c, y, "Rechnungsempfaenger:", "CHG-MERIDIAN AG, Franz-Beer-Str. 111, 88250 Weingarten")
+    if cost_center_reference:
+        y = _row(c, y, "Kostenstellenreferenz:", cost_center_reference, bold=True)
     y -= 8 * mm
 
     c.setFont("Helvetica-Bold", 10)
@@ -222,11 +223,11 @@ def eingangsrechnung(pfad: Path, *, nummer: str, betrag: float, lieferant: tuple
     c.line(20 * mm, y, 190 * mm, y)
     y -= 6 * mm
 
-    for i, (bez, pos_betrag) in enumerate(positionen, start=1):
+    for i, (label, item_amount) in enumerate(line_items, start=1):
         c.setFont("Helvetica", 10)
         c.drawString(20 * mm, y, str(i))
-        c.drawString(32 * mm, y, bez)
-        c.drawRightString(180 * mm, y, _eur(pos_betrag))
+        c.drawString(32 * mm, y, label)
+        c.drawRightString(180 * mm, y, _format_eur(item_amount))
         y -= 6 * mm
 
     y -= 2 * mm
@@ -234,7 +235,7 @@ def eingangsrechnung(pfad: Path, *, nummer: str, betrag: float, lieferant: tuple
     y -= 6 * mm
     c.setFont("Helvetica-Bold", 10)
     c.drawString(120 * mm, y, "Gesamtbetrag")
-    c.drawRightString(180 * mm, y, _eur(betrag))
+    c.drawRightString(180 * mm, y, _format_eur(amount))
     y -= 12 * mm
     c.setFont("Helvetica", 8)
     c.drawString(20 * mm, y, "Zahlbar innerhalb von 30 Tagen ohne Abzug.")
@@ -242,110 +243,113 @@ def eingangsrechnung(pfad: Path, *, nummer: str, betrag: float, lieferant: tuple
     c.save()
 
 
-def erzeuge_dokumente(rechnungen: list[dict], rng: random.Random) -> list[Dokument]:
-    """Erzeugt die Eingangs-PDFs: Happy Path plus bewusste Stoerfaelle."""
-    EINGANG_DIR.mkdir(parents=True, exist_ok=True)
-    for alt in EINGANG_DIR.glob("*.pdf"):
-        alt.unlink()
+def generate_documents(invoices: list[dict], rng: random.Random) -> list[Document]:
+    """Generates the intake PDFs: happy path plus deliberate incidents."""
+    INTAKE_DIR.mkdir(parents=True, exist_ok=True)
+    for old in INTAKE_DIR.glob("*.pdf"):
+        old.unlink()
 
-    lieferant_nach_id = {l[0]: l for l in LIEFERANTEN}
-    banken = ["Deutsche Bank AG", "Commerzbank AG", "Sparkasse Bodensee"]
-    docs: list[Dokument] = []
+    supplier_by_id = {l[0]: l for l in SUPPLIERS}
+    banks = ["Deutsche Bank AG", "Commerzbank AG", "Sparkasse Bodensee"]
+    docs: list[Document] = []
 
-    # ---- Prozess A, Happy Path: gueltige Zahlungsbestaetigungen -------------
-    # Zwei davon liegen bewusst unter, zwei ueber einer typischen Schwelle von
-    # 10.000 EUR, damit Szenario 1 beide Aufsichtsmodi zeigen kann.
-    guenstig = [r for r in rechnungen if r["betrag_eur"] < 5_000][:2]
-    teuer = [r for r in rechnungen if r["betrag_eur"] > 20_000][:2]
-    for idx, r in enumerate(guenstig + teuer):
-        lief = lieferant_nach_id[r["lieferant_id"]]
+    # ---- Process A, happy path: valid payment confirmations -----------------
+    # Two of them are deliberately below, two above a typical threshold of
+    # 10,000 EUR -- not because the threshold has any effect (booking is
+    # always human-in-the-loop, Thesis §7.4, no amount-based automation), but
+    # to demonstrate exactly that: the same single approval applies
+    # regardless of amount (see tests/test_scenarios.py
+    # ::test_scenario1_large_amount_same_single_approval).
+    cheap = [r for r in invoices if r["amount_eur"] < 5_000][:2]
+    expensive = [r for r in invoices if r["amount_eur"] > 20_000][:2]
+    for idx, r in enumerate(cheap + expensive):
+        sup = supplier_by_id[r["supplier_id"]]
         name = f"A_zahlung_ok_{idx + 1:02d}.pdf"
-        zahlungsbestaetigung(
-            EINGANG_DIR / name,
-            nummer=r["nummer"], betrag=r["betrag_eur"], lieferant_name=lief[1],
-            bank=rng.choice(banken), datum=STICHTAG - timedelta(days=rng.randint(0, 5)),
+        payment_confirmation(
+            INTAKE_DIR / name,
+            number=r["number"], amount=r["amount_eur"], supplier_name=sup[1],
+            bank=rng.choice(banks), date_=CUTOFF_DATE - timedelta(days=rng.randint(0, 5)),
         )
-        unter_schwelle = r["betrag_eur"] < 10_000
-        docs.append(Dokument(
-            dateiname=name, prozess="A", szenario="1_happy_path",
-            einspeiser="m.keller@chg-meridian.com", stoerfall=None,
-            erwartung=("automatische Verbuchung, Status offen -> bezahlt"
-                       if unter_schwelle
-                       else "Betrag ueber Schwelle -> HITL-Freigabe, dann Verbuchung"),
-            nummer=r["nummer"], betrag_eur=r["betrag_eur"], lieferant=lief[1],
+        docs.append(Document(
+            filename=name, process="A", scenario="1_happy_path",
+            submitter="m.keller@chg-meridian.com", incident=None,
+            expectation="Betrag unstrittig -> HITL-Freigabe (immer, "
+                       "unabhaengig vom Betrag) -> Verbuchung, Status offen "
+                       "-> bezahlt",
+            number=r["number"], amount_eur=r["amount_eur"], supplier=sup[1],
         ))
 
-    # ---- Prozess A, Stoerfall: unbekannte Nummer ---------------------------
+    # ---- Process A, incident: unknown number ---------------------------------
     name = "A_zahlung_unbekannte_nummer.pdf"
-    unbekannt = "RE-2026-9999"
-    zahlungsbestaetigung(
-        EINGANG_DIR / name, nummer=unbekannt, betrag=3_480.00,
-        lieferant_name="Dell Technologies GmbH", bank=banken[0], datum=STICHTAG,
+    unknown = "RE-2026-9999"
+    payment_confirmation(
+        INTAKE_DIR / name, number=unknown, amount=3_480.00,
+        supplier_name="Dell Technologies GmbH", bank=banks[0], date_=CUTOFF_DATE,
     )
-    docs.append(Dokument(
-        dateiname=name, prozess="A", szenario="2_unbekannte_nummer",
-        einspeiser="m.keller@chg-meridian.com", stoerfall="nummer_unbekannt",
-        erwartung="Abgleich schlaegt fehl -> Klaerfall -> HITL-Freigabe -> Verbuchung",
-        nummer=unbekannt, betrag_eur=3_480.00, lieferant="Dell Technologies GmbH",
+    docs.append(Document(
+        filename=name, process="A", scenario="2_unbekannte_nummer",
+        submitter="m.keller@chg-meridian.com", incident="nummer_unbekannt",
+        expectation="Abgleich schlaegt fehl -> Klaerfall -> HITL-Freigabe -> Verbuchung",
+        number=unknown, amount_eur=3_480.00, supplier="Dell Technologies GmbH",
     ))
 
-    # ---- Prozess A, Stoerfall: Dublette ------------------------------------
-    # Dieselbe Nummer zweimal: der zweite Lauf muss erkennen, dass die Rechnung
-    # bereits bezahlt ist, statt erneut zu verbuchen.
-    dublette = guenstig[0]
-    lief = lieferant_nach_id[dublette["lieferant_id"]]
+    # ---- Process A, incident: duplicate --------------------------------------
+    # The same number twice: the second run must recognize that the invoice
+    # is already paid, instead of booking it again.
+    duplicate = cheap[0]
+    sup = supplier_by_id[duplicate["supplier_id"]]
     for k in (1, 2):
         name = f"A_zahlung_dublette_{k}.pdf"
-        zahlungsbestaetigung(
-            EINGANG_DIR / name, nummer=dublette["nummer"], betrag=dublette["betrag_eur"],
-            lieferant_name=lief[1], bank=banken[1], datum=STICHTAG,
+        payment_confirmation(
+            INTAKE_DIR / name, number=duplicate["number"], amount=duplicate["amount_eur"],
+            supplier_name=sup[1], bank=banks[1], date_=CUTOFF_DATE,
         )
-        docs.append(Dokument(
-            dateiname=name, prozess="A", szenario="2b_dublette",
-            einspeiser="t.brandt@chg-meridian.com",
-            stoerfall=None if k == 1 else "dublette",
-            erwartung=("Verbuchung" if k == 1
-                       else "bereits bezahlt -> Klaerfall, keine zweite Verbuchung"),
-            nummer=dublette["nummer"], betrag_eur=dublette["betrag_eur"], lieferant=lief[1],
+        docs.append(Document(
+            filename=name, process="A", scenario="2b_dublette",
+            submitter="t.brandt@chg-meridian.com",
+            incident=None if k == 1 else "dublette",
+            expectation=("Verbuchung" if k == 1
+                        else "bereits bezahlt -> Klaerfall, keine zweite Verbuchung"),
+            number=duplicate["number"], amount_eur=duplicate["amount_eur"], supplier=sup[1],
         ))
 
-    # ---- Prozess A, Stoerfall: unplausibler Betrag -------------------------
-    abweichend = rechnungen[10]
-    lief = lieferant_nach_id[abweichend["lieferant_id"]]
+    # ---- Process A, incident: implausible amount -----------------------------
+    mismatched = invoices[10]
+    sup = supplier_by_id[mismatched["supplier_id"]]
     name = "A_zahlung_betrag_unplausibel.pdf"
-    falscher_betrag = round(abweichend["betrag_eur"] * 3.7, 2)
-    zahlungsbestaetigung(
-        EINGANG_DIR / name, nummer=abweichend["nummer"], betrag=falscher_betrag,
-        lieferant_name=lief[1], bank=banken[2], datum=STICHTAG,
+    wrong_amount = round(mismatched["amount_eur"] * 3.7, 2)
+    payment_confirmation(
+        INTAKE_DIR / name, number=mismatched["number"], amount=wrong_amount,
+        supplier_name=sup[1], bank=banks[2], date_=CUTOFF_DATE,
     )
-    docs.append(Dokument(
-        dateiname=name, prozess="A", szenario="2c_betrag_unplausibel",
-        einspeiser="t.brandt@chg-meridian.com", stoerfall="betrag_abweichend",
-        erwartung="Betrag weicht von Stammdaten ab -> Klaerfall",
-        nummer=abweichend["nummer"], betrag_eur=falscher_betrag, lieferant=lief[1],
+    docs.append(Document(
+        filename=name, process="A", scenario="2c_betrag_unplausibel",
+        submitter="t.brandt@chg-meridian.com", incident="betrag_abweichend",
+        expectation="Betrag weicht von Stammdaten ab -> Klaerfall",
+        number=mismatched["number"], amount_eur=wrong_amount, supplier=sup[1],
     ))
 
-    # ---- Prozess A, Stoerfall: unberechtigter Einspeiser (Szenario 5) ------
-    ok = rechnungen[20]
-    lief = lieferant_nach_id[ok["lieferant_id"]]
+    # ---- Process A, incident: unauthorized submitter (scenario 5) -----------
+    ok = invoices[20]
+    sup = supplier_by_id[ok["supplier_id"]]
     name = "A_zahlung_unberechtigt.pdf"
-    zahlungsbestaetigung(
-        EINGANG_DIR / name, nummer=ok["nummer"], betrag=ok["betrag_eur"],
-        lieferant_name=lief[1], bank=banken[0], datum=STICHTAG,
+    payment_confirmation(
+        INTAKE_DIR / name, number=ok["number"], amount=ok["amount_eur"],
+        supplier_name=sup[1], bank=banks[0], date_=CUTOFF_DATE,
     )
-    docs.append(Dokument(
-        dateiname=name, prozess="A", szenario="5_ad_check_verweigert",
-        einspeiser="e.extern@partner-consulting.de", stoerfall="ad_kein_mitglied",
-        erwartung="AD-Check verweigert Zugriff -> Audit-Eintrag, kein Reader-Aufruf",
-        nummer=ok["nummer"], betrag_eur=ok["betrag_eur"], lieferant=lief[1],
+    docs.append(Document(
+        filename=name, process="A", scenario="5_ad_check_verweigert",
+        submitter="e.extern@partner-consulting.de", incident="ad_kein_mitglied",
+        expectation="AD-Check verweigert Zugriff -> Audit-Eintrag, kein Reader-Aufruf",
+        number=ok["number"], amount_eur=ok["amount_eur"], supplier=sup[1],
     ))
 
-    referenz_nach_kst = {k[0]: k[2] for k in KOSTENSTELLEN}
+    reference_by_cost_center = {k[0]: k[2] for k in COST_CENTERS}
 
-    # ---- Prozess B, Happy Path: eindeutige Kostenstellen-Referenz ----------
-    # Jede Rechnung traegt eine eindeutige Kostenstellenreferenz, die exakt
-    # nachgeschlagen wird (kein semantisches Matching).
-    eindeutig = [
+    # ---- Process B, happy path: unique cost-center reference ----------------
+    # Every invoice carries a unique cost-center reference that is looked up
+    # exactly (no semantic matching).
+    unique = [
         ("LIF-0001", [("Mobilfunk Rahmenvertrag, 250 Anschluesse", 8_450.00),
                       ("Festnetz Standort Weingarten", 1_120.00)], "KST-1100"),
         ("LIF-0002", [("Microsoft 365 E5, 1200 Lizenzen, Jahresabrechnung", 31_200.00),
@@ -353,49 +357,49 @@ def erzeuge_dokumente(rechnungen: list[dict], rng: random.Random) -> list[Dokume
         ("LIF-0004", [("Notebook ThinkPad T14, 40 Stueck, Hardware-Rollout", 52_000.00)],
          "KST-3100"),
     ]
-    for idx, (lif_id, positionen, kst) in enumerate(eindeutig, start=1):
-        lief = lieferant_nach_id[lif_id]
-        nummer = f"ER-2026-{7100 + idx:04d}"
-        referenz = referenz_nach_kst[kst]
-        gesamt = round(sum(p[1] for p in positionen), 2)
+    for idx, (sup_id, line_items, kst) in enumerate(unique, start=1):
+        sup = supplier_by_id[sup_id]
+        number = f"ER-2026-{7100 + idx:04d}"
+        reference = reference_by_cost_center[kst]
+        total = round(sum(p[1] for p in line_items), 2)
         name = f"B_rechnung_ok_{idx:02d}.pdf"
-        eingangsrechnung(
-            EINGANG_DIR / name, nummer=nummer, betrag=gesamt, lieferant=lief,
-            positionen=positionen, datum=STICHTAG - timedelta(days=rng.randint(1, 10)),
-            kostenstellen_referenz=referenz,
+        incoming_invoice(
+            INTAKE_DIR / name, number=number, amount=total, supplier=sup,
+            line_items=line_items, date_=CUTOFF_DATE - timedelta(days=rng.randint(1, 10)),
+            cost_center_reference=reference,
         )
-        docs.append(Dokument(
-            dateiname=name, prozess="B", szenario="3_happy_path",
-            einspeiser="m.keller@chg-meridian.com", stoerfall=None,
-            erwartung="eindeutige Kostenstellenreferenz -> exakter Nachschlag -> "
-                      "automatische Archivierung in ELO (Prozessende B)",
-            nummer=nummer, betrag_eur=gesamt, lieferant=lief[1],
-            erwartete_kostenstelle=kst, kostenstellen_referenz=referenz,
+        docs.append(Document(
+            filename=name, process="B", scenario="3_happy_path",
+            submitter="m.keller@chg-meridian.com", incident=None,
+            expectation="eindeutige Kostenstellenreferenz -> exakter Nachschlag -> "
+                       "automatische Archivierung in ELO (Prozessende B)",
+            number=number, amount_eur=total, supplier=sup[1],
+            expected_cost_center=kst, cost_center_reference=reference,
         ))
 
-    # ---- Prozess B, Stoerfall: Kostenstellenreferenz fehlt (Szenario 4) ----
-    # Die Rechnung traegt KEINE Kostenstellenreferenz. Der exakte Nachschlag
-    # scheitert -> Zuordnung nicht eindeutig -> Klaerfall, Mensch entscheidet.
-    lief = lieferant_nach_id["LIF-0006"]
-    nummer = "ER-2026-7200"
-    positionen = [
+    # ---- Process B, incident: cost-center reference missing (scenario 4) ---
+    # The invoice carries NO cost-center reference. The exact lookup fails
+    # -> assignment not unique -> exception case, human decides.
+    sup = supplier_by_id["LIF-0006"]
+    number = "ER-2026-7200"
+    line_items = [
         ("SAP Lizenzverlaengerung Modul FI", 14_800.00),
         ("Anwenderschulung SAP FI, 3 Tage, 12 Teilnehmer", 9_600.00),
     ]
-    gesamt = round(sum(p[1] for p in positionen), 2)
+    total = round(sum(p[1] for p in line_items), 2)
     name = "B_rechnung_ohne_referenz.pdf"
-    eingangsrechnung(
-        EINGANG_DIR / name, nummer=nummer, betrag=gesamt, lieferant=lief,
-        positionen=positionen, datum=STICHTAG - timedelta(days=3),
-        kostenstellen_referenz=None,
+    incoming_invoice(
+        INTAKE_DIR / name, number=number, amount=total, supplier=sup,
+        line_items=line_items, date_=CUTOFF_DATE - timedelta(days=3),
+        cost_center_reference=None,
     )
-    docs.append(Dokument(
-        dateiname=name, prozess="B", szenario="4_kostenstelle_referenz_fehlt",
-        einspeiser="t.brandt@chg-meridian.com", stoerfall="kostenstelle_referenz_fehlt",
-        erwartung="keine Kostenstellenreferenz auf dem Beleg -> Nachschlag "
-                  "scheitert -> Klaerfall, Mensch waehlt Kostenstelle",
-        nummer=nummer, betrag_eur=gesamt, lieferant=lief[1],
-        erwartete_kostenstelle=None, kostenstellen_referenz=None,
+    docs.append(Document(
+        filename=name, process="B", scenario="4_kostenstelle_referenz_fehlt",
+        submitter="t.brandt@chg-meridian.com", incident="kostenstelle_referenz_fehlt",
+        expectation="keine Kostenstellenreferenz auf dem Beleg -> Nachschlag "
+                   "scheitert -> Klaerfall, Mensch waehlt Kostenstelle",
+        number=number, amount_eur=total, supplier=sup[1],
+        expected_cost_center=None, cost_center_reference=None,
     ))
 
     return docs
@@ -405,30 +409,30 @@ def main() -> None:
     rng = random.Random(SEED)
     Faker.seed(SEED)
 
-    DB_PFAD.unlink(missing_ok=True)
-    con = sqlite3.connect(DB_PFAD)
+    DB_PATH.unlink(missing_ok=True)
+    con = sqlite3.connect(DB_PATH)
     con.executescript((DATA_DIR / "schema.sql").read_text(encoding="utf-8"))
 
-    rechnungen = erzeuge_stammdaten(con, rng)
+    invoices = generate_master_data(con, rng)
     con.commit()
 
-    docs = erzeuge_dokumente(rechnungen, rng)
-    MANIFEST_PFAD.write_text(
+    docs = generate_documents(invoices, rng)
+    MANIFEST_PATH.write_text(
         json.dumps([asdict(d) for d in docs], indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
     con.close()
 
-    print(f"Datenbank:   {DB_PFAD}")
-    print(f"  Rechnungen:    {len(rechnungen)} (Status offen)")
-    print(f"  Kostenstellen: {len(KOSTENSTELLEN)}")
-    print(f"  Lieferanten:   {len(LIEFERANTEN)}")
-    print(f"  AD-Nutzer:     {len(AD_NUTZER)}")
-    print(f"Dokumente:   {EINGANG_DIR} ({len(docs)} PDFs)")
+    print(f"Datenbank:   {DB_PATH}")
+    print(f"  Rechnungen:    {len(invoices)} (Status offen)")
+    print(f"  Kostenstellen: {len(COST_CENTERS)}")
+    print(f"  Lieferanten:   {len(SUPPLIERS)}")
+    print(f"  AD-Nutzer:     {len(AD_USERS)}")
+    print(f"Dokumente:   {INTAKE_DIR} ({len(docs)} PDFs)")
     for d in docs:
-        marker = f"  [{d.stoerfall}]" if d.stoerfall else ""
-        print(f"  {d.dateiname:38s} Prozess {d.prozess}  {d.szenario}{marker}")
-    print(f"Manifest:    {MANIFEST_PFAD}")
+        marker = f"  [{d.incident}]" if d.incident else ""
+        print(f"  {d.filename:38s} Prozess {d.process}  {d.scenario}{marker}")
+    print(f"Manifest:    {MANIFEST_PATH}")
 
 
 if __name__ == "__main__":

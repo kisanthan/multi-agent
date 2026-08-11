@@ -1,9 +1,9 @@
-# Streamlit-Konfiguration der Oberflaeche.
+# Streamlit configuration for the UI.
 
 [client]
-# Blendet die Entwickler-Werkzeugleiste aus -- insbesondere den
-# "Deploy"-Knopf samt Dialog. Der Prototyp wird nicht aus der App heraus
-# veroeffentlicht; der Knopf waere eine Einladung ins Leere.
+# Hides the developer toolbar -- in particular the "Deploy" button and its
+# dialog. The prototype is not published from within the app; the button
+# would be an invitation to nowhere.
 toolbarMode = "minimal"
 
 [browser]

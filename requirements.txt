@@ -1,3 +1,17 @@
+# Full pinned dependency closure (direct + transitive), not a curated
+# top-level list -- this is what makes `pip install -r requirements.txt`
+# reproducible (docs/grenzen.md's environment note). Some entries look
+# unused because the project's own code never imports them directly, but
+# each is a real transitive dependency: GitPython/gitdb/smmap <- streamlit,
+# onnxruntime/flatbuffers <- pymupdf-layout <- pymupdf4llm, sqlite-vec <-
+# langgraph-checkpoint-sqlite (verified via `pip show <pkg>`). Removing
+# such a line does not stop the package from being installed -- it only
+# drops the version pin, which pip's resolver then re-picks freely.
+#
+# Not included: `docling`, the alternate reader parser selectable via
+# READER_PARSER=docling (see README.md) -- opt-in and heavier (~1-2 GB of
+# weights), install manually if you use it; tools/reader.py gives an
+# actionable error if it's missing.
 aiosqlite==0.22.1
 altair==6.2.2
 annotated-doc==0.0.4
@@ -10,6 +24,7 @@ cachetools==7.1.4
 certifi==2026.6.17
 charset-normalizer==3.4.9
 click==8.4.2
+coverage==7.15.4
 distro==1.9.0
 docstring_parser==0.18.0
 Faker==40.31.0
@@ -61,6 +76,7 @@ pymupdf==1.28.0
 pymupdf-layout==1.28.0
 pymupdf4llm==1.28.0
 pytest==9.1.1
+pytest-cov==7.1.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
 python-multipart==0.0.32

@@ -1,8 +1,8 @@
-"""Zentrale Konfiguration aus .env.
+"""Central configuration, loaded from .env.
 
-Liegt auf oberster Ebene und importiert nichts aus dem Projekt: sowohl die
-Governance-Schicht (Betragsschwellen) als auch die LLM-Schicht (Modellwahl)
-lesen daraus, ohne dass dadurch eine Abhaengigkeit zwischen beiden entsteht.
+Lives at the top level and imports nothing from the project: both the
+governance layer (amount thresholds) and the LLM layer (model selection)
+read from here without creating a dependency between the two.
 """
 
 from __future__ import annotations
@@ -12,16 +12,16 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-PROJEKT_WURZEL = Path(__file__).parent
-DATA_DIR = PROJEKT_WURZEL / "data"
-DB_PFAD = DATA_DIR / "stammdaten.db"
-CHECKPOINT_PFAD = DATA_DIR / "checkpoints.sqlite"
-EINGANG_DIR = DATA_DIR / "eingang"
-MANIFEST_PFAD = DATA_DIR / "manifest.json"
+PROJECT_ROOT = Path(__file__).parent
+DATA_DIR = PROJECT_ROOT / "data"
+DB_PATH = DATA_DIR / "stammdaten.db"
+CHECKPOINT_PATH = DATA_DIR / "checkpoints.sqlite"
+INTAKE_DIR = DATA_DIR / "eingang"
+MANIFEST_PATH = DATA_DIR / "manifest.json"
 
 
-class ModellModus(str, Enum):
-    LOKAL = "lokal"
+class ModelMode(str, Enum):
+    LOCAL = "lokal"
     HYBRID = "hybrid"
     CLOUD = "cloud"
 
@@ -31,25 +31,30 @@ class ReaderParser(str, Enum):
     DOCLING = "docling"
 
 
-class Einstellungen(BaseSettings):
+class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=PROJEKT_WURZEL / ".env", env_file_encoding="utf-8", extra="ignore"
+        env_file=PROJECT_ROOT / ".env", env_file_encoding="utf-8", extra="ignore"
     )
 
-    # Zulaessige Abweichung zwischen Zahlbetrag und Stammdaten-Betrag, bevor ein
-    # Klaerfall ausgeloest wird. Der Buchungs-Agent ist unabhaengig vom Betrag
-    # immer Human-in-the-loop (Thesis §7.4) -- es gibt bewusst keine Schwelle.
-    betrag_toleranz_eur: float = 0.01
+    # Allowed deviation between the paid amount and the master-data amount
+    # before an exception case is raised. The booking agent is always
+    # human-in-the-loop regardless of the amount (Thesis §7.4) -- there is
+    # deliberately no threshold for it.
+    amount_tolerance_eur: float = 0.01
 
-    modell_modus: ModellModus = ModellModus.LOKAL
+    model_mode: ModelMode = ModelMode.LOCAL
     ollama_base_url: str = "http://localhost:11434"
-    ollama_modell_klein: str = "qwen3:8b"
-    ollama_modell_vision: str = "llama3.2-vision:11b"
+    ollama_model_small: str = "qwen3:8b"
+    # llama3.2-vision:11b (the model named in the original functional
+    # concept) failed to load in this project's own testing ("unknown model
+    # architecture: mllama"); qwen2.5vl:7b is confirmed working -- see
+    # docs/grenzen.md.
+    ollama_model_vision: str = "qwen2.5vl:7b"
 
     anthropic_api_key: str = ""
-    # Modell-IDs Stand 17.07.2026 (wechseln quartalsweise -- siehe docs/grenzen.md).
-    cloud_modell_frontier: str = "claude-opus-4-8"
-    cloud_modell_klein: str = "claude-haiku-4-5"
+    # Model IDs as of 2026-07-17 (change quarterly -- see docs/grenzen.md).
+    cloud_model_frontier: str = "claude-opus-4-8"
+    cloud_model_small: str = "claude-haiku-4-5"
 
     reader_parser: ReaderParser = ReaderParser.PYMUPDF4LLM
 
@@ -57,4 +62,4 @@ class Einstellungen(BaseSettings):
     elo_url: str = "http://localhost:8002"
 
 
-einstellungen = Einstellungen()
+settings = Settings()

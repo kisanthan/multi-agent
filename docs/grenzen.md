@@ -1,126 +1,130 @@
-# Grenzen des Prototyps
+# Limitations of the prototype
 
-Der Prototyp ist ein **Demonstrations- und Machbarkeitsartefakt** (Design
-Science Research nach Hevner et al. 2004), nicht produktionsreif. Diese
-Grenzen gehören in den Fallbeispiel-Text (Kap. 6) und in die Limitationen der
-Arbeit.
+The prototype is a **demonstration and feasibility artifact** (Design
+Science Research per Hevner et al. 2004), not production-ready. These
+limitations belong in the case-study text (chapter 6) and in the thesis's
+limitations section.
 
-## Was der Prototyp belegt — und was nicht
+## What the prototype demonstrates -- and what it does not
 
-**Belegt:** die *Architektur* ist machbar. Rollen-/risikobasierte
-Agentenkonfiguration, Human-in-the-loop an Risikostellen, Least Privilege,
-manipulationsgeschützter Audit-Trail und deterministische Governance außerhalb
-des Sprachmodells laufen zusammen in einem lauffähigen System.
+**Demonstrated:** the *architecture* is feasible. Role-/risk-based agent
+configuration, human-in-the-loop at risk points, Least Privilege,
+tamper-evident audit trail, and deterministic governance outside the
+language model all work together in a running system.
 
-**Nicht belegt:** die *Extraktionsgüte* auf Echtdaten. Alle Dokumente sind
-synthetisch, nativ erzeugt (nicht gescannt) und strukturell sauber. Reale
-Eingangsrechnungen sind heterogener (Scans, Fremdsprachen, uneinheitliche
-Layouts, OCR-Fehler). Der Prototyp sagt nichts über die Trefferquote der
-Klassifikation/Extraktion unter realen Bedingungen aus. Diese Unterscheidung
-ist zentral und sollte in Kap. 6 klar benannt werden.
+**Not demonstrated:** *extraction quality* on real data. All documents are
+synthetic, natively generated (not scanned), and structurally clean. Real
+incoming invoices are more heterogeneous (scans, foreign languages,
+inconsistent layouts, OCR errors). The prototype says nothing about the hit
+rate of classification/extraction under real-world conditions. This
+distinction is central and should be clearly stated in chapter 6.
 
-## Konkrete Limitationen
+## Concrete limitations
 
-### L1 — Synthetische Daten
-Seed-fest generiert (`data/generate.py`). Störfälle (unbekannte Nummer,
-Dublette, unplausibler Betrag, mehrdeutige Kostenstelle, unberechtigter
-Einspeiser) sind bewusst konstruiert, nicht empirisch beobachtet. Die
-Kostenstellen-Zuordnungsregeln sind vereinfachte Schlüsselwortlisten.
+### L1 -- Synthetic data
+Generated with a fixed seed (`data/generate.py`). Incidents (unknown
+number, duplicate, implausible amount, ambiguous cost center, unauthorized
+submitter) are deliberately constructed, not empirically observed. The
+cost-center assignment rules are simplified keyword lists.
 
-### L2 — Schema-Adhärenz lokaler Modelle (Risiko R1)
-Lokale Modelle halten ein übergebenes JSON-Schema nicht zuverlässig ein; für
-Ollama ist das ein offener, dokumentierter Bug
-([ollama/ollama#15540](https://github.com/ollama/ollama/issues/15540), Stand
-April 2026), betreffend u. a. Gemma 4 26B und Qwen 3 9B.
+### L2 -- Schema adherence of local models (risk R1)
+Local models do not reliably honor a supplied JSON schema; for Ollama this
+is an open, documented bug
+([ollama/ollama#15540](https://github.com/ollama/ollama/issues/15540), as
+of April 2026), affecting Gemma 4 26B and Qwen 3 9B, among others.
 
-Der Prototyp behandelt das **nicht als behobenes Problem, sondern als
-abgefangenes**: `llm/extraktion.py` validiert jede Modellantwort gegen das
-Pydantic-Schema, fasst bei Verletzung genau einmal mit dem konkreten Fehler
-nach und eskaliert dann in die HITL-Queue statt zu raten. Ein Modellfehler wird
-so zum Freigabefall, nicht zum stillen Datenfehler. Das ist selbst ein
-Architekturargument der Arbeit — aber es bleibt eine Kompensation, keine
-Garantie für Modellqualität.
+The prototype treats this **not as a fixed problem, but as a caught one**:
+`llm/extraction.py` validates every model response against the Pydantic
+schema, retries exactly once with the concrete error on a violation, and
+then escalates into the HITL queue instead of guessing. A model failure
+thereby becomes an approval case, not a silent data error. This is itself
+an architectural argument of the thesis -- but it remains a compensation,
+not a guarantee of model quality.
 
-### L3 — Gemockte Zielsysteme
-Navision (Dynamics NAV) und ELO sind FastAPI-Mocks. Sie bilden die Schnittstellen
-plausibel nach (inkl. Vorbedingungsprüfung und Ablehnung), aber nicht die
-Fachlogik, Performance oder Fehlermodi der Echtsysteme. Die AD-/Entra-Anbindung
-ist eine SQLite-Tabelle, kein echtes Verzeichnis; es gibt keine echte
-Authentifizierung — der „angemeldete Nutzer" ist im Prototyp eine Auswahl.
+### L3 -- Mocked target systems
+Navision (Dynamics NAV) and ELO are FastAPI mocks. They plausibly replicate
+the interfaces (including precondition checks and rejection), but not the
+business logic, performance, or failure modes of the real systems. The
+AD/Entra connection is a SQLite table, not a real directory; there is no
+real authentication -- the "signed-in user" is a selection in the
+prototype.
 
-### L3b — Kostenstellenreferenz als Betriebsannahme
-Der Kostenstellen-Agent ist ein exakter referenzieller Nachschlag (Thesis §7.4):
-Er setzt voraus, dass der Beleg eine maschinenlesbare Kostenstellenreferenz trägt
-(im Prototyp ein Code `KTR-…`, den der Extraktions-Agent liest). Reale
-Eingangsrechnungen tragen eine solche Referenz nicht immer explizit — dann greift
-korrekterweise der Klärfall (menschliche Zuordnung) häufiger. Der Prototyp
-demonstriert den deterministischen Pfad; die Häufigkeit des Klärfalls auf
-Echtbelegen ist empirisch offen.
+### L3b -- Cost-center reference as an operational assumption
+The cost-center agent is an exact referential lookup (Thesis §7.4): it
+assumes the document carries a machine-readable cost-center reference (in
+the prototype a code `KTR-…` that the extraction agent reads). Real
+incoming invoices do not always carry such a reference explicitly -- then
+the exception case (human assignment) correctly kicks in more often. The
+prototype demonstrates the deterministic path; the frequency of the
+exception case on real documents is empirically open.
 
-### L4 — Governance-Umfang
-Die Policy-Engine deckt die im Fachkonzept genannten Regeln ab (RBAC,
-Autonomiestufen, Betragsschwellen, Vier-Augen-Prinzip). Sie ist kein
-vollständiges ABAC-/Zero-Trust-System; Just-in-Time-Rechtevergabe und Zero
-Standing Privilege sind konzeptionell vorgesehen, aber nicht implementiert.
+### L4 -- Governance scope
+The policy engine covers the rules named in the functional concept (RBAC,
+autonomy levels, amount thresholds, four-eyes principle). It is not a
+complete ABAC/Zero-Trust system; just-in-time privilege grants and Zero
+Standing Privilege are conceptually intended but not implemented.
 
-### L5 — Audit-Trail-Schutz
-Die Hash-Verkettung erkennt nachträgliche Manipulation zuverlässig
-(`verify_chain()`), und DB-Trigger verhindern UPDATE/DELETE über die Anwendung.
-Ein Angreifer mit direktem Schreibzugriff auf die SQLite-Datei könnte die Kette
-zwar nicht unbemerkt *fälschen*, aber die gesamte Tabelle *neu aufbauen*. Echte
-Manipulationssicherheit erforderte externe Verankerung (z. B. periodisches
-Veröffentlichen des Kopf-Hashes, WORM-Speicher). Für ein Demonstrationsartefakt
-ist die Verkettung ausreichend und der Nachweis erbracht.
+### L5 -- Audit-trail protection
+The hash chaining reliably detects subsequent tampering (`verify_chain()`),
+and DB triggers prevent UPDATE/DELETE through the application. An attacker
+with direct write access to the SQLite file could not *forge* the chain
+unnoticed, but could *rebuild* the entire table. Real tamper-proofing would
+require external anchoring (e.g., periodically publishing the head hash,
+WORM storage). For a demonstration artifact, the chaining is sufficient and
+the proof is delivered.
 
-### L6 — Keine Nebenläufigkeit / kein Mehrbenutzerbetrieb
-SQLite im WAL-Modus, ein Vorgang zur Zeit gedacht. Parallele Läufe gegen
-dieselbe DB sind nicht abgesichert.
+### L6 -- No concurrency / no multi-user operation
+SQLite in WAL mode, designed for one case at a time. Parallel runs against
+the same DB are not safeguarded.
 
-### L7 — Modellversionen und -preise
-Alle Modell-IDs (`claude-opus-4-8`, `claude-haiku-4-5`, `qwen3:8b`,
-`llama3.2-vision:11b`) und Preise sind mit Abrufdatum **17.07.2026** zu
-verstehen und wechseln quartalsweise.
+### L7 -- Model versions and prices
+All model IDs (`claude-opus-4-8`, `claude-haiku-4-5`, `qwen3:8b`,
+`qwen2.5vl:7b`) and prices should be read as of the retrieval date
+**2026-07-17** and change quarterly. The vision model was originally
+`llama3.2-vision:11b` per the functional concept, but failed to load under
+Ollama in this project's own testing ("unknown model architecture:
+mllama") and was replaced with the confirmed-working `qwen2.5vl:7b`.
 
-### L8 — Oberfläche führt Vorgänge blockierend aus
-Die Streamlit-UI fährt einen Vorgang synchron im Request des startenden
-Browser-Tabs (`app.stream()` mit Live-Fortschritt). Mit lokalem Modell dauert
-das ein bis drei Minuten, in denen dieser Tab belegt ist. Ein Produktivsystem
-hätte hier eine Auftragswarteschlange (Worker, Job-Queue). Für die Demonstration
-ist die blockierende Variante bewusst gewählt: sie kommt ohne Nebenläufigkeit
-aus und macht jeden Knoten in dem Moment sichtbar, in dem er läuft. Freigaben
-aus einer zweiten Sitzung sind nicht betroffen, weil der Vorgangszustand im
-LangGraph-Checkpoint liegt und nicht im Browser.
+### L8 -- The UI runs cases in a blocking manner
+The Streamlit UI runs a case synchronously within the starting browser
+tab's request (`app.stream()` with live progress). With a local model this
+takes one to three minutes, during which this tab is occupied. A
+production system would have a job queue (workers) here. For the
+demonstration, the blocking variant is deliberately chosen: it needs no
+concurrency and makes every node visible the moment it runs. Approvals from
+a second session are unaffected, because the case state lives in the
+LangGraph checkpoint, not in the browser.
 
-### L9 — Erweiterung des Audit-Trails erzwingt einen Kettenneuaufbau
-Der Trail führt seit dem UI-Umbau die Felder `vorgang_id`, `datenquelle` und
-`ergebnis` als eigene Spalten; sie gehen in den Hash ein, damit sie ebenso
-manipulationsgeschützt sind wie der übrige Eintrag (damit ist zugleich der
-offene Punkt O2 aus
-[abschlussbericht-thesis-angleichung.md](abschlussbericht-thesis-angleichung.md)
-geschlossen).
+### L9 -- Extending the audit trail forces a chain rebuild
+Since the UI rework, the trail carries the fields `case_id`, `source`, and
+`outcome` as their own columns; they feed into the hash so they are just as
+tamper-evident as the rest of the entry (this also closes open point O2
+from
+[abschlussbericht-thesis-angleichung.md](abschlussbericht-thesis-angleichung.md)).
 
-Die Kehrseite ist grundsätzlicher Natur und für die Arbeit aufschlussreich:
-**eine hash-verkettete Tabelle lässt sich nicht schema-migrieren.** Bestehende
-Einträge wurden ohne die neuen Felder gehasht; nimmt man sie ins Hashmaterial
-auf, bricht die Kette für jeden Altbestand. Im Prototyp ist das folgenlos —
-alle Daten sind synthetisch, `python -m data.generate` baut sie neu auf. Ein
-Produktivsystem bräuchte stattdessen eine versionierte Kette: die alte Kette
-wird abgeschlossen und ihr Kopf-Hash als Genesis der neuen Kette verankert, mit
-einer Versionsmarke je Eintrag. Der Prototyp setzt das nicht um.
+The flip side is more fundamental and instructive for the thesis: **a
+hash-chained table cannot be schema-migrated.** Existing entries were
+hashed without the new fields; including them in the hash material would
+break the chain for every legacy entry. In the prototype this is
+consequence-free -- all data is synthetic, and `python -m data.generate`
+rebuilds it from scratch. A production system would instead need a
+versioned chain: the old chain is closed off and its head hash anchored as
+the genesis of the new chain, with a version marker per entry. The
+prototype does not implement this.
 
-### L10 — Vier-Augen-Prinzip nur teilweise erzwungen
-`governance/policy.py` prüft die Mitgliedschaft in `SG-CHG-Freigabe`, aber
-nicht, ob Prüfer und Einspeiser dieselbe Person sind. Die Oberfläche weist
-sichtbar darauf hin, wenn beide identisch sind; technisch verhindert wird es
-nicht. Eine Durchsetzung wäre eine Erweiterung der Policy (mit eigenen Tests)
-und ist bewusst nicht Teil des UI-Umbaus.
+### L10 -- Four-eyes principle only partially enforced
+`governance/policy.py` checks membership in `SG-CHG-Freigabe`, but not
+whether the approver and the submitter are the same person. The UI visibly
+flags it when both are identical; it is not technically prevented.
+Enforcing it would be an extension of the policy (with its own tests) and
+is deliberately not part of the UI rework.
 
-## Umgebungsbedingte Hinweise (dieser Rechner)
+## Environment-related notes (this machine)
 
-- Läuft auf Python 3.14; alle Dependencies haben native Wheels. `uv` ließ sich
-  wegen defekter Homebrew-Rechte nicht installieren — venv + gepinnte
-  `requirements.txt` erfüllen die Reproduzierbarkeit gleichwertig.
-- Der Faker-Import ist auf diesem (stark gefüllten) Dateisystem ungewöhnlich
-  langsam (~40 s). Deshalb importieren nur `data/generate.py` Faker; Demo und
-  Tests nutzen die Pfade aus `config.py` und bleiben schnell. Testdaten werden
-  einmal per `python -m data.generate` erzeugt.
+- Runs on Python 3.14; all dependencies have native wheels. `uv` could not
+  be installed due to broken Homebrew permissions -- venv + a pinned
+  `requirements.txt` satisfy reproducibility just as well.
+- The Faker import is unusually slow on this (heavily filled) filesystem
+  (~40s). That is why only `data/generate.py` imports Faker; the demo and
+  tests use the paths from `config.py` and stay fast. Test data is
+  generated once via `python -m data.generate`.

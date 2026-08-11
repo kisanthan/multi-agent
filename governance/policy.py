@@ -1,13 +1,12 @@
-"""Policy-/Governance-Komponente: deterministisches RBAC/ABAC-Enforcement.
+"""Policy/governance component: deterministic RBAC/ABAC enforcement.
 
-Die zentrale technische Aussage der Arbeit: Berechtigungs- und
-Policy-Pruefungen laufen als regulaere Logik, NICHT im Sprachmodell
-(Abschnitt 7 des Fachkonzepts). Dieses Modul importiert daher weder einen
-LLM-Client noch irgendetwas aus `agents/` -- tests/test_schichtgrenze.py
-erzwingt das.
+The thesis's central technical claim: permission and policy checks run as
+regular logic, NOT inside the language model (section 7 of the functional
+concept). This module therefore imports neither an LLM client nor anything
+from `agents/` -- tests/test_layer_boundaries.py enforces this.
 
-Der praktische Beleg: jede Entscheidung hier ist mit einem Unit-Test
-reproduzierbar pruefbar. Bei einem Sprachmodell waere sie das nicht.
+The practical evidence: every decision here is reproducibly verifiable with
+a unit test. With a language model, it would not be.
 """
 
 from __future__ import annotations
@@ -17,124 +16,124 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from governance import ad
-from registry import Aufsichtsmodus, Autonomiestufe, konfiguration
+from agent_registry import AutonomyLevel, OversightMode, get_config
 
 
-class Ergebnis(str, Enum):
-    ERLAUBT = "erlaubt"
-    FREIGABE_NOETIG = "freigabe_noetig"
-    VERWEIGERT = "verweigert"
+class Outcome(str, Enum):
+    ALLOWED = "erlaubt"
+    APPROVAL_NEEDED = "freigabe_noetig"
+    DENIED = "verweigert"
 
 
 @dataclass(frozen=True)
-class Entscheid:
-    """Das Ergebnis einer Policy-Pruefung.
+class Ruling:
+    """The result of a policy check.
 
-    `regel` benennt die Regel, die gegriffen hat. Das ist kein Logging-Luxus:
-    im Audit-Trail steht damit nicht nur *dass* etwas verweigert wurde, sondern
-    *warum* -- und das ist die Nachvollziehbarkeit, die die Arbeit fordert.
+    `rule` names the rule that fired. That is not logging luxury: the audit
+    trail then records not only *that* something was denied, but *why* --
+    and that is the traceability the thesis requires.
     """
 
-    ergebnis: Ergebnis
-    regel: str
-    begruendung: str
-    kontext: dict = field(default_factory=dict)
+    outcome: Outcome
+    rule: str
+    reason: str
+    context: dict = field(default_factory=dict)
 
     @property
-    def erlaubt(self) -> bool:
-        return self.ergebnis is Ergebnis.ERLAUBT
+    def allowed(self) -> bool:
+        return self.outcome is Outcome.ALLOWED
 
     @property
-    def braucht_freigabe(self) -> bool:
-        return self.ergebnis is Ergebnis.FREIGABE_NOETIG
+    def needs_approval(self) -> bool:
+        return self.outcome is Outcome.APPROVAL_NEEDED
 
     def __str__(self) -> str:
-        return f"[{self.ergebnis.value}] {self.regel}: {self.begruendung}"
+        return f"[{self.outcome.value}] {self.rule}: {self.reason}"
 
 
-def pruefe_schreibaktion(
+def check_write_action(
     con: sqlite3.Connection,
     *,
     agent_id: str,
-    akteur: str,
-    aktion: str,
-    betrag_eur: float | None = None,
-) -> Entscheid:
-    """Vorgeschaltete Pruefung vor JEDER Schreibaktion.
+    actor: str,
+    action: str,
+    amount_eur: float | None = None,
+) -> Ruling:
+    """Upfront check before EVERY write action.
 
-    Die Regeln werden in dieser Reihenfolge geprueft; die erste, die greift,
-    entscheidet. Die Reihenfolge ist bewusst restriktiv-zuerst: die
-    Autonomiestufe wird geprueft, bevor der Betrag ueberhaupt betrachtet wird,
-    damit ein Agent der Stufe 1 auch bei 0 EUR nicht schreiben kann.
+    The rules are checked in this order; the first one that fires decides.
+    The order is deliberately restrictive-first: the autonomy level is
+    checked before the amount is even considered, so that a level-1 agent
+    cannot write even at 0 EUR.
     """
-    cfg = konfiguration(agent_id)
-    basis = {"agent": agent_id, "akteur": akteur, "aktion": aktion,
-             "autonomiestufe": cfg.autonomiestufe.value if cfg.autonomiestufe else None,
-             "aufsicht": cfg.aufsicht.value}
+    cfg = get_config(agent_id)
+    base = {"agent": agent_id, "actor": actor, "action": action,
+            "autonomy_level": cfg.autonomy_level.value if cfg.autonomy_level else None,
+            "oversight": cfg.oversight.value}
 
-    # Regel 1 -- Zero Trust: unbekannte Akteure brechen den Vorgang ab.
+    # Rule 1 -- Zero Trust: unknown actors abort the case.
     try:
-        nutzer = ad.lade_nutzer(con, akteur)
-    except ad.UnbekannterNutzer as e:
-        return Entscheid(Ergebnis.VERWEIGERT, "zero_trust", str(e), basis)
+        user = ad.load_user(con, actor)
+    except ad.UnknownUser as e:
+        return Ruling(Outcome.DENIED, "zero_trust", str(e), base)
 
-    # Regel 2 -- Least Privilege: Komponenten ohne Schreibrecht schreiben nie.
-    if not cfg.darf_schreiben:
-        return Entscheid(
-            Ergebnis.VERWEIGERT, "least_privilege",
-            f"{cfg.name} hat kein Schreibrecht (Typ {cfg.typ.value}).", basis,
+    # Rule 2 -- Least Privilege: components without write access never write.
+    if not cfg.can_write:
+        return Ruling(
+            Outcome.DENIED, "least_privilege",
+            f"{cfg.name} hat kein Schreibrecht (Typ {cfg.type.value}).", base,
         )
 
-    # Regel 3 -- Autonomiestufe: Stufe 1 (Lesen) und 2 (Vorschlag) duerfen
-    # nicht ausfuehren, unabhaengig von allem anderen.
-    if cfg.autonomiestufe is None or cfg.autonomiestufe < Autonomiestufe.REVERSIBLES_SCHREIBEN:
-        stufe = cfg.autonomiestufe.value if cfg.autonomiestufe else "keine"
-        return Entscheid(
-            Ergebnis.VERWEIGERT, "autonomiestufe",
-            f"{cfg.name} hat Autonomiestufe {stufe}; Schreiben erfordert "
-            f"mindestens Stufe {Autonomiestufe.REVERSIBLES_SCHREIBEN.value}.", basis,
+    # Rule 3 -- Autonomy level: level 1 (read) and 2 (proposal) may not
+    # execute, regardless of anything else.
+    if cfg.autonomy_level is None or cfg.autonomy_level < AutonomyLevel.REVERSIBLE_WRITE:
+        level = cfg.autonomy_level.value if cfg.autonomy_level else "keine"
+        return Ruling(
+            Outcome.DENIED, "autonomy_level",
+            f"{cfg.name} hat Autonomiestufe {level}; Schreiben erfordert "
+            f"mindestens Stufe {AutonomyLevel.REVERSIBLE_WRITE.value}.", base,
         )
 
-    # Regel 4 -- Aufsichtsmodus aus der Registry.
-    # Der Buchungs-Agent ist Human-in-the-loop (Thesis §7.4): der finanzwirksame
-    # Buchungsschritt erfordert immer eine menschliche Freigabe, unabhaengig vom
-    # Betrag. Eine betragsbasierte Schwelle gibt es bewusst nicht -- das waere
-    # eine Abschwaechung der im Konzept geforderten durchgaengigen Aufsicht.
-    if cfg.aufsicht is Aufsichtsmodus.HUMAN_IN_THE_LOOP:
-        kontext = {**basis, "betrag_eur": betrag_eur}
-        return Entscheid(
-            Ergebnis.FREIGABE_NOETIG, "aufsichtsmodus",
-            f"{cfg.name} ist Human-in-the-loop -- Freigabe erforderlich.", kontext,
+    # Rule 4 -- oversight mode from the registry.
+    # The booking agent is human-in-the-loop (Thesis §7.4): the financially
+    # effective booking step always requires human approval, regardless of
+    # amount. There is deliberately no amount-based threshold -- that would
+    # weaken the continuous oversight the concept requires.
+    if cfg.oversight is OversightMode.HUMAN_IN_THE_LOOP:
+        context = {**base, "amount_eur": amount_eur}
+        return Ruling(
+            Outcome.APPROVAL_NEEDED, "oversight_mode",
+            f"{cfg.name} ist Human-in-the-loop -- Freigabe erforderlich.", context,
         )
-    if cfg.aufsicht is Aufsichtsmodus.HUMAN_ON_THE_LOOP:
-        return Entscheid(
-            Ergebnis.ERLAUBT, "aufsichtsmodus",
+    if cfg.oversight is OversightMode.HUMAN_ON_THE_LOOP:
+        return Ruling(
+            Outcome.ALLOWED, "oversight_mode",
             f"{cfg.name} ist Human-on-the-loop -- Ausfuehrung mit Audit-Eintrag.",
-            basis,
+            base,
         )
 
-    # Regel 5 -- Default deny. Ein nicht abgedeckter Aufsichtsmodus ist ein
-    # Konfigurationsfehler und darf nicht als Erlaubnis durchgehen.
-    return Entscheid(
-        Ergebnis.VERWEIGERT, "default_deny",
-        f"Aufsichtsmodus {cfg.aufsicht.value} deckt keine Schreibaktion ab.", basis,
+    # Rule 5 -- default deny. An uncovered oversight mode is a configuration
+    # error and must not pass as a permission.
+    return Ruling(
+        Outcome.DENIED, "default_deny",
+        f"Aufsichtsmodus {cfg.oversight.value} deckt keine Schreibaktion ab.", base,
     )
 
 
-def pruefe_freigabe(con: sqlite3.Connection, *, akteur: str, agent_id: str) -> Entscheid:
-    """Prueft, ob ein Mensch einen HITL-Punkt entscheiden darf (Vier-Augen-Prinzip)."""
-    cfg = konfiguration(agent_id)
-    ergebnis = ad.pruefe_freigabe_berechtigung(con, akteur)
-    kontext = {"agent": agent_id, "akteur": akteur, "aufsicht": cfg.aufsicht.value}
-    if not ergebnis.erlaubt:
-        return Entscheid(Ergebnis.VERWEIGERT, "freigabe_rbac", ergebnis.begruendung, kontext)
-    return Entscheid(Ergebnis.ERLAUBT, "freigabe_rbac", ergebnis.begruendung, kontext)
+def check_approval(con: sqlite3.Connection, *, actor: str, agent_id: str) -> Ruling:
+    """Checks whether a human may decide a HITL point (four-eyes principle)."""
+    cfg = get_config(agent_id)
+    result = ad.check_approval_permission(con, actor)
+    context = {"agent": agent_id, "actor": actor, "oversight": cfg.oversight.value}
+    if not result.allowed:
+        return Ruling(Outcome.DENIED, "approval_rbac", result.reason, context)
+    return Ruling(Outcome.ALLOWED, "approval_rbac", result.reason, context)
 
 
-def pruefe_reader_zugriff(con: sqlite3.Connection, *, akteur: str) -> Entscheid:
-    """Eintrittsbedingung ins Reader-Tool (Szenario 5, Governance-Demo)."""
-    ergebnis = ad.pruefe_reader_zugriff(con, akteur)
-    kontext = {"agent": "reader", "akteur": akteur, "gruppe": ad.READER_GRUPPE}
-    if not ergebnis.erlaubt:
-        return Entscheid(Ergebnis.VERWEIGERT, "reader_rbac", ergebnis.begruendung, kontext)
-    return Entscheid(Ergebnis.ERLAUBT, "reader_rbac", ergebnis.begruendung, kontext)
+def check_reader_access(con: sqlite3.Connection, *, actor: str) -> Ruling:
+    """Entry condition into the reader tool (scenario 5, governance demo)."""
+    result = ad.check_reader_access(con, actor)
+    context = {"agent": "reader", "actor": actor, "group": ad.READER_GROUP}
+    if not result.allowed:
+        return Ruling(Outcome.DENIED, "reader_rbac", result.reason, context)
+    return Ruling(Outcome.ALLOWED, "reader_rbac", result.reason, context)

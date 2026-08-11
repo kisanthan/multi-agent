@@ -1,9 +1,9 @@
-"""AD-/Entra-Mock: Nutzer-, Gruppen- und Rollenpruefung (Least Privilege).
+"""AD/Entra mock: user, group, and role checks (Least Privilege).
 
-Bildet die Eintrittsbedingung ins Reader-Tool ab: nur Mitglieder der
-AD-Sicherheitsgruppe duerfen Dokumente einspeisen (Abschnitt 1 des
-Fachkonzepts). Kein LLM -- eine Berechtigungspruefung, die ein Sprachmodell
-"entscheidet", waere keine Berechtigungspruefung.
+Models the entry condition into the reader tool: only members of the AD
+security group may submit documents (section 1 of the functional concept).
+No LLM -- a permission check that a language model "decides" would not be a
+permission check.
 """
 
 from __future__ import annotations
@@ -12,102 +12,102 @@ import sqlite3
 from dataclasses import dataclass
 from enum import Enum
 
-# Die Gruppe, deren Mitgliedschaft das Reader-Tool voraussetzt.
-READER_GRUPPE = "SG-CHG-DocIngest"
-# Die Gruppe, die Klaerfaelle und Kostenstellen-Zuordnungen freigeben darf.
-FREIGABE_GRUPPE = "SG-CHG-Freigabe"
+# The group whose membership the reader tool requires.
+READER_GROUP = "SG-CHG-DocIngest"
+# The group allowed to approve exception cases and cost-center assignments.
+APPROVAL_GROUP = "SG-CHG-Freigabe"
 
 
-class Rolle(str, Enum):
-    EINSPEISER = "einspeiser"
-    PRUEFER = "pruefer"
-    BEOBACHTER = "beobachter"
+class Role(str, Enum):
+    SUBMITTER = "einspeiser"
+    APPROVER = "pruefer"
+    OBSERVER = "beobachter"
 
 
 @dataclass(frozen=True)
-class Nutzer:
+class User:
     upn: str
-    anzeigename: str
-    rolle: Rolle
-    gruppen: frozenset[str]
+    display_name: str
+    role: Role
+    groups: frozenset[str]
 
-    def ist_mitglied(self, gruppe: str) -> bool:
-        return gruppe in self.gruppen
+    def is_member(self, group: str) -> bool:
+        return group in self.groups
 
 
-class UnbekannterNutzer(Exception):
-    """Ein UPN ohne AD-Eintrag.
+class UnknownUser(Exception):
+    """A UPN with no AD entry.
 
-    Bewusst eine Exception statt eines anonymen Default-Nutzers: Zero Trust
-    heisst, dass ein unbekannter Akteur nicht stillschweigend als
-    Minimalberechtigter durchlaeuft, sondern den Vorgang abbricht.
+    Deliberately an exception instead of an anonymous default user: Zero
+    Trust means an unknown actor does not silently pass through as
+    minimally privileged, but aborts the case.
     """
 
 
-def lade_nutzer(con: sqlite3.Connection, upn: str) -> Nutzer:
+def load_user(con: sqlite3.Connection, upn: str) -> User:
     row = con.execute(
-        "SELECT upn, anzeigename, rolle FROM ad_nutzer WHERE upn = ?", (upn,)
+        "SELECT upn, display_name, role FROM ad_users WHERE upn = ?", (upn,)
     ).fetchone()
     if row is None:
-        raise UnbekannterNutzer(f"Kein AD-Eintrag fuer {upn!r}")
+        raise UnknownUser(f"Kein AD-Eintrag fuer {upn!r}")
 
-    gruppen = {
+    groups = {
         g[0] for g in con.execute(
-            "SELECT gruppe FROM ad_mitgliedschaften WHERE upn = ?", (upn,)
+            "SELECT group_name FROM ad_memberships WHERE upn = ?", (upn,)
         ).fetchall()
     }
-    return Nutzer(upn=row[0], anzeigename=row[1], rolle=Rolle(row[2]),
-                  gruppen=frozenset(gruppen))
+    return User(upn=row[0], display_name=row[1], role=Role(row[2]),
+                groups=frozenset(groups))
 
 
 @dataclass(frozen=True)
-class ZugriffsErgebnis:
-    erlaubt: bool
-    begruendung: str
-    nutzer: Nutzer | None = None
+class AccessResult:
+    allowed: bool
+    reason: str
+    user: User | None = None
 
 
-def pruefe_reader_zugriff(con: sqlite3.Connection, upn: str) -> ZugriffsErgebnis:
-    """Eintrittsbedingung ins Reader-Tool (Szenario 5).
+def check_reader_access(con: sqlite3.Connection, upn: str) -> AccessResult:
+    """Entry condition into the reader tool (scenario 5).
 
-    Wird diese Pruefung verweigert, darf danach *nichts* mehr passieren: kein
-    Parsing, kein LLM-Aufruf. Genau das prueft tests/test_szenario5.
+    Once this check is denied, *nothing* may happen afterwards: no parsing,
+    no LLM call. That is exactly what tests/test_szenario5 verifies.
     """
     try:
-        nutzer = lade_nutzer(con, upn)
-    except UnbekannterNutzer as e:
-        return ZugriffsErgebnis(False, f"Zero Trust: {e}")
+        user = load_user(con, upn)
+    except UnknownUser as e:
+        return AccessResult(False, f"Zero Trust: {e}")
 
-    if not nutzer.ist_mitglied(READER_GRUPPE):
-        return ZugriffsErgebnis(
+    if not user.is_member(READER_GROUP):
+        return AccessResult(
             False,
-            f"{nutzer.anzeigename} ist nicht Mitglied der Sicherheitsgruppe "
-            f"{READER_GRUPPE} (Least Privilege).",
-            nutzer,
+            f"{user.display_name} ist nicht Mitglied der Sicherheitsgruppe "
+            f"{READER_GROUP} (Least Privilege).",
+            user,
         )
-    return ZugriffsErgebnis(
-        True, f"{nutzer.anzeigename} ist Mitglied von {READER_GRUPPE}.", nutzer
+    return AccessResult(
+        True, f"{user.display_name} ist Mitglied von {READER_GROUP}.", user
     )
 
 
-def pruefe_freigabe_berechtigung(con: sqlite3.Connection, upn: str) -> ZugriffsErgebnis:
-    """Darf dieser Nutzer einen HITL-Freigabepunkt entscheiden?
+def check_approval_permission(con: sqlite3.Connection, upn: str) -> AccessResult:
+    """May this user decide a HITL approval point?
 
-    Vier-Augen-Prinzip: relevant fuer die Kostenstellen-Freigabe (Prozess B)
-    und die Klaerfall-/Buchungsfreigabe (Prozess A).
+    Four-eyes principle: relevant for the cost-center approval (process B)
+    and the exception-case/booking approval (process A).
     """
     try:
-        nutzer = lade_nutzer(con, upn)
-    except UnbekannterNutzer as e:
-        return ZugriffsErgebnis(False, f"Zero Trust: {e}")
+        user = load_user(con, upn)
+    except UnknownUser as e:
+        return AccessResult(False, f"Zero Trust: {e}")
 
-    if not nutzer.ist_mitglied(FREIGABE_GRUPPE):
-        return ZugriffsErgebnis(
+    if not user.is_member(APPROVAL_GROUP):
+        return AccessResult(
             False,
-            f"{nutzer.anzeigename} ist nicht Mitglied von {FREIGABE_GRUPPE} "
+            f"{user.display_name} ist nicht Mitglied von {APPROVAL_GROUP} "
             "und darf keine Freigaben erteilen.",
-            nutzer,
+            user,
         )
-    return ZugriffsErgebnis(
-        True, f"{nutzer.anzeigename} ist freigabeberechtigt.", nutzer
+    return AccessResult(
+        True, f"{user.display_name} ist freigabeberechtigt.", user
     )

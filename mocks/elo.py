@@ -1,10 +1,9 @@
-"""DMS-Mock: ELO (nur Prozess B, revisionssichere Archivierung).
+"""DMS mock: ELO (process B only, tamper-evident archiving).
 
-`POST /archive` legt ein Dokument ab und gibt eine unveraenderliche Archiv-ID
-zurueck. "Revisionssicher" heisst hier konkret: eine bereits vergebene Ablage
-laesst sich nicht ueberschreiben, und der Dokument-Hash entscheidet ueber die
-Identitaet -- dasselbe Dokument zweimal abzulegen liefert dieselbe ID zurueck,
-statt eine Dublette anzulegen.
+`POST /archive` files a document and returns an immutable archive ID.
+"Tamper-evident" means concretely: a filing that has already been assigned
+cannot be overwritten, and the document hash decides identity -- filing the
+same document twice returns the same ID instead of creating a duplicate.
 
 Start:  uvicorn mocks.elo:app --port 8002
 """
@@ -18,22 +17,22 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from config import DB_PFAD
-from governance.audit import Entscheidung, Vorgangsbezug, protokolliere
+from config import DB_PATH
+from governance.audit import CaseReference, Decision, log_entry
 
 app = FastAPI(title="ELO-Mock (DMS)", version="1.0")
 
 
 def _con() -> sqlite3.Connection:
-    return sqlite3.connect(DB_PFAD)
+    return sqlite3.connect(DB_PATH)
 
 
-class Ablage(BaseModel):
-    dateiname: str
-    dokument_hash: str = Field(min_length=64, max_length=64,
+class Filing(BaseModel):
+    filename: str
+    document_hash: str = Field(min_length=64, max_length=64,
                                description="SHA-256 des Rohdokuments")
-    akteur: str
-    vorgang_id: str | None = Field(
+    actor: str
+    case_id: str | None = Field(
         default=None, description="Vorgang, zu dem die Ablage gehoert")
 
 
@@ -43,56 +42,56 @@ def health() -> dict:
 
 
 @app.post("/archive")
-def archiviere(a: Ablage) -> dict:
-    """Legt ein Dokument revisionssicher ab und liefert die Archiv-ID."""
+def archive(a: Filing) -> dict:
+    """Files a document tamper-evidently and returns the archive ID."""
     con = _con()
-    bezug = Vorgangsbezug(a.vorgang_id, a.dateiname)
+    reference = CaseReference(a.case_id, a.filename)
     try:
-        vorhanden = con.execute(
-            "SELECT archiv_id FROM archiv WHERE dokument_hash = ?", (a.dokument_hash,)
+        existing = con.execute(
+            "SELECT archive_id FROM archive WHERE document_hash = ?", (a.document_hash,)
         ).fetchone()
-        if vorhanden:
-            # Idempotent: identisches Dokument -> bestehende ID. Kein Fehler,
-            # aber auch keine zweite Ablage.
-            protokolliere(con, akteur=a.akteur, agent="elo", aktion="dokument_archivieren",
-                          entscheidung=Entscheidung.INFO,
-                          begruendung=f"ELO: Dokument bereits abgelegt unter "
-                                      f"{vorhanden[0]}.",
-                          payload={"archiv_id": vorhanden[0], "dateiname": a.dateiname},
-                          bezug=bezug, ergebnis="bereits archiviert")
+        if existing:
+            # Idempotent: identical document -> existing ID. Not an error,
+            # but no second filing either.
+            log_entry(con, actor=a.actor, agent="elo", action="dokument_archivieren",
+                      decision=Decision.INFO,
+                      reason=f"ELO: Dokument bereits abgelegt unter "
+                             f"{existing[0]}.",
+                      payload={"archive_id": existing[0], "filename": a.filename},
+                      reference=reference, outcome="bereits archiviert")
             con.commit()
-            return {"archiv_id": vorhanden[0], "bereits_vorhanden": True}
+            return {"archive_id": existing[0], "already_existed": True}
 
         aid = f"ELO-{uuid.uuid4().hex[:12].upper()}"
         con.execute(
-            "INSERT INTO archiv VALUES (?,?,?,?)",
-            (aid, a.dateiname, a.dokument_hash, datetime.now(timezone.utc).isoformat()),
+            "INSERT INTO archive VALUES (?,?,?,?)",
+            (aid, a.filename, a.document_hash, datetime.now(timezone.utc).isoformat()),
         )
-        protokolliere(con, akteur=a.akteur, agent="elo", aktion="dokument_archivieren",
-                      entscheidung=Entscheidung.ERLAUBT,
-                      begruendung=f"ELO: {a.dateiname} revisionssicher abgelegt.",
-                      payload={"archiv_id": aid, "dateiname": a.dateiname,
-                               "dokument_hash": a.dokument_hash},
-                      bezug=bezug, ergebnis="archiviert")
+        log_entry(con, actor=a.actor, agent="elo", action="dokument_archivieren",
+                  decision=Decision.ALLOWED,
+                  reason=f"ELO: {a.filename} revisionssicher abgelegt.",
+                  payload={"archive_id": aid, "filename": a.filename,
+                           "document_hash": a.document_hash},
+                  reference=reference, outcome="archiviert")
         con.commit()
-        return {"archiv_id": aid, "bereits_vorhanden": False}
+        return {"archive_id": aid, "already_existed": False}
     finally:
         con.close()
 
 
-@app.get("/archive/{archiv_id}")
-def lies_ablage(archiv_id: str) -> dict:
-    """Read-only-Abruf. Es gibt bewusst kein PUT/DELETE -- das ist der Kern
-    von 'revisionssicher'."""
+@app.get("/archive/{archive_id}")
+def read_filing(archive_id: str) -> dict:
+    """Read-only lookup. There is deliberately no PUT/DELETE -- that is the
+    essence of 'tamper-evident'."""
     con = _con()
     try:
         row = con.execute(
-            "SELECT archiv_id, dateiname, dokument_hash, abgelegt_am FROM archiv "
-            "WHERE archiv_id = ?", (archiv_id,)
+            "SELECT archive_id, filename, document_hash, filed_at FROM archive "
+            "WHERE archive_id = ?", (archive_id,)
         ).fetchone()
         if row is None:
-            raise HTTPException(404, f"Archiv-ID {archiv_id} nicht gefunden")
-        return {"archiv_id": row[0], "dateiname": row[1], "dokument_hash": row[2],
-                "abgelegt_am": row[3]}
+            raise HTTPException(404, f"Archiv-ID {archive_id} nicht gefunden")
+        return {"archive_id": row[0], "filename": row[1], "document_hash": row[2],
+                "filed_at": row[3]}
     finally:
         con.close()

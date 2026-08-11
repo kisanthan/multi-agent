@@ -1,99 +1,99 @@
-"""Filtern und Sortieren von Vorgangslisten.
+"""Filtering and sorting case lists.
 
-Reine Funktionen ueber `Vorgangsuebersicht`-Zeilen: kein Streamlit, keine
-Datenbank. Die Filterleiste in der Oberflaeche sammelt nur die Eingaben ein und
-ruft `wende_an()` -- damit ist das Verhalten ohne laufende App pruefbar.
+Pure functions over `CaseOverview` rows: no Streamlit, no database. The
+filter bar in the UI only collects the inputs and calls `apply()` -- that
+way the behavior is testable without a running app.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from graph.vorgaenge import Status, Vorgangsuebersicht
+from graph.cases import Status, CaseOverview
 
-SEITENGROESSE = 25
+PAGE_SIZE = 25
 
 
 @dataclass(frozen=True)
 class Filter:
-    """Die Auswahl des Nutzers. Leere Felder bedeuten 'nicht einschraenken'."""
+    """The user's selection. Empty fields mean 'do not restrict'."""
 
-    suche: str = ""
-    prozesse: frozenset[str] = field(default_factory=frozenset)
-    stati: frozenset[Status] = field(default_factory=frozenset)
-    von: str = ""      # ISO-Datum, einschliesslich
-    bis: str = ""      # ISO-Datum, einschliesslich
-    neueste_zuerst: bool = True
+    search: str = ""
+    processes: frozenset[str] = field(default_factory=frozenset)
+    statuses: frozenset[Status] = field(default_factory=frozenset)
+    date_from: str = ""      # ISO date, inclusive
+    date_to: str = ""        # ISO date, inclusive
+    newest_first: bool = True
 
     @property
-    def ist_leer(self) -> bool:
-        return not (self.suche or self.prozesse or self.stati or self.von or self.bis)
+    def is_empty(self) -> bool:
+        return not (self.search or self.processes or self.statuses or self.date_from or self.date_to)
 
 
-def _passt_suche(zeile: Vorgangsuebersicht, begriff: str) -> bool:
-    if not begriff:
+def _matches_search(row: CaseOverview, term: str) -> bool:
+    if not term:
         return True
-    heuhaufen = " ".join([
-        zeile.dateiname, zeile.akteur, zeile.status.beschriftung,
-        zeile.ergebnis or "", zeile.freigegeben_von or "",
+    haystack = " ".join([
+        row.filename, row.actor, row.status.label,
+        row.outcome or "", row.approved_by or "",
     ]).lower()
-    return begriff.lower().strip() in heuhaufen
+    return term.lower().strip() in haystack
 
 
-def _passt_zeitraum(zeile: Vorgangsuebersicht, von: str, bis: str) -> bool:
-    """Vergleicht auf Tagesebene.
+def _matches_date_range(row: CaseOverview, date_from: str, date_to: str) -> bool:
+    """Compares at day granularity.
 
-    ISO-Zeitstempel sind lexikografisch sortierbar, deshalb genuegt ein
-    Stringvergleich der ersten zehn Zeichen. Vorgaenge ohne Startzeitpunkt
-    (Laeufe aus aelteren Ständen) werden von einem Zeitraumfilter nie
-    ausgeschlossen -- sonst verschwaenden sie unerklaerlich.
+    ISO timestamps sort lexicographically, so a string comparison of the
+    first ten characters is enough. Cases without a start time (runs from
+    older states) are never excluded by a date-range filter -- otherwise
+    they would vanish inexplicably.
     """
-    tag = (zeile.gestartet_am or "")[:10]
-    if not tag:
+    day = (row.started_at or "")[:10]
+    if not day:
         return True
-    if von and tag < von:
+    if date_from and day < date_from:
         return False
-    if bis and tag > bis:
+    if date_to and day > date_to:
         return False
     return True
 
 
-def wende_an(zeilen: list[Vorgangsuebersicht], f: Filter) -> list[Vorgangsuebersicht]:
-    """Filtert und sortiert. Aendert die Eingabeliste nicht."""
-    treffer = [
-        z for z in zeilen
-        if _passt_suche(z, f.suche)
-        and (not f.prozesse or z.prozess in f.prozesse)
-        and (not f.stati or z.status in f.stati)
-        and _passt_zeitraum(z, f.von, f.bis)
+def apply(rows: list[CaseOverview], f: Filter) -> list[CaseOverview]:
+    """Filters and sorts. Does not change the input list."""
+    matches = [
+        z for z in rows
+        if _matches_search(z, f.search)
+        and (not f.processes or z.process in f.processes)
+        and (not f.statuses or z.status in f.statuses)
+        and _matches_date_range(z, f.date_from, f.date_to)
     ]
-    return sorted(treffer, key=lambda z: z.gestartet_am or "",
-                  reverse=f.neueste_zuerst)
+    return sorted(matches, key=lambda z: z.started_at or "",
+                  reverse=f.newest_first)
 
 
-def offene(zeilen: list[Vorgangsuebersicht]) -> list[Vorgangsuebersicht]:
-    """Aktive Vorgaenge -- freigabepflichtige zuerst, denn sie brauchen jemanden."""
-    aktiv = [z for z in zeilen if z.status.ist_offen]
-    return sorted(aktiv, key=lambda z: z.status is not Status.WARTET_AUF_FREIGABE)
+def open_cases(rows: list[CaseOverview]) -> list[CaseOverview]:
+    """Active cases -- ones needing approval first, since they need someone."""
+    active = [z for z in rows if z.status.is_open]
+    return sorted(active, key=lambda z: z.status is not Status.WAITING_FOR_APPROVAL)
 
 
-def abgeschlossene(zeilen: list[Vorgangsuebersicht]) -> list[Vorgangsuebersicht]:
-    return [z for z in zeilen if not z.status.ist_offen]
+def closed_cases(rows: list[CaseOverview]) -> list[CaseOverview]:
+    return [z for z in rows if not z.status.is_open]
 
 
-def fuer_prozess(zeilen: list[Vorgangsuebersicht],
-                 schluessel: str) -> list[Vorgangsuebersicht]:
-    return [z for z in zeilen if z.prozess == schluessel]
+def for_process(rows: list[CaseOverview],
+                key: str) -> list[CaseOverview]:
+    return [z for z in rows if z.process == key]
 
 
-def kennzahlen(zeilen: list[Vorgangsuebersicht]) -> dict[str, int]:
-    """Zaehlwerte fuer die Kennzahlenzeile einer Seite."""
+def counts(rows: list[CaseOverview]) -> dict[str, int]:
+    """Counters for a page's metrics row."""
     return {
-        "offen": sum(1 for z in zeilen if z.status is Status.WARTET_AUF_FREIGABE),
-        "laeuft": sum(1 for z in zeilen if z.status is Status.LAEUFT),
-        "abgeschlossen": sum(1 for z in zeilen if z.status is Status.ABGESCHLOSSEN),
-        "fehlgeschlagen": sum(
-            1 for z in zeilen
-            if z.status in (Status.FEHLGESCHLAGEN, Status.ABGEWIESEN)
+        "pending": sum(1 for z in rows if z.status is Status.WAITING_FOR_APPROVAL),
+        "running": sum(1 for z in rows if z.status is Status.RUNNING),
+        "completed": sum(1 for z in rows if z.status is Status.COMPLETED),
+        "failed": sum(
+            1 for z in rows
+            if z.status in (Status.FAILED, Status.DENIED)
         ),
     }

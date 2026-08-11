@@ -1,16 +1,23 @@
-"""Der LangGraph-Workflow: beide Prozesse in einem Graphen.
+"""The LangGraph workflow: both processes in one graph.
 
-Bildet die Konzeptdiagramme auf ausfuehrbaren Code ab:
-- Jeder Agent = ein Knoten.
-- Der Orchestrator = eine Conditional Edge nach Dokumenttyp.
-- HITL-Punkte = `interrupt()`; der Checkpointer haelt den Zustand, bis ein
-  Mensch entscheidet.
-- Policy-Pruefungen liegen in den schreibenden Knoten, vor dem Zielsystemaufruf.
-- Jeder Schritt schreibt in den Audit-Trail.
+Maps the concept diagrams onto executable code:
+- Each agent = one node.
+- The orchestrator = a conditional edge on document type.
+- HITL points = `interrupt()`; the checkpointer holds the state until a
+  human decides.
+- Policy checks live in the writing nodes, before the target-system call.
+- Every step writes to the audit trail.
 
-Warum ein Graph fuer beide Prozesse: die Arbeit argumentiert mit *gemeinsamen*
-Komponenten (Reader, Orchestrator, Klassifikation, Datenbasis). Zwei getrennte
-Graphen wuerden diese Aussage im Code aufloesen.
+Why one graph for both processes: the thesis argues from *shared*
+components (reader, orchestrator, classification, master data). Two
+separate graphs would dissolve that claim in the code.
+
+This module only wires the graph together -- it defines no node itself.
+The nodes live in `graph.nodes.shared` (the intake stretch both processes
+share), `graph.nodes.payment_confirmation` (process A), and
+`graph.nodes.incoming_invoice` (process B); each node is referenced here
+through its module, so which process a node belongs to is visible at the
+call site.
 """
 
 from __future__ import annotations
@@ -19,467 +26,104 @@ import sqlite3
 from pathlib import Path
 
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import interrupt
+from langgraph.graph.state import CompiledStateGraph
 
-from agents import abgleich, buchung, klassifikation, kostenstelle, zielsysteme
-from agents.abgleich import Befund
-from agents.schemas import Dokumenttyp
-from config import DB_PFAD
-from governance.audit import Entscheidung, Vorgangsbezug, protokolliere
-from graph.state import Vorgang
-from tools.reader import ZugriffVerweigert, lies_dokument
+from graph.nodes import incoming_invoice, payment_confirmation, shared
+from graph.state import Case
 
 
-def _con() -> sqlite3.Connection:
-    return sqlite3.connect(DB_PFAD)
+def build_graph() -> StateGraph:
+    """Assembles the graph. Without a checkpointer -- the caller sets that.
 
-
-def _bezug(zustand: Vorgang) -> Vorgangsbezug:
-    """Vorgangsbezug fuer den Audit-Trail.
-
-    Jeder Eintrag eines Laufs traegt dieselbe Vorgangs-ID und denselben Beleg --
-    nur so laesst sich der Trail spaeter nach genau diesem Vorgang filtern.
-    Der Dateiname steht erst nach dem Reader fest; davor genuegt der Pfad.
+    Built in the order the case actually travels, one section per node
+    module: the shared intake stretch, then process A, then process B.
+    Each node sits right next to its own outgoing edges, and every routing
+    label is commented where it is consumed -- not where the diagram would
+    otherwise force you to go looking for it. (LangGraph resolves edge
+    targets at `.compile()`, not when `add_conditional_edges()` is called,
+    so a target named here but added in a later section is not a forward
+    reference at runtime.)
     """
-    return Vorgangsbezug(
-        vorgang_id=zustand.get("vorgang_id"),
-        datenquelle=zustand.get("dateiname") or Path(zustand.get("pfad", "")).name,
-    )
+    g = StateGraph(Case)
 
-
-def _gelesene_felder(d) -> str:
-    """Was der Extraktions-Agent gefunden hat -- als Satz, nicht als Dump.
-
-    Der Text erscheint in der Detailansicht unter „Was bisher geschah". Rohe
-    Feldnamen und `None` haetten dort nichts verloren; was nicht gefunden
-    wurde, wird als solches benannt.
-    """
-    gefunden = []
-    if d.nummer:
-        gefunden.append(f"Rechnungsnummer {d.nummer}")
-    if d.betrag_eur is not None:
-        gefunden.append(f"Betrag {d.betrag_eur:.2f} EUR".replace(".", ","))
-    if d.lieferant:
-        gefunden.append(f"Lieferant {d.lieferant}")
-    if d.kostenstellen_referenz:
-        gefunden.append(f"Kostenstelle {d.kostenstellen_referenz}")
-
-    if not gefunden:
-        return "Beleg ausgewertet, aber keine verwertbaren Angaben gefunden."
-    return "Erkannt: " + ", ".join(gefunden) + "."
-
-
-def _notiz(zustand: Vorgang, knoten: str, text: str) -> list[dict]:
-    """Haengt einen Schritt an das Laufprotokoll (fuer UI und CLI-Ausgabe)."""
-    return [*zustand.get("protokoll", []), {"knoten": knoten, "text": text}]
-
-
-# --------------------------------------------------------------- Knoten
-
-def knoten_reader(zustand: Vorgang) -> dict:
-    """Reader-Tool. Der AD-Check steckt in `lies_dokument` (Least Privilege)."""
-    con = _con()
-    try:
-        inhalt = lies_dokument(con, zustand["pfad"], akteur=zustand["akteur"],
-                               bezug=_bezug(zustand))
-    except ZugriffVerweigert as e:
-        # Szenario 5: Ende des Vorgangs. Kein Parsing, kein Modell, kein Ziel.
-        return {
-            "abgeschlossen": True,
-            "ergebnis": "zugriff_verweigert",
-            "fehler": str(e),
-            "protokoll": _notiz(zustand, "reader",
-                                f"Zugriff nicht erlaubt: {e}"),
-        }
-    finally:
-        con.close()
-
-    return {
-        "markdown": inhalt.markdown,
-        "dokument_hash": inhalt.dokument_hash,
-        "dateiname": inhalt.dateiname,
-        "protokoll": _notiz(
-            zustand, "reader",
-            f"{inhalt.dateiname} eingelesen, {inhalt.seiten} Seite(n)."),
-    }
-
-
-def knoten_klassifikation(zustand: Vorgang) -> dict:
-    """Klassifikations- & Extraktions-Agent: Typ und Felder in einem Durchgang."""
-    con = _con()
-    try:
-        e = klassifikation.klassifiziere(con, markdown=zustand["markdown"],
-                                         akteur=zustand["akteur"],
-                                         bezug=_bezug(zustand))
-    finally:
-        con.close()
-
-    if not e.gelungen:
-        # R1: Modell haelt das Schema nicht ein -> Klaerfall statt Raten.
-        return {
-            "klaerfall": True,
-            "klaerfall_grund": e.eskalation or "Extraktion fehlgeschlagen",
-            "eskalation": e.eskalation,
-            "typ": Dokumenttyp.UNBEKANNT.value,
-            "protokoll": _notiz(
-                zustand, "klassifikation",
-                "Der Beleg konnte nicht ausgewertet werden – eine Person "
-                "muss entscheiden."),
-        }
-
-    d = e.daten
-    return {
-        "typ": d.typ.value,
-        "nummer": d.nummer,
-        "betrag_eur": d.betrag_eur,
-        "lieferant": d.lieferant,
-        "positionen": d.positionen,
-        "kostenstellen_referenz": d.kostenstellen_referenz,
-        "protokoll": _notiz(zustand, "klassifikation", _gelesene_felder(d)),
-    }
-
-
-def route_dokumenttyp(zustand: Vorgang) -> str:
-    """Orchestrator-Agent: Conditional Edge nach Dokumenttyp.
-
-    Kein Modellaufruf: der Typ steht bereits fest (der Klassifikations-Agent
-    hat ihn bestimmt). Der Orchestrator *routet* danach -- ihn erneut ein
-    Modell fragen zu lassen, waere ein zweiter Aufruf mit
-    Widerspruchspotenzial.
-    """
-    if zustand.get("abgeschlossen"):
-        return "ende"
-    if zustand.get("klaerfall"):
-        return "hitl"
-    typ = zustand.get("typ")
-    if typ == Dokumenttyp.ZAHLUNGSBESTAETIGUNG.value:
-        return "prozess_a"
-    if typ == Dokumenttyp.EINGANGSRECHNUNG.value:
-        return "prozess_b"
-    return "hitl"
-
-
-# ---------------------------------------------------------- Prozess A
-
-def knoten_abgleich(zustand: Vorgang) -> dict:
-    """Abgleich-Agent (Stufe 1). Deterministisch -- siehe agents/abgleich.py."""
-    con = _con()
-    try:
-        e = abgleich.gleiche_ab(con, nummer=zustand.get("nummer"),
-                                betrag_eur=zustand.get("betrag_eur"),
-                                akteur=zustand["akteur"], bezug=_bezug(zustand))
-    finally:
-        con.close()
-
-    return {
-        "befund": e.befund.value,
-        "nummer": e.nummer,
-        "soll_betrag_eur": e.soll_betrag_eur,
-        "klaerfall": e.ist_klaerfall,
-        "klaerfall_grund": e.begruendung if e.ist_klaerfall else "",
-        "protokoll": _notiz(zustand, "abgleich", e.begruendung),
-    }
-
-
-def route_abgleich(zustand: Vorgang) -> str:
-    return "hitl" if zustand.get("klaerfall") else "buchung"
-
-
-def knoten_buchung(zustand: Vorgang) -> dict:
-    """Buchungs-Agent (Stufe 3). Fragt die Policy -- die entscheidet ueber HITL."""
-    con = _con()
-    try:
-        e = buchung.buche(
-            con, nummer=zustand["nummer"], betrag_eur=zustand["betrag_eur"],
-            akteur=zustand["akteur"], beleg=zustand["dateiname"],
-            freigegeben_von=zustand.get("freigegeben_von"),
-            bezug=_bezug(zustand),
-        )
-    finally:
-        con.close()
-
-    if e.freigabe_noetig:
-        return {
-            "klaerfall": True,
-            "klaerfall_grund": e.begruendung,
-            "protokoll": _notiz(
-                zustand, "buchung",
-                "Die Buchung muss von einer Person bestätigt werden."),
-        }
-
-    return {
-        "abgeschlossen": True,
-        "ergebnis": "verbucht" if e.gebucht else "abgelehnt",
-        "fehler": e.fehler,
-        "protokoll": _notiz(zustand, "buchung", e.begruendung),
-    }
-
-
-def route_buchung(zustand: Vorgang) -> str:
-    """Nach dem Buchungsversuch: entweder fertig oder Freigabe noetig."""
-    if zustand.get("abgeschlossen"):
-        return "ende"
-    return "hitl"
-
-
-# ---------------------------------------------------------- Prozess B
-
-def knoten_kostenstelle(zustand: Vorgang) -> dict:
-    """Kostenstellen-Agent (Stufe 2): exakter referenzieller Nachschlag.
-
-    Deterministisch -- kein Sprachmodell (Thesis §7.4, siehe agents/kostenstelle).
-    Loest die vom Beleg extrahierte Referenz gegen den Katalog auf.
-    """
-    con = _con()
-    try:
-        z = kostenstelle.ordne_zu(con, referenz=zustand.get("kostenstellen_referenz"),
-                                  akteur=zustand["akteur"],
-                                  positionen=zustand.get("positionen", []),
-                                  bezug=_bezug(zustand))
-    finally:
-        con.close()
-
-    return {
-        "kostenstelle_id": z.kostenstelle_id,
-        "kostenstelle_begruendung": z.begruendung,
-        "kostenstelle_eindeutig": z.eindeutig,
-        "protokoll": _notiz(zustand, "kostenstelle", z.begruendung),
-    }
-
-
-def route_kostenstelle(zustand: Vorgang) -> str:
-    """Zuordnung eindeutig? (Diagramm Teil 3).
-
-    Der Kostenstellen-Agent ist Human-on-the-loop: loest die Belegreferenz
-    eindeutig eine Kostenstelle auf, laeuft der Vorgang automatisch zur
-    Archivierung. Fehlt oder unbekannt die Referenz, greift die
-    Vier-Augen-Freigabe. Das spiegelt Prozess A (Nummer vorhanden? -> direkt
-    oder Klaerfall).
-    """
-    if zustand.get("kostenstelle_eindeutig"):
-        return "elo"
-    return "freigabe"
-
-
-def knoten_freigabe_kostenstelle(zustand: Vorgang) -> dict:
-    """HITL-Punkt Prozess B: Vier-Augen-Freigabe bei Mehrdeutigkeit.
-
-    Wird nur erreicht, wenn die Zuordnung NICHT eindeutig ist (Klaerfall). Bei
-    eindeutiger Zuordnung ueberspringt route_kostenstelle diesen Knoten -- der
-    Kostenstellen-Agent ist Human-on-the-loop.
-    """
-    # Fehlt die Belegreferenz, waehlt der Mensch aus dem vollstaendigen Katalog.
-    con = _con()
-    try:
-        katalog = kostenstelle.katalog(con)
-    finally:
-        con.close()
-
-    antwort = interrupt({
-        "art": "kostenstellen_freigabe",
-        "dateiname": zustand.get("dateiname"),
-        "lieferant": zustand.get("lieferant"),
-        "betrag_eur": zustand.get("betrag_eur"),
-        "positionen": zustand.get("positionen", []),
-        "referenz": zustand.get("kostenstellen_referenz"),
-        "begruendung": zustand.get("kostenstelle_begruendung"),
-        "katalog": [{"id": k[0], "bezeichnung": k[1], "referenz": k[2]} for k in katalog],
-        "eindeutig": zustand.get("kostenstelle_eindeutig"),
-    })
-
-    con = _con()
-    try:
-        protokolliere(
-            con, akteur=antwort["pruefer"], agent="kostenstelle",
-            aktion="kostenstelle_freigegeben",
-            entscheidung=(Entscheidung.ERLAUBT if antwort["entscheidung"] == "freigegeben"
-                          else Entscheidung.VERWEIGERT),
-            begruendung=f"{antwort['pruefer']} hat "
-                        f"{antwort.get('kostenstelle_id')} {antwort['entscheidung']}.",
-            payload={"kostenstelle_id": antwort.get("kostenstelle_id"),
-                     "vorschlag_agent": zustand.get("kostenstelle_id")},
-            bezug=_bezug(zustand), ergebnis=antwort["entscheidung"],
-        )
-        con.commit()
-    finally:
-        con.close()
-
-    if antwort["entscheidung"] != "freigegeben":
-        return {
-            "abgeschlossen": True,
-            "ergebnis": "verworfen",
-            "freigegeben_von": antwort["pruefer"],
-            "protokoll": _notiz(zustand, "freigabe",
-                                f"{antwort['pruefer']} hat abgelehnt."),
-        }
-
-    return {
-        "kostenstelle_id": antwort["kostenstelle_id"],
-        "freigegeben_von": antwort["pruefer"],
-        "freigabe_entscheidung": "freigegeben",
-        "protokoll": _notiz(zustand, "freigabe",
-                            f"{antwort['pruefer']} hat "
-                            f"{antwort['kostenstelle_id']} bestätigt."),
-    }
-
-
-def route_freigabe_kostenstelle(zustand: Vorgang) -> str:
-    return "ende" if zustand.get("abgeschlossen") else "elo"
-
-
-def knoten_elo(zustand: Vorgang) -> dict:
-    """ELO-Agent (Stufe 3): revisionssichere Ablage. Prozessende von Prozess B.
-
-    Nach dem Diagramm Teil 3 endet Prozess B hier -- eine bilanzwirksame
-    Verbuchung in Navision findet in Prozess B nicht statt. Navision (NAV) wird
-    nur noch in Prozess A angesprochen (Buchungs-Agent, offen -> bezahlt).
-    """
-    con = _con()
-    try:
-        e = zielsysteme.archiviere(con, dateiname=zustand["dateiname"],
-                                   dokument_hash=zustand["dokument_hash"],
-                                   akteur=zustand["akteur"], bezug=_bezug(zustand))
-    finally:
-        con.close()
-
-    if not e.erfolgreich:
-        return {
-            "abgeschlossen": True,
-            "ergebnis": "archivierung_fehlgeschlagen",
-            "fehler": e.fehler,
-            "protokoll": _notiz(zustand, "elo", e.begruendung),
-        }
-    return {
-        "abgeschlossen": True,
-        "ergebnis": "archiviert",
-        "archiv_id": e.kennung,
-        "protokoll": _notiz(zustand, "elo", e.begruendung),
-    }
-
-
-# ------------------------------------------------------------ HITL A
-
-def knoten_klaerfall(zustand: Vorgang) -> dict:
-    """HITL-Punkt Prozess A: Klaerfall oder Buchungsfreigabe.
-
-    Deckt beide Faelle ab, weil sie dieselbe Frage an denselben Menschen
-    stellen: 'Diesen Vorgang trotzdem verbuchen?' Der Grund steht im Payload.
-    """
-    antwort = interrupt({
-        "art": "klaerfall",
-        "dateiname": zustand.get("dateiname"),
-        "grund": zustand.get("klaerfall_grund"),
-        "befund": zustand.get("befund"),
-        "nummer": zustand.get("nummer"),
-        "betrag_eur": zustand.get("betrag_eur"),
-        "soll_betrag_eur": zustand.get("soll_betrag_eur"),
-        "eskalation": zustand.get("eskalation"),
-    })
-
-    if antwort["entscheidung"] != "freigegeben":
-        con = _con()
-        try:
-            protokolliere(con, akteur=antwort["pruefer"], agent="buchung",
-                          aktion="klaerfall_entschieden",
-                          entscheidung=Entscheidung.VERWEIGERT,
-                          begruendung=f"{antwort['pruefer']} hat den Vorgang verworfen.",
-                          payload={"nummer": zustand.get("nummer")},
-                          bezug=_bezug(zustand), ergebnis="verworfen")
-            con.commit()
-        finally:
-            con.close()
-        return {
-            "abgeschlossen": True,
-            "ergebnis": "verworfen",
-            "freigegeben_von": antwort["pruefer"],
-            "protokoll": _notiz(zustand, "klaerfall",
-                                f"{antwort['pruefer']} hat abgelehnt."),
-        }
-
-    # Der Pruefer darf die Nummer korrigieren (Fall 'unbekannte Nummer').
-    return {
-        "nummer": antwort.get("nummer") or zustand.get("nummer"),
-        "freigegeben_von": antwort["pruefer"],
-        "freigabe_entscheidung": "freigegeben",
-        "klaerfall": False,
-        "protokoll": _notiz(zustand, "klaerfall",
-                            f"{antwort['pruefer']} hat bestätigt."),
-    }
-
-
-def route_klaerfall(zustand: Vorgang) -> str:
-    if zustand.get("abgeschlossen"):
-        return "ende"
-    # Nach der Freigabe zurueck in den passenden Prozess. Ein Klaerfall kann
-    # auch aus einer fehlgeschlagenen Klassifikation einer Eingangsrechnung
-    # entstehen -- dann darf nicht faelschlich eine Zahlung gebucht werden.
-    if zustand.get("typ") == Dokumenttyp.EINGANGSRECHNUNG.value:
-        return "kostenstelle"
-    return "buchung"
-
-
-# --------------------------------------------------------------- Graph
-
-def baue_graph():
-    """Setzt den Graphen zusammen. Ohne Checkpointer -- den setzt der Aufrufer."""
-    g = StateGraph(Vorgang)
-
-    g.add_node("reader", knoten_reader)
-    g.add_node("klassifikation", knoten_klassifikation)
-    g.add_node("abgleich", knoten_abgleich)
-    g.add_node("buchung", knoten_buchung)
-    g.add_node("klaerfall", knoten_klaerfall)
-    g.add_node("kostenstelle", knoten_kostenstelle)
-    g.add_node("freigabe_kostenstelle", knoten_freigabe_kostenstelle)
-    g.add_node("elo", knoten_elo)
-
+    # ------------------------------------------------- Shared intake stretch
+    # reader -> classification -> orchestrator routing (graph/nodes/shared.py).
+    # Both processes pass through here; from "klassifikation" on, the two
+    # diverge by document type.
+    g.add_node("reader", shared.node_reader)
     g.add_edge(START, "reader")
-
-    # Szenario 5 endet direkt nach dem Reader.
+    # Scenario 5 ends directly after the reader: AD check denied.
     g.add_conditional_edges(
         "reader",
-        lambda z: "ende" if z.get("abgeschlossen") else "klassifikation",
+        lambda z: "ende" if z.get("completed") else "klassifikation",
         {"ende": END, "klassifikation": "klassifikation"},
     )
 
-    # Orchestrator-Routing nach Dokumenttyp.
+    g.add_node("klassifikation", shared.node_classification)
+    # Orchestrator agent: routing by document type, no model call (the
+    # classification agent already determined the type; see
+    # shared.route_document_type).
     g.add_conditional_edges(
-        "klassifikation", route_dokumenttyp,
-        {"prozess_a": "abgleich", "prozess_b": "kostenstelle",
-         "hitl": "klaerfall", "ende": END},
+        "klassifikation", shared.route_document_type,
+        {"prozess_a": "abgleich",       # -> process A
+         "prozess_b": "kostenstelle",   # -> process B
+         "hitl": "klaerfall",           # extraction failed, see node_classification
+         "ende": END},
     )
 
-    # Prozess A
-    g.add_conditional_edges("abgleich", route_abgleich,
+    # ------------------------------------ Process A: Zahlungsbestätigung
+    # abgleich -> buchung -> Navision. `klaerfall` is the only HITL point
+    # and guards both callers. The booking node runs on the approval path
+    # TWICE: once to request approval, once -- after a human decides -- to
+    # actually book (see ui/cases/steps.py for how the stepper shows this).
+    g.add_node("abgleich", payment_confirmation.node_reconciliation)
+    g.add_conditional_edges("abgleich", payment_confirmation.route_reconciliation,
                             {"hitl": "klaerfall", "buchung": "buchung"})
-    g.add_conditional_edges("buchung", route_buchung,
-                            {"hitl": "klaerfall", "ende": END})
-    g.add_conditional_edges("klaerfall", route_klaerfall,
-                            {"buchung": "buchung", "kostenstelle": "kostenstelle",
-                             "ende": END})
 
-    # Prozess B -- endet bei ELO (Diagramm Teil 3).
-    # Eindeutige Zuordnung laeuft automatisch zur Archivierung; nur bei
-    # Mehrdeutigkeit die Vier-Augen-Freigabe.
-    g.add_conditional_edges("kostenstelle", route_kostenstelle,
+    g.add_node("buchung", payment_confirmation.node_booking)
+    g.add_conditional_edges("buchung", payment_confirmation.route_booking,
+                            {"hitl": "klaerfall", "ende": END})
+
+    g.add_node("klaerfall", payment_confirmation.node_exception_case)
+    g.add_conditional_edges(
+        "klaerfall", payment_confirmation.route_exception_case,
+        {"buchung": "buchung",           # approved -> book (closes the cycle)
+         "kostenstelle": "kostenstelle", # guard only, see route_exception_case
+         "ende": END},                   # rejected
+    )
+
+    # ------------------------------------- Process B: Eingangsrechnung
+    # kostenstelle -> (on ambiguity) freigabe_kostenstelle -> elo. Ends at
+    # ELO (diagram part 3) -- no balance-sheet-effective booking happens in
+    # process B; Navision is only ever addressed in process A.
+    g.add_node("kostenstelle", incoming_invoice.node_cost_center)
+    # A unique assignment proceeds automatically to archiving; only on
+    # ambiguity does the four-eyes approval kick in.
+    g.add_conditional_edges("kostenstelle", incoming_invoice.route_cost_center,
                             {"elo": "elo", "freigabe": "freigabe_kostenstelle"})
-    g.add_conditional_edges("freigabe_kostenstelle", route_freigabe_kostenstelle,
+
+    g.add_node("freigabe_kostenstelle", incoming_invoice.node_cost_center_approval)
+    g.add_conditional_edges("freigabe_kostenstelle", incoming_invoice.route_cost_center_approval,
                             {"elo": "elo", "ende": END})
+
+    g.add_node("elo", incoming_invoice.node_elo)
     g.add_edge("elo", END)
 
     return g
 
 
-def kompiliere(checkpoint_pfad: Path | str | None = None):
-    """Kompiliert den Graphen mit SQLite-Checkpointer.
+def compile_graph(
+    checkpoint_path: Path | str | None = None,
+) -> tuple[CompiledStateGraph, sqlite3.Connection]:
+    """Compiles the graph with the SQLite checkpointer.
 
-    Der Checkpointer ist nicht optional: ohne ihn kann `interrupt()` den Zustand
-    nicht halten und es gaebe kein Human-in-the-loop.
+    The checkpointer is not optional: without it, `interrupt()` could not
+    hold the state and there would be no human-in-the-loop.
     """
     from langgraph.checkpoint.sqlite import SqliteSaver
 
-    from config import CHECKPOINT_PFAD
+    from config import CHECKPOINT_PATH
 
-    pfad = Path(checkpoint_pfad or CHECKPOINT_PFAD)
-    con = sqlite3.connect(pfad, check_same_thread=False)
-    return baue_graph().compile(checkpointer=SqliteSaver(con)), con
+    path = Path(checkpoint_path or CHECKPOINT_PATH)
+    con = sqlite3.connect(path, check_same_thread=False)
+    return build_graph().compile(checkpointer=SqliteSaver(con)), con
