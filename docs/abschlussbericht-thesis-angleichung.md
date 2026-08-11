@@ -99,6 +99,15 @@ the code with the §7.4 specification**.
   (reference unique → auto), scenario 4 (reference missing → exception
   case).
 
+> **Note (later rework):** the file paths in this section reflect the
+> state at the time of this report. A subsequent restructuring split
+> `agents/` and `graph/workflow.py` by process; the same modules now live
+> at `agents/payment_confirmation/booking.py`,
+> `agents/incoming_invoice/cost_center.py`, and
+> `graph/nodes/{payment_confirmation,incoming_invoice}.py`. See the "A/B
+> separation" section in [architektur.md](architektur.md) for the current
+> layout.
+
 ## 6. Revised sections of the master's thesis
 
 **None.** At the user's request, and because of the submission readiness,
@@ -151,3 +160,159 @@ I7), `docs/architektur.md`, `README.md`, `docs/gap-analyse-thesis.md`.
   also states in §7). For a later empirical extension, the docking points
   named by the review (§8.2/table 11 "empirically open" cells, §9.4) are
   the right places -- **only after** submission.
+
+## 9. Later rework: declared contracts and a readable per-process flow (2026-08-03)
+
+**Date:** 2026-08-03 · **Branch:** `rafactoring`
+
+A separate follow-up request asked for the project to be optimized for
+understandability -- explicitly naming Clean Architecture, or something
+better, as the target. Measurement first: the dependency rule Clean
+Architecture is usually invoked for was already satisfied (`agents/`,
+`governance/`, `tools/`, `llm/` had zero framework imports and zero direct
+`sqlite3.connect` calls), so a directory rewrite into
+domain/application/infrastructure would have solved a problem that did not
+exist, at the cost of invalidating the layer table and both architecture
+tests this report and `docs/architektur.md` already describe. The actual
+measured problem was narrower: routing labels and the approval
+request/response shape existed only as repeated string literals with no
+declared contract, and no single file described either process from start
+to finish in execution order.
+
+**What changed (does not touch anything in sections 1-8 above):**
+- `contracts.py` (new) declares `InterruptKind`, `ApprovalDecision`,
+  `CaseOutcome`, and the `ApprovalRequest`/`ApprovalResponse` dataclasses --
+  the vocabulary that crosses a process boundary or the LangGraph
+  checkpoint, previously only ever a matching pair of string literals at
+  the producing and consuming end. Both graph node modules
+  (`graph/nodes/payment_confirmation.py`, `graph/nodes/incoming_invoice.py`)
+  and both producer sites (`ui/cases/detail.py`, `demo.py`) now build and
+  read these types instead of raw dicts.
+- `graph/workflow.py`'s `build_graph()` is reordered into the three
+  sections a case actually travels through (shared intake, process A,
+  process B), each routing label commented at the point it is consumed --
+  a pure reordering, verified byte-identical in `draw_mermaid()` output
+  before and after.
+- `process_registry.ProcessStep` gained an optional `graph_node` field for
+  the one step (`freigabe`) whose run-log name and LangGraph node name
+  differ; this also corrected a docstring that had been wrong since the
+  process-separation rework (the later note under §5 above).
+- `tests/test_flow.py` (new) pins both processes' edges and every step's
+  node mapping against the *compiled graph itself*
+  (`get_graph().edges`/`.nodes`), not a hand-maintained description of it,
+  and checks the generated `docs/flow.mmd` diagram (embedded a second time
+  in `docs/architektur.md`) for drift the same way.
+- One deliberate, documented change to a persisted value: process B's
+  cost-center approval now logs `kostenstelle_verworfen` on rejection,
+  where it previously logged `kostenstelle_freigegeben` even when a human
+  had just rejected the case. Mirrors process A, which already used two
+  distinct action names for its own approve/reject branches.
+  `tests/test_scenarios.py`'s only assertion on this action name checks
+  solely the approved path and needed no change.
+- Eight small documentation-drift corrections: stale file paths (in
+  `registry.py`, `docs/gap-analyse-thesis.md`), an inaccurate wiring claim
+  in `README.md`, the ASCII diagram in `docs/architektur.md` repaired to
+  include three edges it was missing, a three-vocabulary "outcome"
+  comparison table, `tests/test_process_separation.py` cited where it
+  previously was not, and a documented -- not fixed -- coincidence in
+  `ui/pages/audit.py` now pinned by `tests/test_process_registry.py`.
+
+**Verification.** Full suite green after every step (184 tests at the
+start of this rework, i.e. at the end of the process-separation rework
+noted under §5; 195 once `contracts.py` landed; 201 at the end); `demo.py
+--szenario 5` and `--liste` re-run after the producer-side change;
+`draw_mermaid()` diffed byte-for-byte before/after the graph reordering; a
+`git diff` review confirming no German string *value* changed anywhere
+except the one `kostenstelle_verworfen` addition documented above.
+
+**Not verified live in this environment:** a full browser walkthrough of a
+cost-center-approval case (scenario 4) end-to-end, the one path that
+exercises `ApprovalRequest`, `ApprovalResponse`, `InterruptKind`, and
+`CaseOutcome` together. Blocked by two independent, pre-existing issues
+unrelated to this rework, both surfaced while attempting it: the local
+Ollama vision model failed to load (`unknown model architecture:
+"mllama"`), and -- separately -- a live gap where a *total* classification
+failure (nothing extracted at all), if its resulting exception case is
+then approved, currently crashes the booking step (`KeyError:
+'amount_eur'`) instead of ending the case gracefully. Neither is caused by
+this rework; the second has been flagged separately as its own follow-up,
+not fixed here, since it needs a product decision (what should happen
+instead) rather than a code fix.
+
+**Nothing in this section has been committed.** As with the rest of this
+branch, that is left to the user's explicit instruction.
+
+## 10. Bug fixes and a structural-clarity pass (2026-08-05)
+
+**Date:** 2026-08-05 · **Branch:** `rafactoring`
+
+Two follow-up requests: fix the issues surfaced at the end of §9, then
+make the folder structure faster to grasp on first read.
+
+**Bug fixes.**
+- **Silent config drift.** The live `.env` file still used the pre-English-
+  translation German variable names (`OLLAMA_MODELL_VISION`,
+  `MODELL_MODUS`, ...), while `config.py`'s `Settings` fields had already
+  been renamed to English during the translation pass (§ Phase 1) and
+  `.env.example` updated to match. `pydantic-settings` matched neither, so
+  every renamed setting silently fell back to its Python default --
+  invisible everywhere the default happened to coincide with the intended
+  value, and the exact cause of `ModelClass.VISION` quietly resolving to
+  the broken `llama3.2-vision:11b` instead of the user's already-pulled,
+  working `qwen2.5vl:7b`. Fixed by migrating `.env` to the current English
+  names (values preserved); every other stale reference to the old names
+  in user-facing messages (`llm/client.py`, `llm/preflight.py`, `demo.py`,
+  `README.md`) corrected alongside it.
+- **`node_exception_case` crash on an unbookable approval.** When
+  classification fails totally, or succeeds but never resolves a number,
+  and the resulting exception case is approved anyway, `node_booking`
+  used to crash (`KeyError: 'amount_eur'` or an avoidable round trip to a
+  target system that could only refuse). `node_exception_case`
+  (`graph/nodes/payment_confirmation.py`) now recognizes "approved, but
+  nothing bookable behind it" and ends the case the same way an outright
+  rejection does, with an honest audit reason. Two regression tests in
+  `tests/test_scenarios.py`, each verified to fail on the pre-fix code and
+  pass on the fix.
+- **Target-system audit gap, precisely scoped.** `booking.py`/`archiving.py`
+  now audit a transport-level failure (Navision/ELO unreachable) from the
+  caller's side -- previously invisible in the audit trail, since an
+  unreachable target system's own handler never runs and so can never log
+  itself. A first pass also added logging for the *reached* outcomes
+  (accepted/explicitly refused), but `mocks/navision.py` and
+  `mocks/elo.py` already log those themselves (same database access a
+  real integration would not have) -- that duplicate logging was removed
+  before landing. Two regression tests, same fail-before/pass-after
+  verification.
+
+**Structural-clarity pass** (folder/file renames, no behavior change):
+- `registry.py` → `agent_registry.py`, so it reads as a matched pair with
+  `process_registry.py` instead of a near-duplicate name.
+- `agents/classification.py` and `agents/schemas.py` → `agents/shared/`,
+  so the shared/A/B three-way split is visible in the directory tree
+  itself, not only in prose.
+- `ui/upload/` → `ui/intake/`, removing the path-level collision with
+  `ui/pages/upload.py` (the split itself -- testable business logic vs.
+  the Streamlit page -- was already correct and unchanged).
+- `ui/cases/processes/` → `ui/cases/process_views/`, matching the
+  `ProcessView` dataclass name the package already exports.
+- All seven previously-empty top-level `__init__.py` files
+  (`agents/`, `governance/`, `graph/`, `llm/`, `mocks/`, `tools/`, `data/`)
+  got a short orientation docstring, extending a pattern that already
+  existed in `graph/nodes/__init__.py` and `agents/payment_confirmation/
+  __init__.py` but had not been applied uniformly.
+- New `tests/test_structure.py` pins the key paths `README.md`'s
+  project-structure section names against the filesystem, so a future
+  rename that forgets the docs fails the suite instead of drifting --
+  exactly what happened twice already in this report (§9's drift
+  corrections, and the stale `MODELL_MODUS`/`registry.py` messages found
+  while fixing the config bug above).
+
+**Verification.** Full suite green after every step (206 at the end, up
+from 201 at the end of §9); each of the four regression tests (crash
+fixes + audit gap) individually verified to fail against the pre-fix code
+and pass against the fix, not merely "green once written"; a live re-run
+of the total-extraction-failure crash against a real (not mocked) model
+timeout, confirming the fix holds outside the test suite too.
+
+**Nothing in this section has been committed.** Same standing instruction
+as throughout this branch.

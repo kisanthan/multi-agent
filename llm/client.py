@@ -7,7 +7,7 @@ risk-class-based model assignment from the concept diagram
 sovereignty vs. performance).
 
 Which concrete model an agent gets follows from two inputs: its risk class
-(registry.py) and the deployment mode (.env). No agent knows its provider --
+(agent_registry.py) and the deployment mode (.env). No agent knows its provider --
 that is the point.
 
 Model IDs and prices as of 2026-07-17 (change quarterly).
@@ -20,8 +20,8 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel
 
+from agent_registry import ModelClass, get_config
 from config import ModelMode, settings
-from registry import ModelClass, get_config
 
 
 class LLMUnreachable(Exception):
@@ -136,7 +136,7 @@ class OllamaClient(LLMClient):
                 f"Modell {self.model_id!r} ist auf {settings.ollama_base_url} "
                 f"nicht geladen. Laden mit: `ollama pull {self.model_id}` -- oder "
                 "in .env ein anderes Modell eintragen "
-                "(OLLAMA_MODELL_KLEIN / OLLAMA_MODELL_VISION)."
+                "(OLLAMA_MODEL_SMALL / OLLAMA_MODEL_VISION)."
             )
         if response.status_code != 200:
             raise LLMUnreachable(
@@ -158,7 +158,7 @@ class AnthropicClient(LLMClient):
         if not settings.anthropic_api_key:
             raise LLMUnreachable(
                 "ANTHROPIC_API_KEY ist nicht gesetzt. Fuer den Offline-Betrieb "
-                "MODELL_MODUS=lokal in .env setzen."
+                "MODEL_MODE=lokal in .env setzen."
             )
 
         client = anthropic.Anthropic(api_key=settings.anthropic_api_key)

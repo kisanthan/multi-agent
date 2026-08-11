@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from agents.schemas import Classification
+from agents.shared.schemas import Classification
 from governance.audit import NO_REFERENCE, CaseReference
 from llm.extraction import ExtractionResult, extract
 

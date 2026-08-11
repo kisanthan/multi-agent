@@ -110,7 +110,7 @@ CREATE TABLE IF NOT EXISTS audit (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     ts           TEXT NOT NULL,
     actor        TEXT NOT NULL,   -- UPN or agent ID
-    agent        TEXT,            -- agent ID from registry.py, NULL for system events
+    agent        TEXT,            -- agent ID from agent_registry.py, NULL for system events
     action       TEXT NOT NULL,
     decision     TEXT NOT NULL CHECK (decision IN ('erlaubt', 'verweigert', 'info')),
     reason       TEXT NOT NULL,

@@ -16,9 +16,9 @@ from __future__ import annotations
 import streamlit as st
 
 import process_registry
+from agent_registry import REGISTRY, OversightMode
 from config import settings
 from governance import ad
-from registry import REGISTRY, OversightMode
 from ui.shared import style
 from ui.cases.steps import steps_for
 
@@ -54,7 +54,7 @@ def render() -> None:
         st.divider()
 
     st.markdown("### Agentenkonfiguration")
-    st.caption("Aus `registry.py`. Eine Änderung dort ändert das "
+    st.caption("Aus `agent_registry.py`. Eine Änderung dort ändert das "
                "Laufzeitverhalten – die Tabelle ist Durchsetzung, nicht "
                "Dokumentation.")
     st.dataframe(

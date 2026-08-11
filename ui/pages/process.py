@@ -11,8 +11,8 @@ import streamlit as st
 
 from config import CHECKPOINT_PATH
 from graph.cases import overview
+from agent_registry import REGISTRY, OversightMode
 from process_registry import ProcessConfig
-from registry import REGISTRY, OversightMode
 from ui.shared import user
 from ui.shared import filter as filters
 from ui.shared import style

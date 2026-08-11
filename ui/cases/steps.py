@@ -37,8 +37,10 @@ class Step:
     hint: str = ""
 
 
-# Maps the kind of an interrupt to the step it hangs on.
-WAIT_POINTS = {"klaerfall": "klaerfall", "kostenstellen_freigabe": "freigabe"}
+# Maps the kind of an interrupt to the step it hangs on. Derived from
+# process_registry rather than duplicated, so it can never drift from the
+# `own_steps` each process actually declares.
+WAIT_POINTS = process_registry.wait_points()
 
 
 def _raw_steps(process: str | None) -> tuple[ProcessStep, ...]:
@@ -57,8 +59,9 @@ def _step_status(node: str, counts: dict[str, int], *, waiting_at: str | None,
 
     - The **booking node runs twice**: the first pass only reports "approval
       required" and sends the case into the exception case
-      (graph/workflow.py::node_booking). A log entry alone is therefore not
-      a booking -- what matters is the overall outcome.
+      (graph/nodes/payment_confirmation.py::node_booking). A log entry
+      alone is therefore not a booking -- what matters is the overall
+      outcome.
     - The **approval in process B is skipped** when the document reference
       resolves uniquely. That is the normal case (human-on-the-loop), not a
       skipped step.

@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from agents.schemas import DocumentType, Classification
+from agents.shared.schemas import DocumentType, Classification
 from config import INTAKE_DIR, MANIFEST_PATH
 from governance.audit import verify_chain
 from llm.extraction import ExtractionResult
@@ -84,8 +84,8 @@ def app(monkeypatch, tmp_path):
             return elo_client.post("/archive", **kwargs)
         raise AssertionError(f"Unerwarteter POST an {url}")
 
-    monkeypatch.setattr("agents.booking.httpx.post", fake_post)
-    monkeypatch.setattr("agents.archiving.httpx.post", fake_post)
+    monkeypatch.setattr("agents.payment_confirmation.booking.httpx.post", fake_post)
+    monkeypatch.setattr("agents.incoming_invoice.archiving.httpx.post", fake_post)
 
     from graph.workflow import compile_graph
     graph, cp_con = compile_graph(tmp_path / "checkpoints.sqlite")
@@ -99,7 +99,7 @@ def _mock_classification(monkeypatch, **fields):
     """Replaces the extraction agent with a fixed classification result."""
     data = Classification(**fields)
     result = ExtractionResult(data=data, attempts=1, model="mock", provider="mock")
-    monkeypatch.setattr("agents.classification.extract", lambda *a, **k: result)
+    monkeypatch.setattr("agents.shared.classification.extract", lambda *a, **k: result)
 
 
 def _reset_status(number: str, status: str = "offen") -> None:
@@ -355,3 +355,205 @@ def test_scenario5_unauthorized_submitter(app, thread):
     assert "__interrupt__" not in state
     # Exactly one step: the reader node, nothing else.
     assert [s["node"] for s in state["log"]] == ["reader"]
+
+
+# ------------------------------ Beyond the five: total extraction failure
+
+def _mock_extraction_failure(monkeypatch, *,
+                             escalation: str = "Modell nicht erreichbar: Testfehler.") -> None:
+    """Replaces the extraction agent with a total failure (R1 escalation:
+    data=None), not merely a successful result with a null field -- exactly
+    what llm/extraction.py::extract returns once both schema-retry attempts
+    fail, or the model is unreachable."""
+    result = ExtractionResult(data=None, attempts=2, model="mock", provider="mock",
+                              escalation=escalation)
+    monkeypatch.setattr("agents.shared.classification.extract", lambda *a, **k: result)
+
+
+def test_total_extraction_failure_approved_ends_cleanly_not_booked(app, thread, monkeypatch):
+    """A total classification failure (nothing extracted at all) must not
+    reach node_booking, even if the resulting exception case is approved --
+    there is nothing to book.
+
+    Regression test: this used to crash the graph with `KeyError:
+    'amount_eur'` in node_booking, because route_exception_case's only
+    guard checked document_type, not whether reconciliation's fields
+    (number, amount_eur) were ever actually extracted.
+    """
+    _mock_extraction_failure(monkeypatch)
+
+    from langgraph.types import Command
+    state = app.invoke(
+        {"path": _pdf("A_zahlung_ok_01.pdf"), "actor": "m.keller@chg-meridian.com",
+         "log": []},
+        thread,
+    )
+
+    assert "__interrupt__" in state
+    request = state["__interrupt__"][0].value
+    assert request["kind"] == "klaerfall"
+
+    # Approved anyway -- there is still nothing to book.
+    state = app.invoke(
+        Command(resume={"decision": "freigegeben",
+                        "approver": "s.hofmann@chg-meridian.com"}),
+        thread,
+    )
+    assert state["outcome"] == "verworfen"
+    assert state["completed"] is True
+
+    from config import DB_PATH
+    from governance.audit import read_all
+    con = sqlite3.connect(DB_PATH)
+    entries = [e for e in read_all(con) if e.action == "klaerfall_entschieden"]
+    assert any("keine Buchung" in e.reason for e in entries)
+    assert verify_chain(con).valid
+    con.close()
+
+
+def test_unreachable_navision_is_audited_from_the_caller_side(app, thread, monkeypatch):
+    """A transport-level failure talking to Navision (connection refused,
+    timeout, DNS) must itself be audited -- from the caller's side.
+
+    Navision logs its own accept/reject decision when it actually receives
+    a request (mocks/navision.py), but an unreachable Navision never runs
+    that handler at all, so it never gets the chance to log anything about
+    it. Before this fix, that specific failure mode left no audit trace of
+    its own -- only the case's outcome/error state reflected it.
+    """
+    _reset_status("RE-2026-4200")
+    _set_amount("RE-2026-4200", 1_500.0)
+    _mock_classification(
+        monkeypatch, type=DocumentType.PAYMENT_CONFIRMATION,
+        number="RE-2026-4200", amount_eur=1_500.0,
+    )
+
+    from langgraph.types import Command
+    state = app.invoke(
+        {"path": _pdf("A_zahlung_ok_01.pdf"), "actor": "m.keller@chg-meridian.com",
+         "log": []},
+        thread,
+    )
+    assert "__interrupt__" in state
+
+    import httpx as httpx_module
+
+    def unreachable(*args, **kwargs):
+        raise httpx_module.ConnectError("Verbindung verweigert")
+
+    # Overrides the app fixture's routing to the in-process mock for this
+    # one call -- simulating Navision being down, not just rejecting.
+    monkeypatch.setattr("agents.payment_confirmation.booking.httpx.post", unreachable)
+
+    from config import DB_PATH
+    from governance.audit import read_all
+    con = sqlite3.connect(DB_PATH)
+    # Watermark: the production audit table persists across test runs, so
+    # "any entry ever logged" would trivially pass once this fix has run
+    # successfully once. Only entries written by *this* call count.
+    before_ids = {e.id for e in read_all(con)}
+    con.close()
+
+    state = app.invoke(
+        Command(resume={"decision": "freigegeben",
+                        "approver": "s.hofmann@chg-meridian.com",
+                        "number": "RE-2026-4200"}),
+        thread,
+    )
+    assert state["outcome"] == "abgelehnt"
+
+    con = sqlite3.connect(DB_PATH)
+    new_entries = [e for e in read_all(con) if e.id not in before_ids]
+    assert any(e.action == "zahlung_verbuchen" and e.decision.value == "verweigert"
+              and "nicht erreichbar" in e.reason for e in new_entries), (
+        f"no matching new audit entry among {[(e.action, e.decision.value) for e in new_entries]}"
+    )
+    assert verify_chain(con).valid
+    con.close()
+
+
+def test_unreachable_elo_is_audited_from_the_caller_side(app, thread, monkeypatch):
+    """Mirrors the Navision case for process B: an unreachable ELO must be
+    audited from the caller's side, since its own handler never runs to
+    log anything about it either."""
+    _mock_classification(
+        monkeypatch, type=DocumentType.INCOMING_INVOICE,
+        number="ER-2026-9100", amount_eur=12_000.0,
+        supplier="Microsoft Deutschland GmbH",
+        line_items=["Azure Cloud Hosting"],
+        cost_center_reference="KTR-ITINFRA",  # resolves uniquely -> no interrupt
+    )
+
+    import httpx as httpx_module
+
+    def unreachable(*args, **kwargs):
+        raise httpx_module.ConnectError("Verbindung verweigert")
+
+    monkeypatch.setattr("agents.incoming_invoice.archiving.httpx.post", unreachable)
+
+    from config import DB_PATH
+    from governance.audit import read_all
+    con = sqlite3.connect(DB_PATH)
+    # Watermark -- see test_unreachable_navision_is_audited_from_the_caller_side.
+    before_ids = {e.id for e in read_all(con)}
+    con.close()
+
+    state = app.invoke(
+        {"path": _pdf("B_rechnung_ok_02.pdf"), "actor": "m.keller@chg-meridian.com",
+         "log": []},
+        thread,
+    )
+    assert "__interrupt__" not in state
+    assert state["outcome"] == "archivierung_fehlgeschlagen"
+
+    con = sqlite3.connect(DB_PATH)
+    new_entries = [e for e in read_all(con) if e.id not in before_ids]
+    assert any(e.action == "dokument_archivieren" and e.decision.value == "verweigert"
+              and "nicht erreichbar" in e.reason for e in new_entries), (
+        f"no matching new audit entry among {[(e.action, e.decision.value) for e in new_entries]}"
+    )
+    assert verify_chain(con).valid
+    con.close()
+
+
+def test_number_still_missing_after_approval_ends_cleanly_not_booked(app, thread, monkeypatch):
+    """Classification succeeds (amount_eur is known) but finds no invoice
+    number, and the approver does not correct it -- there is still nothing
+    to book.
+
+    Symmetric case to the total-extraction-failure test above: before this
+    fix, this would not crash (Navision's mock schema already rejects a
+    missing `number`), but it would silently rely on that downstream
+    rejection instead of the domain layer's own logic, and would not carry
+    an accurate audit reason.
+    """
+    _mock_classification(
+        monkeypatch, type=DocumentType.PAYMENT_CONFIRMATION,
+        number=None, amount_eur=2_000.0,
+    )
+
+    from langgraph.types import Command
+    state = app.invoke(
+        {"path": _pdf("A_zahlung_ok_01.pdf"), "actor": "m.keller@chg-meridian.com",
+         "log": []},
+        thread,
+    )
+    assert "__interrupt__" in state
+    assert state["__interrupt__"][0].value["finding"] == "keine_nummer"
+
+    # Approved without a correction -- still nothing to book.
+    state = app.invoke(
+        Command(resume={"decision": "freigegeben",
+                        "approver": "s.hofmann@chg-meridian.com"}),
+        thread,
+    )
+    assert state["outcome"] == "verworfen"
+    assert state["completed"] is True
+
+    from config import DB_PATH
+    from governance.audit import read_all
+    con = sqlite3.connect(DB_PATH)
+    entries = [e for e in read_all(con) if e.action == "klaerfall_entschieden"]
+    assert any("keine Buchung" in e.reason for e in entries)
+    assert verify_chain(con).valid
+    con.close()

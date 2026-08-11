@@ -1,0 +1,44 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+%% Generated, not hand-authored -- do not edit directly.
+%% Source: build_graph().compile().get_graph().draw_mermaid() (graph/workflow.py).
+%% Regenerate after any change to graph/workflow.py:
+%%   .venv/Scripts/python.exe -c "from graph.workflow import build_graph; print(build_graph().compile().get_graph().draw_mermaid(), end='')" > docs/flow.mmd
+%% tests/test_flow.py compares this file's edges (and the copy embedded in
+%% docs/architektur.md) against the compiled graph on every test run.
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	reader(reader)
+	klassifikation(klassifikation)
+	abgleich(abgleich)
+	buchung(buchung)
+	klaerfall(klaerfall)
+	kostenstelle(kostenstelle)
+	freigabe_kostenstelle(freigabe_kostenstelle)
+	elo(elo)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> reader;
+	abgleich -.-> buchung;
+	abgleich -. &nbsp;hitl&nbsp; .-> klaerfall;
+	buchung -. &nbsp;ende&nbsp; .-> __end__;
+	buchung -. &nbsp;hitl&nbsp; .-> klaerfall;
+	freigabe_kostenstelle -. &nbsp;ende&nbsp; .-> __end__;
+	freigabe_kostenstelle -.-> elo;
+	klaerfall -. &nbsp;ende&nbsp; .-> __end__;
+	klaerfall -.-> buchung;
+	klaerfall -.-> kostenstelle;
+	klassifikation -. &nbsp;ende&nbsp; .-> __end__;
+	klassifikation -. &nbsp;prozess_a&nbsp; .-> abgleich;
+	klassifikation -. &nbsp;hitl&nbsp; .-> klaerfall;
+	klassifikation -. &nbsp;prozess_b&nbsp; .-> kostenstelle;
+	kostenstelle -.-> elo;
+	kostenstelle -. &nbsp;freigabe&nbsp; .-> freigabe_kostenstelle;
+	reader -. &nbsp;ende&nbsp; .-> __end__;
+	reader -.-> klassifikation;
+	elo --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc

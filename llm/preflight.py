@@ -11,9 +11,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from agent_registry import REGISTRY, ModelClass
 from config import ModelMode, settings
 from llm.client import choose_model
-from registry import REGISTRY, ModelClass
 
 
 @dataclass
@@ -50,7 +50,7 @@ def check() -> Readiness:
 
     if mode is ModelMode.CLOUD:
         if not settings.anthropic_api_key:
-            return Readiness(False, ["MODELL_MODUS=cloud, aber ANTHROPIC_API_KEY ist leer."])
+            return Readiness(False, ["MODEL_MODE=cloud, aber ANTHROPIC_API_KEY ist leer."])
         return Readiness(True, ["Cloud-Modus, API-Key vorhanden."])
 
     needed = required_models()
@@ -86,7 +86,7 @@ def check() -> Readiness:
              *[f"Laden mit: `ollama pull {m}`" for m in missing],
              f"Verfuegbar waeren: {', '.join(available) or '(keine)'}",
              "Alternativ in .env ein vorhandenes Modell eintragen "
-             "(OLLAMA_MODELL_KLEIN / OLLAMA_MODELL_VISION)."],
+             "(OLLAMA_MODEL_SMALL / OLLAMA_MODEL_VISION)."],
             required_models=needed, available_models=available,
         )
 
@@ -94,9 +94,9 @@ def check() -> Readiness:
         return Readiness(
             False,
             [f"Ollama unter {url} bereit ({', '.join(needed)}).",
-             "MODELL_MODUS=hybrid verlangt zusaetzlich ANTHROPIC_API_KEY fuer die "
+             "MODEL_MODE=hybrid verlangt zusaetzlich ANTHROPIC_API_KEY fuer die "
              "risikobehafteten Agenten (Buchung, Navision, Klassifikation).",
-             "Fuer reinen Offline-Betrieb: MODELL_MODUS=lokal setzen."],
+             "Fuer reinen Offline-Betrieb: MODEL_MODE=lokal setzen."],
             required_models=needed, available_models=available,
         )
 

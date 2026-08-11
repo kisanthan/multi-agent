@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from governance import ad
-from registry import AutonomyLevel, OversightMode, get_config
+from agent_registry import AutonomyLevel, OversightMode, get_config
 
 
 class Outcome(str, Enum):

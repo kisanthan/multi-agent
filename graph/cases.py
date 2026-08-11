@@ -22,6 +22,7 @@ from enum import Enum
 from pathlib import Path
 
 import process_registry
+from contracts import CaseOutcome
 
 
 class Status(str, Enum):
@@ -78,9 +79,9 @@ def determine_status(values: dict, *, waiting: bool) -> Status:
     # would have to extend it.
     if outcome in process_registry.successful_outcomes():
         return Status.COMPLETED
-    if outcome == "verworfen":
+    if outcome == CaseOutcome.REJECTED.value:
         return Status.REJECTED
-    if outcome == "zugriff_verweigert":
+    if outcome == CaseOutcome.ACCESS_DENIED.value:
         return Status.DENIED
     # 'abgelehnt', 'archivierung_fehlgeschlagen', and anything unexpected:
     # the case has ended, but not successfully. No silent success.

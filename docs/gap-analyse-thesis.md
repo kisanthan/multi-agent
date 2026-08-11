@@ -15,12 +15,12 @@ the prototype (not in the thesis).
 |---|---|---|
 | Two processes A (payment receipt) / B (incoming invoice), shared intake stretch | one shared graph, shared reader/orchestrator/data layer | ✅ |
 | Business processing only by **Shared Domain Agents** | registry: all business agents are Shared Domain | ✅ |
-| Classification/extraction agent determines type + reads fields | `agents/classification.py` (type + fields in one pass) | ✅ |
+| Classification/extraction agent determines type + reads fields | `agents/shared/classification.py` (type + fields in one pass) | ✅ |
 | Orchestrator "without its own full business rights", routing only | routing function, no write access | ✅ |
 | Reader tool **not an AI agent**, PDF→Markdown deterministic | `tools/reader.py`, no LLM | ✅ |
 | **Process B: unique → straight to ELO; otherwise exception case (four-eyes, HITL)** | `route_cost_center` + `node_cost_center_approval` | ✅ |
 | **Process B ends at ELO** (tamper-evident archiving) | `elo → END`, no Navision booking in B | ✅ |
-| Process A: reconciliation → booking sets open→paid in Navision | `agents/booking.py` → Navision mock `/booking` | ✅ |
+| Process A: reconciliation → booking sets open→paid in Navision | `agents/payment_confirmation/booking.py` → Navision mock `/booking` | ✅ |
 | AD security group at the process entry point (Least Privilege) | AD check *inside* `read_document()` | ✅ |
 | Policy checks "deterministically outside the language model" | `governance/policy.py`, enforced via AST test | ✅ |
 | Audit "tamper-evident" | hash-chained trail, append-only | ✅ |
@@ -57,8 +57,9 @@ reconciliation.
 The thesis describes the cost-center assignment as an **exact referential
 lookup** (deterministic). The prototype (at the time of this analysis)
 implemented it as **LLM-/keyword-based, semantic**
-(`agents/kostenstelle.py`, docstring: "a semantic task that cannot be
-formulated as an exact query", translated from the German).
+(`agents/kostenstelle.py` -- since moved to
+`agents/incoming_invoice/cost_center.py`, docstring: "a semantic task that
+cannot be formulated as an exact query", translated from the German).
 
 That is a real contradiction. Two paths:
 

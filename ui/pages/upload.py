@@ -22,7 +22,7 @@ from graph.cases import overview
 from ui.shared import user, style
 from ui.shared.formatting import enumerate_list, file_size
 from ui.shared.context import current_user, graph, open_case, connection
-from ui.upload import intake
+from ui.intake import intake
 from ui.cases import list as case_list
 from ui.cases.run import start
 

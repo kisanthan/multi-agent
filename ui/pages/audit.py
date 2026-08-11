@@ -40,6 +40,18 @@ def _step_name(agent_id: str | None) -> str:
     The acting agents carry the same ID as their node in the flow -- the
     process registry supplies the name for them. The remaining components
     are in `OTHER_PARTICIPANTS`.
+
+    This passes an *agent ID* into `step_title()`, which is documented to
+    take a *node name* -- correct today only because `step_title()` matches
+    on `ProcessStep.node`, and every step's node name happens to equal its
+    own agent_id except `klaerfall` (node="klaerfall", agent_id="buchung").
+    Since that step's *node* is not "buchung", it does not shadow the real
+    "buchung" step here. Do not replace this with an agent-id-based lookup
+    (e.g. matching on `ProcessStep.agent_id`) -- process A's own_steps list
+    `klaerfall` before `buchung`, so a first-match-by-agent_id lookup would
+    resolve "buchung" to "klaerfall"'s title instead and mislabel every
+    booking entry as an approval decision. Pinned by
+    tests/test_process_registry.py.
     """
     if not agent_id:
         return "—"

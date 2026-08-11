@@ -18,6 +18,7 @@ from dataclasses import dataclass
 import httpx
 
 from config import settings
+from contracts import CaseOutcome
 from governance.audit import NO_REFERENCE, CaseReference, Decision, log_entry
 from governance.policy import Outcome, check_write_action
 
@@ -55,6 +56,12 @@ def archive_document(con: sqlite3.Connection, *, filename: str, document_hash: s
                                   action="dokument_archivieren", reference=reference)):
         return error
 
+    # ELO logs its own outcome (mocks/elo.py) -- it has the same database
+    # access a real DMS integration would not have, so re-logging a
+    # reached response here would double the entry, not complete it. An
+    # unreachable ELO is different: its handler never runs, so it never
+    # gets the chance to log anything about it -- that gap is only visible
+    # from this side of the call.
     try:
         response = httpx.post(
             f"{settings.elo_url}/archive",
@@ -64,7 +71,13 @@ def archive_document(con: sqlite3.Connection, *, filename: str, document_hash: s
         )
         response.raise_for_status()
     except httpx.HTTPError as e:
-        return TargetSystemResult(False, None, f"ELO nicht erreichbar: {e}", str(e))
+        reason = f"ELO nicht erreichbar: {e}"
+        log_entry(con, actor=actor, agent=ELO_AGENT_ID, action="dokument_archivieren",
+                 decision=Decision.DENIED, reason=reason,
+                 payload={"filename": filename, "document_hash": document_hash},
+                 reference=reference, outcome=CaseOutcome.ARCHIVING_FAILED.value)
+        con.commit()
+        return TargetSystemResult(False, None, reason, str(e))
 
     data = response.json()
     note = " (war bereits abgelegt)" if data.get("already_existed") else ""

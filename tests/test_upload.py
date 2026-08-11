@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from governance.audit import read_all, verify_chain
-from ui.upload import intake
+from ui.intake import intake
 
 PDF = b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\nInhalt"
 ACTOR = "einspeiser@chg-meridian.com"

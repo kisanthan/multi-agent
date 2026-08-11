@@ -23,6 +23,7 @@ from dataclasses import dataclass
 import httpx
 
 from config import settings
+from contracts import CaseOutcome
 from governance.audit import NO_REFERENCE, CaseReference, Decision, log_entry
 from governance.policy import Outcome, check_write_action
 
@@ -82,7 +83,13 @@ def book(con: sqlite3.Connection, *, number: str, amount_eur: float, actor: str,
         con.commit()
 
     # The ERP call. The target system checks its own preconditions -- a 409
-    # here is a business finding (duplicate), not a transport error.
+    # here is a business finding (duplicate), not a transport error, and
+    # Navision logs its own accept/reject decision (mocks/navision.py) --
+    # it has the same database access a real ERP integration would not
+    # have, so re-logging that here would double the entry, not complete
+    # it. An unreachable ERP is different: its handler never runs, so it
+    # never gets the chance to log anything about it -- that gap is only
+    # visible from this side of the call.
     try:
         response = httpx.post(
             f"{settings.navision_url}/booking",
@@ -91,9 +98,13 @@ def book(con: sqlite3.Connection, *, number: str, amount_eur: float, actor: str,
             timeout=30.0,
         )
     except httpx.HTTPError as e:
-        return BookingResult(
-            False, False, f"Navision nicht erreichbar: {e}", number, error=str(e)
-        )
+        reason = f"Navision nicht erreichbar: {e}"
+        log_entry(con, actor=actor, agent=AGENT_ID, action="zahlung_verbuchen",
+                 decision=Decision.DENIED, reason=reason,
+                 payload={"number": number, "amount_eur": amount_eur},
+                 reference=reference, outcome=CaseOutcome.BOOKING_REFUSED.value)
+        con.commit()
+        return BookingResult(False, False, reason, number, error=str(e))
 
     if response.status_code != 200:
         detail = response.json().get("detail", response.text)

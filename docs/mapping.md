@@ -20,18 +20,26 @@ against the actual diagrams.
 | Component (concept) | Code | Type | Level | Oversight | Model class |
 |---|---|---|---|---|---|
 | Reader tool | [tools/reader.py](../tools/reader.py) | not an agent | – | deterministic | none |
-| Orchestrator agent | `route_document_type` in [graph/workflow.py](../graph/workflow.py) | orchestrator | – | human-on-the-loop | local/small |
-| Classification & extraction | [agents/classification.py](../agents/classification.py) | Shared Domain | 2 | human-on-the-loop | vision |
-| Reconciliation agent | [agents/reconciliation.py](../agents/reconciliation.py) | Shared Domain | 1 | human-on-the-loop | none *(det., I1)* |
-| Booking agent | [agents/booking.py](../agents/booking.py) | Shared Domain | 3 | **human-in-the-loop** | frontier |
-| Cost-center agent | [agents/cost_center.py](../agents/cost_center.py) | Shared Domain | 2 | human-on-the-loop | none *(det., I1)* |
-| ELO agent (end of process B) | [agents/archiving.py](../agents/archiving.py) | Shared Domain | 3 | human-on-the-loop | local/small |
+| Orchestrator agent | `route_document_type` in [graph/nodes/shared.py](../graph/nodes/shared.py) | orchestrator | – | human-on-the-loop | local/small |
+| Classification & extraction | [agents/shared/classification.py](../agents/shared/classification.py) | Shared Domain | 2 | human-on-the-loop | vision |
+| Reconciliation agent | [agents/payment_confirmation/reconciliation.py](../agents/payment_confirmation/reconciliation.py) | Shared Domain | 1 | human-on-the-loop | none *(det., I1)* |
+| Booking agent | [agents/payment_confirmation/booking.py](../agents/payment_confirmation/booking.py) | Shared Domain | 3 | **human-in-the-loop** | frontier |
+| Cost-center agent | [agents/incoming_invoice/cost_center.py](../agents/incoming_invoice/cost_center.py) | Shared Domain | 2 | human-on-the-loop | none *(det., I1)* |
+| ELO agent (end of process B) | [agents/incoming_invoice/archiving.py](../agents/incoming_invoice/archiving.py) | Shared Domain | 3 | human-on-the-loop | local/small |
 | Policy/governance | [governance/policy.py](../governance/policy.py) | policy | – | deterministic | none |
 | Audit/monitoring | [governance/audit.py](../governance/audit.py) | audit | – | read-only | none |
 
 The table is stored in code as effective data
-([registry.py](../registry.py)) -- the policy reads from it. Changing a
+([agent_registry.py](../agent_registry.py)) -- the policy reads from it. Changing a
 level changes runtime behavior; it is not merely documented.
+
+Reconciliation and booking live under `agents/payment_confirmation/`;
+cost-center assignment and archiving under `agents/incoming_invoice/` --
+classification stays in `agents/shared/`, and the reader stays in `tools/`
+entirely outside `agents/`, because all three are genuinely shared by both
+processes. `graph/nodes/` mirrors the same split (see the new
+"A/B separation" section in [architektur.md](architektur.md)); this table
+lists each agent once, not each file location per layer.
 
 ## Diagrams → implementation
 
@@ -45,7 +53,7 @@ level changes runtime behavior; it is not merely documented.
 - **`mindmap_prozessB.png`** → nodes `reader → klassifikation → kostenstelle
   → (on ambiguity) freigabe_kostenstelle → elo`. **End of process at ELO**
   -- no Navision booking in process B (diagram part 3).
-- **`teil1_agententypen.png` (taxonomy)** → [registry.py](../registry.py):
+- **`teil1_agententypen.png` (taxonomy)** → [agent_registry.py](../agent_registry.py):
   `AgentType`, `AutonomyLevel`, `OversightMode` as enums.
 - **`teil2_ki_modelle.png` (model assignment)** → `ModelClass` per agent
   plus [llm/client.py](../llm/client.py) `choose_model`: risk class × mode
@@ -66,8 +74,8 @@ could contribute nothing there that a database lookup does not already do
 exactly and reproducibly -- it could only hallucinate, and at a
 financially/booking-relevant point. The prototype therefore implements
 both agents **deterministically**
-([agents/reconciliation.py](../agents/reconciliation.py),
-[agents/cost_center.py](../agents/cost_center.py)); the autonomy level and
+([agents/payment_confirmation/reconciliation.py](../agents/payment_confirmation/reconciliation.py),
+[agents/incoming_invoice/cost_center.py](../agents/incoming_invoice/cost_center.py)); the autonomy level and
 oversight mode remain valid, the model class is `NO_MODEL`. Extracting the
 number or the cost-center reference from the document itself is done by
 the upstream classification/extraction agent (which uses a model).
@@ -113,8 +121,8 @@ document reference resolves to a unique cost center, the case runs
 automatically through to archiving; the four-eyes approval only kicks in
 if the reference is missing or unknown (the "assignment unique?" decision
 → no/exception case). This exactly mirrors process A (number present?).
-Implemented in [graph/workflow.py](../graph/workflow.py) via
-`route_cost_center`.
+Implemented in [graph/nodes/incoming_invoice.py](../graph/nodes/incoming_invoice.py)
+via `route_cost_center`.
 
 *(An earlier prototype version always forced an approval at this point;
 the diagram refined the oversight mode to on-the-loop.)*

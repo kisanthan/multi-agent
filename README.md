@@ -10,7 +10,7 @@ incoming invoice) with a multi-agent system and technically substantiates
 the thesis's five central architectural claims:
 
 1. **Role- and risk-based agent configuration** — every agent has a type,
-   autonomy level, oversight mode, and model class ([registry.py](registry.py)).
+   autonomy level, oversight mode, and model class ([agent_registry.py](agent_registry.py)).
 2. **Human-in-the-loop at risk points** — LangGraph interrupts pause the
    case until a human decides.
 3. **Least Privilege** — the AD check is the entry condition into the
@@ -59,14 +59,14 @@ ollama pull qwen3:8b            # load a model (name freely choosable)
 
 In `.env`, **`OLLAMA_BASE_URL`** matters most — local or a server on the
 network. Which model names should be available there is set in
-`OLLAMA_MODELL_KLEIN` / `OLLAMA_MODELL_VISION`. Whether everything is ready
+`OLLAMA_MODEL_SMALL` / `OLLAMA_MODEL_VISION`. Whether everything is ready
 is checked with:
 
 ```bash
 .venv/bin/python demo.py --check
 ```
 
-For cloud or hybrid operation, set `MODELL_MODUS=hybrid` (or `cloud`) and
+For cloud or hybrid operation, set `MODEL_MODE=hybrid` (or `cloud`) and
 put `ANTHROPIC_API_KEY` in `.env`.
 
 ## Demo
@@ -135,9 +135,20 @@ browser tab meanwhile; progress is shown node by node. Approvals from a
 second tab are unaffected by this, because the state lives in the
 checkpoint (see [docs/grenzen.md](docs/grenzen.md), L8).
 
-**One more process** needs no new page: an entry in
-[process_registry.py](process_registry.py) produces navigation, route,
-working view, stepper, and filter.
+**One more process** follows the same pattern throughout the codebase: one
+entry in [process_registry.py](process_registry.py) (which produces
+navigation, route, working view, stepper, and filter), its own agents under
+`agents/<process>/`, its own nodes under `graph/nodes/<process>.py`, and its
+own case-detail fragment under `ui/cases/process_views/<process>.py`. Wiring the
+new file in touches exactly three shared places: `graph/workflow.py`
+(`add_node`/`add_conditional_edges`), `graph/nodes/shared.py`'s
+`route_document_type` (one more routing branch), and
+`ui/cases/process_views/__init__.py`'s `VIEWS` registry -- plus, only if the new
+process has a step that can be conditionally skipped the way process B's
+`freigabe` is, `ui/cases/steps.py::_step_status`. `ui/cases/detail.py` itself
+needs no change: it already resolves everything process-specific through
+the registries above -- nothing to edit inside the other processes' own
+files.
 
 ## The five scenarios
 
@@ -161,6 +172,9 @@ architecture, not model quality. Particularly relevant for the thesis:
 
 - `tests/test_layer_boundaries.py` -- the governance layer imports no LLM
   client (enforced via AST analysis).
+- `tests/test_process_separation.py` -- process A and process B stay
+  separated at the file level: A's node module never imports B's agents
+  and vice versa (same AST technique, one level down).
 - `tests/test_audit.py::test_verify_chain_detects_*` -- the tamper-evidence
   proof.
 - `tests/test_scenarios.py` -- all five scenarios end-to-end.
@@ -168,23 +182,29 @@ architecture, not model quality. Particularly relevant for the thesis:
 ## Project structure
 
 ```
-agents/       one LangGraph node + extraction schemas per agent
+agents/       domain agents
+  shared/       extraction schemas + classification agent (shared by A and B)
+  payment_confirmation/  process A only: reconciliation, booking
+  incoming_invoice/      process B only: cost-center assignment, archiving
 governance/   deterministic, NO LLM: policy, ad, audit
 tools/        reader tool (PDF -> markdown, AD check as entry condition)
 llm/          provider abstraction, validated extraction, preflight
 mocks/        FastAPI: Navision (ERP), ELO (DMS)
 graph/        LangGraph workflow, state model, case overview, target-system effect
+  nodes/        graph nodes: shared.py (intake stretch) + one module per process
 data/         data generator (seed-fixed), SQLite, generated PDFs
 ui/           Streamlit UI
   shared/       style, formatting, filter, runtime context (knows no business logic)
-  cases/        case list, detail view, run, step derivation
-  upload/       intake check and storage
+  cases/        case list, shared detail-view shell, run, step derivation
+    process_views/  per-process detail-view fragments (approval input, outcome text, metric)
+  intake/       upload check and storage
   pages/        upload, history, process (parameterized), audit, architecture
 tests/        pytest
 docs/         architecture, concept->code mapping, limitations
-registry.py   agent configuration table (effective, not just documented)
+agent_registry.py    agent configuration table (effective, not just documented)
 process_registry.py  processes as configuration: step sequence, target system, fields
 config.py     .env configuration
+contracts.py  cross-boundary vocabulary: interrupt kind, approval decision, case outcome
 demo.py       CLI runner for the five scenarios
 ```
 

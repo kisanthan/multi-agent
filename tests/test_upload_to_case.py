@@ -17,13 +17,13 @@ from pathlib import Path
 import pytest
 
 import process_registry
-from agents.schemas import DocumentType, Classification
+from agents.shared.schemas import DocumentType, Classification
 from config import INTAKE_DIR
 from governance.audit import read_all, verify_chain
 from graph.cases import Status, process_of, determine_status, overview
 from llm.extraction import ExtractionResult
 from ui.shared import filter as filters
-from ui.upload import intake
+from ui.intake import intake
 
 PDF = (INTAKE_DIR / "A_zahlung_ok_01.pdf")
 SUBMITTER = "m.keller@chg-meridian.com"
@@ -73,13 +73,13 @@ def app(monkeypatch, tmp_path):
             return elo.post("/archive", **kwargs)
         raise AssertionError(f"Unerwarteter POST an {url}")
 
-    monkeypatch.setattr("agents.booking.httpx.post", fake_post)
-    monkeypatch.setattr("agents.archiving.httpx.post", fake_post)
+    monkeypatch.setattr("agents.payment_confirmation.booking.httpx.post", fake_post)
+    monkeypatch.setattr("agents.incoming_invoice.archiving.httpx.post", fake_post)
 
     data = Classification(type=DocumentType.PAYMENT_CONFIRMATION,
                           number="RE-2026-4203", amount_eur=1341.96)
     monkeypatch.setattr(
-        "agents.classification.extract",
+        "agents.shared.classification.extract",
         lambda *a, **k: ExtractionResult(data=data, attempts=1,
                                          model="mock", provider="mock"))
 

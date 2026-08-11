@@ -13,7 +13,7 @@ from pathlib import Path
 import streamlit as st
 
 import process_registry
-from agents import cost_center as cost_center_agent
+from contracts import ApprovalDecision, ApprovalResponse
 from governance.audit import verify_chain
 from governance.policy import check_approval
 from graph.cases import Status, process_of, determine_status
@@ -22,28 +22,9 @@ from ui.shared import style
 from ui.shared import user
 from ui.shared.formatting import field
 from ui.shared.context import connection, show_audit_for
+from ui.cases import process_views
 from ui.cases.run import resume
 from ui.cases.steps import steps_for
-
-# Which agent is responsible for which approval point. Checking the
-# permission against the wrong agent would be a silent bypass of the
-# policy.
-AGENT_FOR_INTERRUPT = {
-    "klaerfall": "buchung",
-    "kostenstellen_freigabe": "kostenstelle",
-}
-
-RESULT_TEXTS = {
-    "verbucht": "Die Zahlung ist verbucht. Die Rechnung gilt als bezahlt.",
-    "archiviert": "Die Rechnung ist revisionssicher abgelegt. Damit ist der "
-                  "Vorgang beendet.",
-    "verworfen": "Der Vorgang wurde abgelehnt. Es wurde nichts gebucht und "
-                 "nichts abgelegt.",
-    "zugriff_verweigert": "Der Beleg wurde nicht geöffnet: das Konto ist dazu "
-                          "nicht berechtigt.",
-    "abgelehnt": "Die Buchhaltung hat die Buchung abgelehnt.",
-    "archivierung_fehlgeschlagen": "Die Ablage im Archiv ist fehlgeschlagen.",
-}
 
 
 def render(app, thread_id: str, *, upn: str, with_title: bool = True) -> None:
@@ -67,7 +48,7 @@ def render(app, thread_id: str, *, upn: str, with_title: bool = True) -> None:
     if request:
         _decision_form(app, thread_id, request, values, upn=upn)
     else:
-        _outcome(values, status)
+        _outcome(values, status, process)
 
     with st.expander("Was bisher geschah"):
         for entry in values.get("log", []):
@@ -113,7 +94,8 @@ def _decision_form(app, thread_id: str, request: dict, values: dict, *,
                    upn: str) -> None:
     """Here the case pauses until a human decides."""
     kind = request.get("kind", "")
-    agent_id = AGENT_FOR_INTERRUPT.get(kind, "buchung")
+    config = process_registry.for_interrupt(kind)
+    agent_id = (config.approval_agent_id if config else None) or "buchung"
 
     con = connection()
     try:
@@ -139,24 +121,8 @@ def _decision_form(app, thread_id: str, request: dict, values: dict, *,
     if request.get("line_items"):
         st.markdown("**Rechnungsposten:** " + ", ".join(request["line_items"]))
 
-    cost_center_id = None
-    if kind == "kostenstellen_freigabe":
-        catalog = request.get("catalog") or []
-        if not catalog:
-            con = connection()
-            try:
-                catalog = [{"id": z[0], "name": z[1], "reference": z[2]}
-                           for z in cost_center_agent.catalog(con)]
-            finally:
-                con.close()
-        labels = {e["id"]: f"{e['id']} — {e['name']} ({e['reference']})"
-                  for e in catalog}
-        st.warning("Auf dem Beleg steht keine Kostenstelle, die zugeordnet "
-                   "werden konnte. Bitte wählen Sie die passende aus.")
-        cost_center_id = st.selectbox(
-            "Kostenstelle", [e["id"] for e in catalog],
-            format_func=lambda o: labels.get(o, o), key=f"kst_{thread_id}",
-        )
+    view = process_views.for_interrupt(kind)
+    extra_response = view.approval_inputs(request, thread_id=thread_id) if view else {}
 
     if not decision.allowed:
         # No error bar: for this person, this is not an error, simply not
@@ -183,26 +149,24 @@ def _decision_form(app, thread_id: str, request: dict, values: dict, *,
         return
 
     if confirm or reject:
-        response = {
-            "decision": "freigegeben" if confirm else "verworfen",
-            "approver": upn,
-            "number": request.get("number"),
-        }
-        if cost_center_id:
-            response["cost_center_id"] = cost_center_id
+        response = ApprovalResponse(
+            decision=ApprovalDecision.APPROVED if confirm else ApprovalDecision.REJECTED,
+            approver=upn,
+            number=request.get("number"),
+            cost_center_id=extra_response.get("cost_center_id"),
+        ).as_resume()
         st.session_state.pop(f"ablehnen_bestaetigt_{thread_id}", None)
         resume(app, thread_id=thread_id, response=response)
         st.rerun()
 
 
-def _outcome(values: dict, status: Status) -> None:
+def _outcome(values: dict, status: Status, process: str | None) -> None:
     """Completion card: what actually happened in the end?"""
     if not values.get("completed"):
         st.info("Der Vorgang wird gerade bearbeitet.")
         return
 
-    outcome = values.get("outcome", "")
-    text = RESULT_TEXTS.get(outcome, f"Vorgang beendet: {outcome or 'unbekannt'}")
+    text = process_views.result_text(values.get("outcome", ""), process)
 
     st.markdown("#### Ergebnis")
     if status is Status.COMPLETED:
@@ -223,12 +187,12 @@ def _outcome(values: dict, status: Status) -> None:
         con.close()
 
     if effect.has_effect:
-        cols = st.columns(2)
-        if effect.navision_status:
-            cols[0].metric(f"Rechnung {effect.navision_number}",
-                          effect.navision_status.capitalize())
-        if effect.elo_archive_id:
-            cols[1].metric("Im Archiv abgelegt unter", effect.elo_archive_id)
+        views = process_views.all_views()
+        cols = st.columns(len(views))
+        for col, view in zip(cols, views):
+            metric = view.effect_metric(effect)
+            if metric:
+                col.metric(*metric)
 
     if values.get("approved_by"):
         st.caption(f"Bestätigt von {values['approved_by']}")

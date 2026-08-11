@@ -1,14 +1,18 @@
 """The processes of the functional concept as an effective configuration table.
 
-Counterpart to `registry.py`: that module states *who* acts (agents, roles,
+Counterpart to `agent_registry.py`: that module states *who* acts (agents, roles,
 oversight); this one states *what* is being acted on* (process A payment
 receipt, process B incoming invoice).
 
 This module deliberately lives at the top level and not inside `ui/`. The
 step sequence of a process is domain knowledge, not a presentation detail --
 if it lived in the UI, a third process would require touching the UI.
-So the rule holds: **one more process = one entry here plus the nodes in
-the graph.** Page, navigation, list, stepper, and filter follow from that.
+So the rule holds: **one more process = one entry here, plus its agents
+under `agents/<process>/`, plus its nodes under `graph/nodes/<process>.py`,
+plus its detail-view fragment under `ui/cases/process_views/<process>.py`.**
+Page, navigation, list, stepper, and filter follow from the entry here;
+`interrupt_kind` and `approval_step_node` below are what let the UI resolve
+an approval point without a hand-maintained table of its own.
 
 Pure configuration with no behavior, no LLM dependency, and no Streamlit
 import.
@@ -18,21 +22,31 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agents.schemas import DocumentType
+from agents.shared.schemas import DocumentType
 
 
 @dataclass(frozen=True)
 class ProcessStep:
     """A step in the flow.
 
-    `node` is the node name from `graph/workflow.py`. It is the key the UI
-    uses to look up in the run log whether the step has already happened --
-    the link between the flow model and the display.
+    `node` is the key the UI uses to look up in the run log whether the
+    step has already happened -- the second argument every `note(...)` call
+    in `graph/nodes/*.py` writes, and the link between the flow model and
+    the display. For every step but one, `node` is *also* the LangGraph
+    node name from `graph/workflow.py`, because the log namespace and the
+    graph namespace happen to use the same string. `freigabe` is the one
+    exception: its graph node is `freigabe_kostenstelle` (see
+    `graph/nodes/incoming_invoice.py::node_cost_center_approval`, which logs
+    under `"freigabe"` but is wired into the graph as
+    `"freigabe_kostenstelle"`). `graph_node` names that graph node when it
+    differs from `node`; `tests/test_flow.py` pins the two namespaces
+    against the compiled graph so they cannot silently drift apart.
     """
 
     node: str
     title: str
     agent_id: str | None
+    graph_node: str | None = None
 
 
 # The shared intake stretch of both processes (functional concept: shared
@@ -58,10 +72,22 @@ class ProcessConfig:
     target_system: str
     process_end: str
     completion_outcome: str      # `outcome` value of a successful run
+    interrupt_kind: str           # the `kind` value of this process's HITL interrupt
+    approval_step_node: str       # node name (log namespace) of the approval step
 
     @property
     def steps(self) -> tuple[ProcessStep, ...]:
         return (*SHARED_STEPS, *self.own_steps)
+
+    @property
+    def approval_agent_id(self) -> str | None:
+        """Which agent's permission governs this process's approval point.
+
+        Derived from `own_steps` rather than duplicated, so the two can
+        never drift apart the way a hand-maintained lookup table could.
+        """
+        return next((s.agent_id for s in self.own_steps
+                    if s.node == self.approval_step_node), None)
 
 
 PROCESSES: dict[str, ProcessConfig] = {
@@ -85,6 +111,8 @@ PROCESSES: dict[str, ProcessConfig] = {
         target_system="Buchhaltung (Navision)",
         process_end="Die Rechnung ist als bezahlt verbucht",
         completion_outcome="verbucht",
+        interrupt_kind="klaerfall",
+        approval_step_node="klaerfall",
     ),
     "B": ProcessConfig(
         key="B",
@@ -98,7 +126,8 @@ PROCESSES: dict[str, ProcessConfig] = {
         document_type=DocumentType.INCOMING_INVOICE,
         own_steps=(
             ProcessStep("kostenstelle", "Kostenstelle zuordnen", "kostenstelle"),
-            ProcessStep("freigabe", "Bestätigung durch eine Person", "kostenstelle"),
+            ProcessStep("freigabe", "Bestätigung durch eine Person", "kostenstelle",
+                       graph_node="freigabe_kostenstelle"),
             ProcessStep("elo", "Rechnung archivieren", "elo"),
         ),
         list_columns=("supplier", "amount_eur"),
@@ -107,6 +136,8 @@ PROCESSES: dict[str, ProcessConfig] = {
         target_system="Archiv (ELO)",
         process_end="Die Rechnung ist revisionssicher archiviert",
         completion_outcome="archiviert",
+        interrupt_kind="kostenstellen_freigabe",
+        approval_step_node="freigabe",
     ),
 }
 
@@ -135,6 +166,28 @@ def for_document_type(document_type: str | None) -> ProcessConfig | None:
 
 def for_route(route: str) -> ProcessConfig | None:
     return next((p for p in PROCESSES.values() if p.route == route), None)
+
+
+def for_interrupt(kind: str | None) -> ProcessConfig | None:
+    """Maps an interrupt's `kind` to the process it belongs to.
+
+    Lets the approval form resolve by interrupt kind instead of by
+    process -- a case waiting at process A's exception-case node has no
+    resolved process yet if it got there via a failed classification, but
+    the interrupt kind is always known.
+    """
+    if not kind:
+        return None
+    return next((p for p in PROCESSES.values() if p.interrupt_kind == kind), None)
+
+
+def wait_points() -> dict[str, str]:
+    """Maps each process's interrupt `kind` to its approval step node.
+
+    Used by the stepper to know which step is active while a case is
+    waiting -- derived here so it can never drift from `own_steps` above.
+    """
+    return {p.interrupt_kind: p.approval_step_node for p in PROCESSES.values()}
 
 
 def all_processes() -> list[ProcessConfig]:

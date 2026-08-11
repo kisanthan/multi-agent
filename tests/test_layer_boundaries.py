@@ -84,8 +84,8 @@ def test_registry_is_llm_free():
     It is read by governance and would otherwise break the layer boundary
     through a detour.
     """
-    forbidden = _imported_root_modules(PROJECT_ROOT / "registry.py") & FORBIDDEN_MODULES
-    assert not forbidden, f"registry.py importiert {sorted(forbidden)}"
+    forbidden = _imported_root_modules(PROJECT_ROOT / "agent_registry.py") & FORBIDDEN_MODULES
+    assert not forbidden, f"agent_registry.py importiert {sorted(forbidden)}"
 
 
 def test_config_is_llm_free():

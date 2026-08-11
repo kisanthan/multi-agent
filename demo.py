@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from config import DB_PATH, INTAKE_DIR, MANIFEST_PATH, settings
+from contracts import InterruptKind
 from governance.audit import read_all, verify_chain
 from graph.effects import read_effect
 
@@ -56,7 +57,7 @@ def list_documents() -> None:
 def _response_to(request: dict, approver: str, decision: str) -> dict:
     """Builds the approval response for an interrupt."""
     kind = request.get("kind")
-    if kind == "kostenstellen_freigabe":
+    if kind == InterruptKind.COST_CENTER_APPROVAL.value:
         # If the document reference is missing, the approver picks from the
         # catalog. In the non-interactive run we take the first catalog
         # entry.
@@ -81,7 +82,7 @@ def run_case(doc: dict, *, approver: str, decision: str, interactive: bool) -> N
     print(f"Erwartung:  {doc['expectation']}")
     if doc["incident"]:
         print(f"Stoerfall:  {doc['incident']}")
-    print(f"Modus:      MODELL_MODUS={settings.model_mode.value}")
+    print(f"Modus:      MODEL_MODE={settings.model_mode.value}")
     print("-" * 78)
 
     try:

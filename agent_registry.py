@@ -54,7 +54,7 @@ class OversightMode(str, Enum):
 class ModelClass(str, Enum):
     """Model assignment by risk (concept diagram `teil2_ki_modelle.png`).
 
-    The concrete model IDs live in llm/config.py -- only the risk class lives
+    The concrete model IDs live in config.py -- only the risk class lives
     here, so the assignment stays an architectural statement and not a
     dependency on a specific provider.
     """

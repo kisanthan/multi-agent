@@ -4,6 +4,13 @@ LangGraph carries this state through every node and persists it in the
 checkpointer. That is exactly what makes the HITL interruption possible:
 the case pauses at an approval point, the state survives the process, and a
 human resumes it hours later.
+
+Split into one `TypedDict` per process plus a shared one, mirroring
+`agents/` and `graph/nodes/`: a field's home tells you which process's node
+writes it. All four classes live in this one file on purpose -- with
+`from __future__ import annotations`, LangGraph resolves every annotation
+as a string against this module's globals, so a base class defined
+elsewhere would fail to resolve.
 """
 
 from __future__ import annotations
@@ -11,8 +18,9 @@ from __future__ import annotations
 from typing import Any, TypedDict
 
 
-class Case(TypedDict, total=False):
-    """A single document's pass through process A or B."""
+class SharedFields(TypedDict, total=False):
+    """Fields written by the shared intake stretch (reader, classification)
+    or by either process's HITL/outcome handling."""
 
     # --- Intake ---
     path: str
@@ -39,19 +47,16 @@ class Case(TypedDict, total=False):
     amount_eur: float | None
     supplier: str | None
     line_items: list[str]
-    cost_center_reference: str | None   # extracted from the document (process B)
-
-    # --- Process A: reconciliation ---
-    finding: str
-    expected_amount_eur: float | None
-
-    # --- Process B: cost center ---
-    cost_center_id: str | None
-    cost_center_reason: str
-    cost_center_unique: bool
-    archive_id: str | None
+    # Extracted from the document by the shared classification agent;
+    # only meaningful for process B, but the field belongs here because
+    # that is the node that writes it.
+    cost_center_reference: str | None
+    escalation: str | None
 
     # --- HITL ---
+    # Written by either process's approval node (klaerfall for A,
+    # freigabe_kostenstelle for B) -- same shape, same question asked of a
+    # human, hence shared rather than duplicated per process.
     approved_by: str | None
     approval_decision: str        # 'freigegeben' | 'verworfen'
     exception_case: bool
@@ -61,7 +66,26 @@ class Case(TypedDict, total=False):
     completed: bool
     outcome: str
     error: str | None
-    escalation: str | None
 
     # --- Traceability ---
     log: list[dict[str, Any]]
+
+
+class PaymentConfirmationFields(TypedDict, total=False):
+    """Fields written only by process A's nodes (agents/payment_confirmation)."""
+
+    finding: str
+    expected_amount_eur: float | None
+
+
+class IncomingInvoiceFields(TypedDict, total=False):
+    """Fields written only by process B's nodes (agents/incoming_invoice)."""
+
+    cost_center_id: str | None
+    cost_center_reason: str
+    cost_center_unique: bool
+    archive_id: str | None
+
+
+class Case(SharedFields, PaymentConfirmationFields, IncomingInvoiceFields, total=False):
+    """A single document's pass through process A or B."""
