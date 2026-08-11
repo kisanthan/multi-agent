@@ -230,6 +230,81 @@ def test_scenario2_unknown_number_becomes_an_exception_case(app, thread, monkeyp
     assert state["outcome"] == "verbucht"
 
 
+def test_scenario2_approval_by_unauthorized_user_is_denied(app, thread, monkeypatch):
+    """A known user without SG-CHG-Freigabe membership cannot approve.
+
+    Regression test: node_exception_case used to accept whatever `approver`
+    was named in the resume payload without checking
+    governance.policy.check_approval at all -- the four-eyes principle was
+    enforced only by the Streamlit UI graying out the buttons, never by the
+    graph. `m.keller@chg-meridian.com` is a real AD user (member of
+    SG-CHG-DocIngest, submits documents elsewhere in this file) but is not a
+    member of SG-CHG-Freigabe -- exactly the case a stolen or guessed resume
+    payload would exploit.
+    """
+    _mock_classification(
+        monkeypatch, type=DocumentType.PAYMENT_CONFIRMATION,
+        number="RE-2026-9999", amount_eur=2_000.0,
+    )
+    from langgraph.types import Command
+    state = app.invoke(
+        {"path": _pdf("A_zahlung_unbekannte_nummer.pdf"),
+         "actor": "t.brandt@chg-meridian.com", "log": []},
+        thread,
+    )
+    assert "__interrupt__" in state
+
+    state = app.invoke(
+        Command(resume={"decision": "freigegeben",
+                        "approver": "m.keller@chg-meridian.com",
+                        "number": "RE-2026-4201"}),
+        thread,
+    )
+    assert state["outcome"] == "verworfen"
+    assert state["completed"] is True
+
+    from config import DB_PATH
+    from governance.audit import read_all
+    con = sqlite3.connect(DB_PATH)
+    entries = [e for e in read_all(con) if e.action == "freigabe_verweigert"]
+    assert any("m.keller@chg-meridian.com" in e.actor
+              and "SG-CHG-Freigabe" in e.reason for e in entries)
+    assert verify_chain(con).valid
+    con.close()
+
+
+def test_scenario2_approval_by_unknown_user_is_denied(app, thread, monkeypatch):
+    """An approver UPN with no AD entry at all is denied (Zero Trust), not
+    silently accepted -- the exact `demo.py --pruefer <beliebiger-upn>` path."""
+    _mock_classification(
+        monkeypatch, type=DocumentType.PAYMENT_CONFIRMATION,
+        number="RE-2026-9999", amount_eur=2_000.0,
+    )
+    from langgraph.types import Command
+    state = app.invoke(
+        {"path": _pdf("A_zahlung_unbekannte_nummer.pdf"),
+         "actor": "t.brandt@chg-meridian.com", "log": []},
+        thread,
+    )
+    assert "__interrupt__" in state
+
+    state = app.invoke(
+        Command(resume={"decision": "freigegeben",
+                        "approver": "nicht-in-freigabe@example.com",
+                        "number": "RE-2026-4201"}),
+        thread,
+    )
+    assert state["outcome"] == "verworfen"
+
+    from config import DB_PATH
+    from governance.audit import read_all
+    con = sqlite3.connect(DB_PATH)
+    entries = [e for e in read_all(con) if e.action == "freigabe_verweigert"]
+    assert any("Zero Trust" in e.reason for e in entries)
+    assert verify_chain(con).valid
+    con.close()
+
+
 def test_scenario2_rejecting_does_not_book(app, thread, monkeypatch):
     """The approver can also reject the exception case -- then no booking."""
     _mock_classification(
@@ -248,6 +323,125 @@ def test_scenario2_rejecting_does_not_book(app, thread, monkeypatch):
         thread,
     )
     assert state["outcome"] == "verworfen"
+
+
+def test_scenario2b_duplicate_is_flagged_not_rebooked(app, thread, monkeypatch):
+    """Scenario 2b (data/generate.py): the same invoice number submitted a
+    second time must be recognized as already paid, not booked again.
+
+    Uses the purpose-built fixture pair A_zahlung_dublette_1.pdf / _2.pdf --
+    generated specifically for this case but previously never wired into
+    pytest (reconciliation.Finding.ALREADY_PAID was untested)."""
+    _reset_status("RE-2026-4211")
+    _set_amount("RE-2026-4211", 890.0)
+    _mock_classification(
+        monkeypatch, type=DocumentType.PAYMENT_CONFIRMATION,
+        number="RE-2026-4211", amount_eur=890.0,
+    )
+
+    from langgraph.types import Command
+    # First submission: happy path, ends up paid.
+    state = app.invoke(
+        {"path": _pdf("A_zahlung_dublette_1.pdf"), "actor": "t.brandt@chg-meridian.com",
+         "log": []},
+        thread,
+    )
+    assert "__interrupt__" in state
+    state = app.invoke(
+        Command(resume={"decision": "freigegeben",
+                        "approver": "s.hofmann@chg-meridian.com",
+                        "number": "RE-2026-4211"}),
+        thread,
+    )
+    assert state["outcome"] == "verbucht"
+
+    # Second submission of the same number, in its own case: reconciliation
+    # must recognize it is already paid, not book it again.
+    thread2 = {"configurable": {"thread_id": f"test-{uuid.uuid4().hex[:8]}"}}
+    state = app.invoke(
+        {"path": _pdf("A_zahlung_dublette_2.pdf"), "actor": "t.brandt@chg-meridian.com",
+         "log": []},
+        thread2,
+    )
+    assert "__interrupt__" in state
+    assert state["__interrupt__"][0].value["finding"] == "bereits_bezahlt"
+
+    state = app.invoke(
+        Command(resume={"decision": "verworfen",
+                        "approver": "s.hofmann@chg-meridian.com"}),
+        thread2,
+    )
+    assert state["outcome"] == "verworfen"
+
+
+def test_scenario2c_amount_mismatch_becomes_exception_case(app, thread, monkeypatch):
+    """Scenario 2c (data/generate.py): an extracted amount that deviates
+    from the master-data amount must become an exception case, not a
+    silent mismatch booking. reconciliation.Finding.AMOUNT_MISMATCH was
+    previously untested."""
+    _reset_status("RE-2026-4210")
+    _set_amount("RE-2026-4210", 1_000.0)
+    _mock_classification(
+        monkeypatch, type=DocumentType.PAYMENT_CONFIRMATION,
+        number="RE-2026-4210", amount_eur=3_700.0,  # far off the stored 1,000.0
+    )
+
+    from langgraph.types import Command
+    state = app.invoke(
+        {"path": _pdf("A_zahlung_betrag_unplausibel.pdf"),
+         "actor": "t.brandt@chg-meridian.com", "log": []},
+        thread,
+    )
+    assert "__interrupt__" in state
+    assert state["__interrupt__"][0].value["finding"] == "betrag_abweichend"
+
+    state = app.invoke(
+        Command(resume={"decision": "verworfen",
+                        "approver": "s.hofmann@chg-meridian.com"}),
+        thread,
+    )
+    assert state["outcome"] == "verworfen"
+
+
+def test_corrected_number_that_is_already_paid_is_refused_by_navision(app, thread, monkeypatch):
+    """The approver may correct the number at the exception-case point
+    (node_exception_case) -- but that correction is never re-validated by
+    reconciliation, only by Navision itself at the write site
+    (agents/payment_confirmation/booking.py's non-200 branch, previously
+    untested). If a human "corrects" to a number that turns out to already
+    be paid, Navision's own duplicate protection must catch it -- the case
+    must not silently look booked.
+    """
+    _reset_status("RE-2026-4212", status="bezahlt")
+    _mock_classification(
+        monkeypatch, type=DocumentType.PAYMENT_CONFIRMATION,
+        number="RE-2026-9999", amount_eur=1_200.0,
+    )
+
+    from langgraph.types import Command
+    state = app.invoke(
+        {"path": _pdf("A_zahlung_unbekannte_nummer.pdf"),
+         "actor": "m.keller@chg-meridian.com", "log": []},
+        thread,
+    )
+    assert "__interrupt__" in state
+    assert state["__interrupt__"][0].value["finding"] == "unbekannt"
+
+    state = app.invoke(
+        Command(resume={"decision": "freigegeben",
+                        "approver": "s.hofmann@chg-meridian.com",
+                        "number": "RE-2026-4212"}),
+        thread,
+    )
+    assert state["outcome"] == "abgelehnt"
+
+    from config import DB_PATH
+    from governance.audit import read_all
+    con = sqlite3.connect(DB_PATH)
+    entries = [e for e in read_all(con) if e.action == "zahlung_verbuchen"]
+    assert any("bereits bezahlt" in e.reason for e in entries[-3:])
+    assert verify_chain(con).valid
+    con.close()
 
 
 # ------------------------------------------- Scenario 3: happy path B
@@ -285,6 +479,46 @@ def test_scenario3_unique_cost_center_is_archived_automatically(app, thread, mon
     row = con.execute("SELECT archive_id FROM archive WHERE archive_id = ?",
                       (state["archive_id"],)).fetchone()
     assert row is not None  # filed tamper-evidently
+    assert verify_chain(con).valid
+    con.close()
+
+
+def test_second_archiving_of_the_same_document_is_idempotent(app, thread, monkeypatch):
+    """Filing the same document a second time must return the existing
+    archive ID (ELO's own idempotency, mocks/elo.py's `already_existed`
+    branch, previously untested), not create a second entry -- identity is
+    decided by the document hash, not by how many times it was submitted.
+    Mirrors process A's duplicate-submission test above."""
+    _mock_classification(
+        monkeypatch, type=DocumentType.INCOMING_INVOICE,
+        number="ER-2026-7102", amount_eur=37_940.0,
+        supplier="Microsoft Deutschland GmbH",
+        line_items=["Microsoft 365 E5, 1200 Lizenzen", "Azure Cloud Hosting"],
+        cost_center_reference="KTR-ITINFRA",
+    )
+
+    state = app.invoke(
+        {"path": _pdf("B_rechnung_ok_02.pdf"), "actor": "m.keller@chg-meridian.com",
+         "log": []},
+        thread,
+    )
+    assert state["outcome"] == "archiviert"
+    first_archive_id = state["archive_id"]
+
+    thread2 = {"configurable": {"thread_id": f"test-{uuid.uuid4().hex[:8]}"}}
+    state = app.invoke(
+        {"path": _pdf("B_rechnung_ok_02.pdf"), "actor": "m.keller@chg-meridian.com",
+         "log": []},
+        thread2,
+    )
+    assert state["outcome"] == "archiviert"
+    assert state["archive_id"] == first_archive_id
+
+    from config import DB_PATH
+    from governance.audit import read_all
+    con = sqlite3.connect(DB_PATH)
+    entries = [e for e in read_all(con) if e.action == "dokument_archivieren"]
+    assert any("bereits abgelegt" in e.reason for e in entries[-3:])
     assert verify_chain(con).valid
     con.close()
 
@@ -338,6 +572,44 @@ def test_scenario4_missing_reference_lets_a_human_decide(app, thread, monkeypatc
     approvals = [e for e in read_all(con)
                 if e.action == "kostenstelle_freigegeben"]
     assert any("KST-5000" in e.reason for e in approvals)
+    assert verify_chain(con).valid
+    con.close()
+
+
+def test_scenario4_approval_by_unauthorized_user_is_denied(app, thread, monkeypatch):
+    """Mirrors test_scenario2_approval_by_unauthorized_user_is_denied for
+    process B's four-eyes approval (node_cost_center_approval)."""
+    _mock_classification(
+        monkeypatch, type=DocumentType.INCOMING_INVOICE,
+        number="ER-2026-7200", amount_eur=24_400.0,
+        supplier="SAP Deutschland SE",
+        line_items=["SAP Lizenzverlaengerung Modul FI"],
+        cost_center_reference=None,
+    )
+
+    from langgraph.types import Command
+    state = app.invoke(
+        {"path": _pdf("B_rechnung_ohne_referenz.pdf"),
+         "actor": "t.brandt@chg-meridian.com", "log": []},
+        thread,
+    )
+    assert "__interrupt__" in state
+
+    state = app.invoke(
+        Command(resume={"decision": "freigegeben",
+                        "approver": "m.keller@chg-meridian.com",
+                        "cost_center_id": "KST-5000"}),
+        thread,
+    )
+    assert state["outcome"] == "verworfen"
+    assert state["completed"] is True
+
+    from config import DB_PATH
+    from governance.audit import read_all
+    con = sqlite3.connect(DB_PATH)
+    entries = [e for e in read_all(con) if e.action == "freigabe_verweigert"]
+    assert any("m.keller@chg-meridian.com" in e.actor
+              and "SG-CHG-Freigabe" in e.reason for e in entries)
     assert verify_chain(con).valid
     con.close()
 

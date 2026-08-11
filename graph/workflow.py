@@ -26,12 +26,13 @@ import sqlite3
 from pathlib import Path
 
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 
 from graph.nodes import incoming_invoice, payment_confirmation, shared
 from graph.state import Case
 
 
-def build_graph():
+def build_graph() -> StateGraph:
     """Assembles the graph. Without a checkpointer -- the caller sets that.
 
     Built in the order the case actually travels, one section per node
@@ -111,7 +112,9 @@ def build_graph():
     return g
 
 
-def compile_graph(checkpoint_path: Path | str | None = None):
+def compile_graph(
+    checkpoint_path: Path | str | None = None,
+) -> tuple[CompiledStateGraph, sqlite3.Connection]:
     """Compiles the graph with the SQLite checkpointer.
 
     The checkpointer is not optional: without it, `interrupt()` could not

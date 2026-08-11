@@ -25,7 +25,7 @@ import httpx
 from config import settings
 from contracts import CaseOutcome
 from governance.audit import NO_REFERENCE, CaseReference, Decision, log_entry
-from governance.policy import Outcome, check_write_action
+from governance.policy import Outcome, check_approval, check_write_action
 
 AGENT_ID = "buchung"
 
@@ -45,9 +45,14 @@ def book(con: sqlite3.Connection, *, number: str, amount_eur: float, actor: str,
     """Books a payment -- after a policy check.
 
     `approved_by` is set when a human has already decided the HITL point.
-    In that case the policy approval check is skipped: the approval *is*
-    the permission, otherwise the case would loop endlessly between
-    approval and re-asking.
+    In that case `check_write_action`'s amount/autonomy rules are skipped --
+    the decision to book at all was already made -- but the approver's
+    permission is re-verified via `check_approval`, the same
+    write-site-check principle
+    agents/incoming_invoice/archiving.py already applies: an approval
+    earlier in the process does not replace the permission check at the
+    point that actually writes. Without this, `book()` would trust
+    whatever string a caller passes as `approved_by`.
     """
     if approved_by is None:
         decision = check_write_action(
@@ -73,6 +78,15 @@ def book(con: sqlite3.Connection, *, number: str, amount_eur: float, actor: str,
             con.commit()
             return BookingResult(False, True, decision.reason, number)
     else:
+        permission = check_approval(con, actor=approved_by, agent_id=AGENT_ID)
+        if not permission.allowed:
+            log_entry(con, actor=approved_by, agent=AGENT_ID, action="freigabe_verweigert",
+                      decision=Decision.DENIED, reason=permission.reason,
+                      payload={"number": number, "amount_eur": amount_eur},
+                      reference=reference, outcome="verweigert")
+            con.commit()
+            return BookingResult(False, False, permission.reason, number)
+
         log_entry(con, actor=approved_by, agent=AGENT_ID,
                   action="freigabe_erteilt", decision=Decision.ALLOWED,
                   reason=f"Buchung von {approved_by} freigegeben "

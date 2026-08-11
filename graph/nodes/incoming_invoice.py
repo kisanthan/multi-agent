@@ -12,6 +12,7 @@ from langgraph.types import interrupt
 from agents.incoming_invoice import archiving, cost_center
 from contracts import ApprovalDecision, ApprovalRequest, ApprovalResponse, CaseOutcome, InterruptKind
 from governance.audit import Decision, log_entry
+from governance.policy import check_approval
 from graph.nodes.shared import case_reference, connection, note
 from graph.state import Case
 
@@ -79,6 +80,32 @@ def node_cost_center_approval(state: Case) -> dict:
         catalog=tuple({"id": k[0], "name": k[1], "reference": k[2]} for k in catalog),
         unique=state.get("cost_center_unique"),
     ).as_payload()))
+
+    # Four-eyes principle, enforced here and not just in the UI -- see the
+    # matching comment in
+    # graph/nodes/payment_confirmation.py::node_exception_case.
+    con = connection()
+    try:
+        permission = check_approval(con, actor=response.approver, agent_id="kostenstelle")
+        if not permission.allowed:
+            log_entry(con, actor=response.approver, agent="kostenstelle",
+                     action="freigabe_verweigert",
+                     decision=Decision.DENIED,
+                     reason=permission.reason,
+                     payload={"cost_center_id": response.cost_center_id},
+                     reference=case_reference(state), outcome=CaseOutcome.REJECTED.value)
+            con.commit()
+    finally:
+        con.close()
+
+    if not permission.allowed:
+        return {
+            "completed": True,
+            "outcome": CaseOutcome.REJECTED.value,
+            "approved_by": response.approver,
+            "log": note(state, "freigabe",
+                       f"Freigabe verweigert: {permission.reason}"),
+        }
 
     con = connection()
     try:

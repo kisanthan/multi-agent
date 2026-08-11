@@ -28,7 +28,7 @@ ELO_AGENT_ID = "elo"
 @dataclass(frozen=True)
 class TargetSystemResult:
     successful: bool
-    reference_id: str | None      # archive ID or booking reference ID
+    reference_id: str | None      # archive ID
     reason: str
     error: str | None = None
 

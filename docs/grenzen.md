@@ -79,8 +79,11 @@ the same DB are not safeguarded.
 
 ### L7 -- Model versions and prices
 All model IDs (`claude-opus-4-8`, `claude-haiku-4-5`, `qwen3:8b`,
-`llama3.2-vision:11b`) and prices should be read as of the retrieval date
-**2026-07-17** and change quarterly.
+`qwen2.5vl:7b`) and prices should be read as of the retrieval date
+**2026-07-17** and change quarterly. The vision model was originally
+`llama3.2-vision:11b` per the functional concept, but failed to load under
+Ollama in this project's own testing ("unknown model architecture:
+mllama") and was replaced with the confirmed-working `qwen2.5vl:7b`.
 
 ### L8 -- The UI runs cases in a blocking manner
 The Streamlit UI runs a case synchronously within the starting browser

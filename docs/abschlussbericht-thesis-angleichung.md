@@ -239,8 +239,10 @@ this rework; the second has been flagged separately as its own follow-up,
 not fixed here, since it needs a product decision (what should happen
 instead) rather than a code fix.
 
-**Nothing in this section has been committed.** As with the rest of this
-branch, that is left to the user's explicit instruction.
+**Nothing in this section had been committed at the time this was
+written.** It has since been committed, along with §10 below, under commits
+`04e7384`..`81f74e0` (`git log` -- the commit messages do not map 1:1 onto
+these two sections' boundaries).
 
 ## 10. Bug fixes and a structural-clarity pass (2026-08-05)
 
@@ -314,5 +316,6 @@ and pass against the fix, not merely "green once written"; a live re-run
 of the total-extraction-failure crash against a real (not mocked) model
 timeout, confirming the fix holds outside the test suite too.
 
-**Nothing in this section has been committed.** Same standing instruction
-as throughout this branch.
+**Nothing in this section had been committed at the time this was
+written.** See the note at the end of §9 -- it has since been committed
+together with that section's changes.

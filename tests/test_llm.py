@@ -8,7 +8,9 @@ architecture testable.
 
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -16,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from config import ModelMode, settings
 from governance.audit import read_all, verify_chain
-from llm.client import LLMUnreachable, ModelChoice, choose_model
+from llm.client import AnthropicClient, LLMUnreachable, ModelChoice, OllamaClient, choose_model
 from llm.extraction import MAX_ATTEMPTS, extract
 
 ACTOR = "einspeiser@chg-meridian.com"
@@ -86,6 +88,163 @@ def test_deterministic_components_get_no_model(agent_id):
     model."""
     with pytest.raises(ValueError, match="kein Sprachmodell"):
         choose_model(agent_id)
+
+
+# --------------------------------------------------- Provider clients (transport)
+#
+# Everything above replaces client_for() wholesale with a MagicMock -- it
+# tests the routing decision, never the two concrete clients themselves.
+# These tests exercise OllamaClient/AnthropicClient.ask_json directly: the
+# actual provider-neutral abstraction the thesis's sub-question 2 (cloud vs.
+# open-source) rests on.
+
+def test_ollama_client_returns_message_content(monkeypatch):
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"message": {"content": '{"number": "RE-2026-4200", "amount_eur": 1.0}'}}
+
+    def fake_post(url, **kwargs):
+        assert url == f"{settings.ollama_base_url}/api/chat"
+        assert kwargs["json"]["model"] == "qwen3:8b"
+        return FakeResponse()
+
+    monkeypatch.setattr("httpx.post", fake_post)
+    client = OllamaClient("qwen3:8b")
+    result = client.ask_json(system="s", prompt="p", schema=Payment)
+    assert result == '{"number": "RE-2026-4200", "amount_eur": 1.0}'
+
+
+def test_ollama_client_missing_model_gives_actionable_message(monkeypatch):
+    """Ollama reports a missing model as HTTP 404 -- must become a message
+    naming `ollama pull`, not a generic transport error."""
+    class FakeResponse:
+        status_code = 404
+        text = "model not found"
+
+    monkeypatch.setattr("httpx.post", lambda *a, **k: FakeResponse())
+    client = OllamaClient("nicht-geladenes-modell")
+    with pytest.raises(LLMUnreachable, match="ollama pull"):
+        client.ask_json(system="s", prompt="p", schema=Payment)
+
+
+def test_ollama_client_other_http_error(monkeypatch):
+    class FakeResponse:
+        status_code = 500
+        text = "internal error"
+
+    monkeypatch.setattr("httpx.post", lambda *a, **k: FakeResponse())
+    client = OllamaClient("qwen3:8b")
+    with pytest.raises(LLMUnreachable, match="HTTP 500"):
+        client.ask_json(system="s", prompt="p", schema=Payment)
+
+
+def test_ollama_client_unreachable_gives_actionable_message(monkeypatch):
+    import httpx as httpx_module
+
+    def unreachable(*args, **kwargs):
+        raise httpx_module.ConnectError("Verbindung verweigert")
+
+    monkeypatch.setattr("httpx.post", unreachable)
+    client = OllamaClient("qwen3:8b")
+    with pytest.raises(LLMUnreachable, match="ollama serve"):
+        client.ask_json(system="s", prompt="p", schema=Payment)
+
+
+def test_anthropic_client_returns_parsed_output_as_json(monkeypatch):
+    import anthropic
+
+    parsed = Payment(number="RE-2026-4200", amount_eur=1_341.96)
+
+    class FakeMessages:
+        def parse(self, **kwargs):
+            assert kwargs["model"] == "claude-haiku-4-5"
+            return SimpleNamespace(stop_reason="end_turn", parsed_output=parsed, content=[])
+
+    class FakeAnthropic:
+        def __init__(self, *, api_key):
+            self.messages = FakeMessages()
+
+    monkeypatch.setattr(anthropic, "Anthropic", FakeAnthropic)
+    monkeypatch.setattr(settings, "anthropic_api_key", "test-key")
+
+    client = AnthropicClient("claude-haiku-4-5")
+    result = client.ask_json(system="s", prompt="p", schema=Payment)
+    assert json.loads(result) == {"number": "RE-2026-4200", "amount_eur": 1341.96}
+
+
+def test_anthropic_client_falls_back_to_text_content(monkeypatch):
+    """When parsed_output is None (the model did not honor output_format),
+    the raw text content is returned instead -- validation happens
+    upstream in llm/extraction.py, not here."""
+    import anthropic
+
+    class FakeMessages:
+        def parse(self, **kwargs):
+            return SimpleNamespace(
+                stop_reason="end_turn", parsed_output=None,
+                content=[SimpleNamespace(type="text", text="raw text")],
+            )
+
+    class FakeAnthropic:
+        def __init__(self, *, api_key):
+            self.messages = FakeMessages()
+
+    monkeypatch.setattr(anthropic, "Anthropic", FakeAnthropic)
+    monkeypatch.setattr(settings, "anthropic_api_key", "test-key")
+
+    client = AnthropicClient("claude-haiku-4-5")
+    assert client.ask_json(system="s", prompt="p", schema=Payment) == "raw text"
+
+
+def test_anthropic_client_refusal_is_unreachable(monkeypatch):
+    import anthropic
+
+    class FakeMessages:
+        def parse(self, **kwargs):
+            return SimpleNamespace(stop_reason="refusal", parsed_output=None, content=[])
+
+    class FakeAnthropic:
+        def __init__(self, *, api_key):
+            self.messages = FakeMessages()
+
+    monkeypatch.setattr(anthropic, "Anthropic", FakeAnthropic)
+    monkeypatch.setattr(settings, "anthropic_api_key", "test-key")
+
+    client = AnthropicClient("claude-haiku-4-5")
+    with pytest.raises(LLMUnreachable, match="Sicherheitsgruenden"):
+        client.ask_json(system="s", prompt="p", schema=Payment)
+
+
+def test_anthropic_client_missing_api_key(monkeypatch):
+    monkeypatch.setattr(settings, "anthropic_api_key", "")
+    client = AnthropicClient("claude-haiku-4-5")
+    with pytest.raises(LLMUnreachable, match="ANTHROPIC_API_KEY"):
+        client.ask_json(system="s", prompt="p", schema=Payment)
+
+
+def test_anthropic_client_api_error(monkeypatch):
+    import anthropic
+    import httpx as httpx_module
+
+    class FakeMessages:
+        def parse(self, **kwargs):
+            raise anthropic.APIError(
+                "boom", httpx_module.Request("POST", "https://api.anthropic.com/v1/messages"),
+                body=None,
+            )
+
+    class FakeAnthropic:
+        def __init__(self, *, api_key):
+            self.messages = FakeMessages()
+
+    monkeypatch.setattr(anthropic, "Anthropic", FakeAnthropic)
+    monkeypatch.setattr(settings, "anthropic_api_key", "test-key")
+
+    client = AnthropicClient("claude-haiku-4-5")
+    with pytest.raises(LLMUnreachable, match="Anthropic-API-Fehler"):
+        client.ask_json(system="s", prompt="p", schema=Payment)
 
 
 # ------------------------------------- Validation / retry / escalation (R1)

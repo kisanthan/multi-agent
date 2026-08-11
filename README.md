@@ -46,6 +46,17 @@ cp .env.example .env
 .venv/bin/python -m data.generate        # generate synthetic data + PDFs
 ```
 
+**On Windows (PowerShell),** the venv layout and copy command differ; every
+other command in this README is otherwise identical -- replace `.venv/bin/`
+with `.venv\Scripts\` and `python3` with `python` throughout:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+Copy-Item .env.example .env
+.venv\Scripts\python.exe -m data.generate
+```
+
 ### Model provisioning
 
 The prototype **loads no models and starts no services** — it connects to
@@ -71,11 +82,24 @@ put `ANTHROPIC_API_KEY` in `.env`.
 
 ## Demo
 
+**On language:** `demo.py`'s CLI output (prompts, scenario labels, the
+approval dialog) is deliberately German, same as the UI -- see "On
+language" under UI below. Only this paragraph and the rest of the
+documentation are English.
+
 The target-system mocks must be running for the write-path scenarios:
 
 ```bash
 .venv/bin/uvicorn mocks.navision:app --port 8001 &
 .venv/bin/uvicorn mocks.elo:app --port 8002 &
+```
+
+**On Windows,** trailing `&` does not background a process the same way --
+open two separate PowerShell windows and run one command in each instead:
+
+```powershell
+.venv\Scripts\python.exe -m uvicorn mocks.navision:app --port 8001
+.venv\Scripts\python.exe -m uvicorn mocks.elo:app --port 8002
 ```
 
 Then the five scenarios:
@@ -178,6 +202,22 @@ architecture, not model quality. Particularly relevant for the thesis:
 - `tests/test_audit.py::test_verify_chain_detects_*` -- the tamper-evidence
   proof.
 - `tests/test_scenarios.py` -- all five scenarios end-to-end.
+
+Coverage (optional, `pytest-cov` is in `requirements.txt`):
+
+```bash
+.venv/bin/python -m pytest -q --cov=agents --cov=governance --cov=graph \
+  --cov=llm --cov=tools --cov=mocks --cov=ui --cov-report=term-missing
+```
+
+As of this writing: 85% overall, 86-98% across `agents/`, `governance/`,
+`graph/`, and `llm/` -- the layers the thesis's architectural claims rest
+on. The one honest, expected gap is the Streamlit UI's approval-decision
+screens (`ui/cases/detail.py`, `ui/cases/run.py`), which have no dedicated
+UI-level tests (see `tests/test_ui_smoke.py`'s own docstring); the
+authorization logic they call into is covered directly at its source
+(`tests/test_scenarios.py`'s unauthorized-approver tests,
+`tests/test_booking.py`).
 
 ## Project structure
 

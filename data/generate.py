@@ -255,7 +255,11 @@ def generate_documents(invoices: list[dict], rng: random.Random) -> list[Documen
 
     # ---- Process A, happy path: valid payment confirmations -----------------
     # Two of them are deliberately below, two above a typical threshold of
-    # 10,000 EUR, so scenario 1 can show both oversight modes.
+    # 10,000 EUR -- not because the threshold has any effect (booking is
+    # always human-in-the-loop, Thesis §7.4, no amount-based automation), but
+    # to demonstrate exactly that: the same single approval applies
+    # regardless of amount (see tests/test_scenarios.py
+    # ::test_scenario1_large_amount_same_single_approval).
     cheap = [r for r in invoices if r["amount_eur"] < 5_000][:2]
     expensive = [r for r in invoices if r["amount_eur"] > 20_000][:2]
     for idx, r in enumerate(cheap + expensive):
@@ -266,13 +270,12 @@ def generate_documents(invoices: list[dict], rng: random.Random) -> list[Documen
             number=r["number"], amount=r["amount_eur"], supplier_name=sup[1],
             bank=rng.choice(banks), date_=CUTOFF_DATE - timedelta(days=rng.randint(0, 5)),
         )
-        below_threshold = r["amount_eur"] < 10_000
         docs.append(Document(
             filename=name, process="A", scenario="1_happy_path",
             submitter="m.keller@chg-meridian.com", incident=None,
-            expectation=("automatische Verbuchung, Status offen -> bezahlt"
-                        if below_threshold
-                        else "Betrag ueber Schwelle -> HITL-Freigabe, dann Verbuchung"),
+            expectation="Betrag unstrittig -> HITL-Freigabe (immer, "
+                       "unabhaengig vom Betrag) -> Verbuchung, Status offen "
+                       "-> bezahlt",
             number=r["number"], amount_eur=r["amount_eur"], supplier=sup[1],
         ))
 

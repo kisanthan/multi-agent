@@ -49,7 +49,7 @@ def load_user(con: sqlite3.Connection, upn: str) -> User:
         "SELECT upn, display_name, role FROM ad_users WHERE upn = ?", (upn,)
     ).fetchone()
     if row is None:
-        raise UnknownUser(f"No AD entry for {upn!r}")
+        raise UnknownUser(f"Kein AD-Eintrag fuer {upn!r}")
 
     groups = {
         g[0] for g in con.execute(

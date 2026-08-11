@@ -45,7 +45,11 @@ class Settings(BaseSettings):
     model_mode: ModelMode = ModelMode.LOCAL
     ollama_base_url: str = "http://localhost:11434"
     ollama_model_small: str = "qwen3:8b"
-    ollama_model_vision: str = "llama3.2-vision:11b"
+    # llama3.2-vision:11b (the model named in the original functional
+    # concept) failed to load in this project's own testing ("unknown model
+    # architecture: mllama"); qwen2.5vl:7b is confirmed working -- see
+    # docs/grenzen.md.
+    ollama_model_vision: str = "qwen2.5vl:7b"
 
     anthropic_api_key: str = ""
     # Model IDs as of 2026-07-17 (change quarterly -- see docs/grenzen.md).

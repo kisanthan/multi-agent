@@ -21,6 +21,8 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from langgraph.graph.state import CompiledStateGraph
+
 import process_registry
 from contracts import CaseOutcome
 
@@ -134,7 +136,7 @@ def thread_ids(checkpoint_path: Path | str) -> list[str]:
         con.close()
 
 
-def overview(app, checkpoint_path: Path | str) -> list[CaseOverview]:
+def overview(app: CompiledStateGraph, checkpoint_path: Path | str) -> list[CaseOverview]:
     """All known cases, newest first.
 
     Queries the checkpoint per thread. That is O(n) in the number of cases

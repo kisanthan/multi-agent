@@ -289,5 +289,10 @@ checkpointer uses a separate file (`data/checkpoints.sqlite`).
 | Role | local (Ollama) | Cloud (Anthropic) | Cloud price (in/out per 1M) |
 |---|---|---|---|
 | reading/small | `qwen3:8b` | `claude-haiku-4-5` | $1 / $5 |
-| classification (vision) | `llama3.2-vision:11b` | `claude-opus-4-8` | $5 / $25 |
+| classification (vision) | `qwen2.5vl:7b`¹ | `claude-opus-4-8` | $5 / $25 |
 | critical writing | — | `claude-opus-4-8` | $5 / $25 |
+
+¹ The functional concept originally named `llama3.2-vision:11b`; it failed
+to load under Ollama in this project's own testing ("unknown model
+architecture: mllama"). `qwen2.5vl:7b` is confirmed working and is the
+default in `.env.example`/`config.py`.

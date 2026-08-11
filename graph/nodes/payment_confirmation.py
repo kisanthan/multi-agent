@@ -14,6 +14,7 @@ from agents.payment_confirmation import booking, reconciliation
 from agents.shared.schemas import DocumentType
 from contracts import ApprovalDecision, ApprovalRequest, ApprovalResponse, CaseOutcome, InterruptKind
 from governance.audit import Decision, log_entry
+from governance.policy import check_approval
 from graph.nodes.shared import case_reference, connection, note
 from graph.state import Case
 
@@ -95,6 +96,36 @@ def node_exception_case(state: Case) -> dict:
         expected_amount_eur=state.get("expected_amount_eur"),
         escalation=state.get("escalation"),
     ).as_payload()))
+
+    # Four-eyes principle, enforced here and not just in the UI: a resume
+    # payload is untrusted input -- it can come from a second browser tab,
+    # `demo.py --pruefer`, or a hand-built Command(resume=...). The UI
+    # already grays out the approval buttons for a non-member
+    # (ui/cases/detail.py), but that is a convenience, not the enforcement
+    # point; without this check, an unauthorized or unknown UPN could
+    # approve a booking simply by being named in the resume payload.
+    con = connection()
+    try:
+        permission = check_approval(con, actor=response.approver, agent_id="buchung")
+        if not permission.allowed:
+            log_entry(con, actor=response.approver, agent="buchung",
+                     action="freigabe_verweigert",
+                     decision=Decision.DENIED,
+                     reason=permission.reason,
+                     payload={"number": state.get("number")},
+                     reference=case_reference(state), outcome=CaseOutcome.REJECTED.value)
+            con.commit()
+    finally:
+        con.close()
+
+    if not permission.allowed:
+        return {
+            "completed": True,
+            "outcome": CaseOutcome.REJECTED.value,
+            "approved_by": response.approver,
+            "log": note(state, "klaerfall",
+                       f"Freigabe verweigert: {permission.reason}"),
+        }
 
     if not response.approved:
         con = connection()

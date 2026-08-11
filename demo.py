@@ -21,7 +21,6 @@ import sqlite3
 import sys
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
 from config import DB_PATH, INTAKE_DIR, MANIFEST_PATH, settings
 from contracts import InterruptKind

@@ -13,7 +13,7 @@ import sqlite3
 from pathlib import Path
 
 from agents.shared import classification
-from agents.shared.schemas import DocumentType
+from agents.shared.schemas import Classification, DocumentType
 from config import DB_PATH
 from contracts import CaseOutcome
 from governance.audit import CaseReference
@@ -39,7 +39,7 @@ def case_reference(state: Case) -> CaseReference:
     )
 
 
-def _extracted_fields(d) -> str:
+def _extracted_fields(d: Classification) -> str:
     """What the extraction agent found -- as a sentence, not a dump.
 
     The text appears in the detail view under "What happened so far". Raw
