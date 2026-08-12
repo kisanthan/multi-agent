@@ -4,9 +4,9 @@ Not a parse of that section -- markdown prose is not worth parsing. An
 independent list a maintainer updates by hand alongside the README, the
 same way tests/test_flow.py's FLOW set is updated alongside
 graph/workflow.py. Without this, a rename can silently leave the README
-describing a layout that no longer exists -- exactly what happened twice
-already this session (a stale `registry.py` reference, an inaccurate
-wiring claim; see docs/abschlussbericht-thesis-angleichung.md).
+describing a layout that no longer exists -- which has happened before
+here (a stale `registry.py` reference that survived the rename to
+`agent_registry.py`, and a wiring claim that no longer matched the graph).
 """
 
 from __future__ import annotations

@@ -13,6 +13,7 @@ from contracts import (
     ApprovalDecision,
     ApprovalRequest,
     ApprovalResponse,
+    ApprovalTrigger,
     CaseOutcome,
     InterruptKind,
 )
@@ -36,29 +37,34 @@ def test_payment_confirmation_request_omits_unset_fields():
         escalation="Extraktion fehlgeschlagen.",
     )
     assert set(request.as_payload()) == {
-        "kind", "filename", "reason", "finding", "number",
+        "kind", "trigger", "filename", "reason", "finding", "number",
         "amount_eur", "escalation",
     }
 
 
 def test_payment_confirmation_request_full_key_set():
     """With every process-A field populated, the key set matches exactly
-    what graph/nodes/payment_confirmation.py declares (8 keys)."""
+    what graph/nodes/payment_confirmation.py declares (9 keys).
+
+    `kind` and `trigger` are the two that are always present: what the
+    case is waiting for, and which oversight rule stopped it.
+    """
     request = ApprovalRequest(
         kind=InterruptKind.EXCEPTION_CASE,
+        trigger=ApprovalTrigger.OVERSIGHT_MODE,
         filename="A_zahlung_ok_01.pdf", reason="…", finding="ok",
         number="RE-2026-4200", amount_eur=1500.0, expected_amount_eur=1500.0,
         escalation="…",
     )
     assert set(request.as_payload()) == {
-        "kind", "filename", "reason", "finding", "number",
+        "kind", "trigger", "filename", "reason", "finding", "number",
         "amount_eur", "expected_amount_eur", "escalation",
     }
 
 
 def test_incoming_invoice_request_full_key_set():
     """With every process-B field populated, the key set matches exactly
-    what graph/nodes/incoming_invoice.py declares (9 keys)."""
+    what graph/nodes/incoming_invoice.py declares (10 keys)."""
     request = ApprovalRequest(
         kind=InterruptKind.COST_CENTER_APPROVAL,
         filename="B_rechnung_ohne_referenz.pdf", supplier="SAP Deutschland SE",
@@ -68,7 +74,7 @@ def test_incoming_invoice_request_full_key_set():
         unique=False,
     )
     assert set(request.as_payload()) == {
-        "kind", "filename", "supplier", "amount_eur", "line_items",
+        "kind", "trigger", "filename", "supplier", "amount_eur", "line_items",
         "reason", "catalog", "unique",
     }
 
@@ -85,6 +91,38 @@ def test_request_round_trips_through_its_payload():
                         unique=True),
     ):
         assert ApprovalRequest.from_payload(request.as_payload()) == request
+
+
+def test_trigger_defaults_to_escalation():
+    """A stop is an exception unless a node declares otherwise.
+
+    The safe default matters because the value is shown to the approver:
+    calling an escalation "routine oversight" would understate it, while
+    the reverse only overstates the unusualness of a routine stop.
+    """
+    request = ApprovalRequest(kind=InterruptKind.EXCEPTION_CASE)
+    assert request.trigger is ApprovalTrigger.ESCALATION
+    assert request.as_payload()["trigger"] == "eskalation"
+
+
+def test_trigger_survives_the_checkpoint_round_trip():
+    """Both values must come back as themselves -- the dialog's whole
+    headline hangs off this one field."""
+    for trigger in ApprovalTrigger:
+        request = ApprovalRequest(kind=InterruptKind.EXCEPTION_CASE,
+                                  trigger=trigger, number="RE-1")
+        assert ApprovalRequest.from_payload(request.as_payload()).trigger is trigger
+
+
+def test_legacy_payload_without_trigger_reads_as_escalation():
+    """Checkpoints written before the field existed must stay readable.
+
+    A case paused in the checkpoint outlives a code change -- that is the
+    point of the checkpointer -- so `from_payload` has to cope with a
+    payload that predates the field.
+    """
+    legacy = {"kind": "klaerfall", "number": "RE-2026-4200"}
+    assert ApprovalRequest.from_payload(legacy).trigger is ApprovalTrigger.ESCALATION
 
 
 # ------------------------------------------------------------ ApprovalResponse

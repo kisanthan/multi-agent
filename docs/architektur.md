@@ -248,8 +248,12 @@ of the thesis's requirements directly:
   `Command(resume=...)`. No HITL without a checkpointer -- the checkpointer
   is therefore not optional (`graph/workflow.py::compile_graph`).
 - **Risk-based approval points:** modeled as conditional edges whose
-  condition comes from the policy (amount threshold) or from the
-  registry's oversight mode (four-eyes principle).
+  condition comes from the agent registry's oversight mode -- the booking
+  agent's standing human-in-the-loop mode, or an escalation out of
+  human-on-the-loop when an agent cannot decide (four-eyes principle).
+  Which of the two stopped a case is declared in the interrupt payload
+  (`contracts.ApprovalTrigger`) and named to the approver in the approval
+  dialog; it is never inferred from the finding.
 - **Audit trail:** every node writes hash-chained into the trail; the graph
   state keeps a run log for the UI and CLI.
 

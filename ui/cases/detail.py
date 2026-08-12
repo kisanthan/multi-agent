@@ -13,7 +13,7 @@ from pathlib import Path
 import streamlit as st
 
 import process_registry
-from contracts import ApprovalDecision, ApprovalResponse
+from contracts import ApprovalDecision, ApprovalResponse, ApprovalTrigger
 from governance.audit import verify_chain
 from governance.policy import check_approval
 from graph.cases import Status, process_of, determine_status
@@ -22,7 +22,7 @@ from ui.shared import style
 from ui.shared import user
 from ui.shared.formatting import field
 from ui.shared.context import connection, show_audit_for
-from ui.cases import process_views
+from ui.cases import approval_dialog, process_views
 from ui.cases.run import resume
 from ui.cases.steps import steps_for
 
@@ -46,7 +46,7 @@ def render(app, thread_id: str, *, upn: str, with_title: bool = True) -> None:
                             waiting_on=(request or {}).get("kind"), status=status))
 
     if request:
-        _decision_form(app, thread_id, request, values, upn=upn)
+        _waiting_card(app, thread_id, request, values, upn=upn)
     else:
         _outcome(values, status, process)
 
@@ -90,9 +90,41 @@ def _header(values: dict, status: Status, process: str | None, thread_id: str, *
         style.fields(values, business_fields)
 
 
-def _decision_form(app, thread_id: str, request: dict, values: dict, *,
-                   upn: str) -> None:
-    """Here the case pauses until a human decides."""
+def _waiting_card(app, thread_id: str, request: dict, values: dict, *,
+                  upn: str) -> None:
+    """A waiting case: opens the modal, and keeps a way back to it.
+
+    The decision itself belongs in the dialog (see
+    `ui/cases/approval_dialog.py`) -- a case that stops must *look* like it
+    stopped. What stays on the page is only the note that it is waiting,
+    plus the button to reopen a dialog that was set aside.
+    """
+    headline, explanation, icon = approval_dialog.oversight_note(request)
+
+    st.markdown(f"#### {icon} {headline}")
+    st.info(explanation)
+
+    if approval_dialog.should_open(thread_id):
+        approval_dialog.open_decision(app, thread_id, request, values, upn=upn)
+    elif st.button("Entscheidung öffnen", type="primary",
+                   key=f"oeffnen_{thread_id}", use_container_width=True):
+        approval_dialog.reset(thread_id)
+        st.rerun()
+
+
+def _is_oversight_stop(request: dict) -> bool:
+    """Did the agent's standing oversight mode stop this, or an escalation?"""
+    return request.get("trigger") == ApprovalTrigger.OVERSIGHT_MODE.value
+
+
+def decision_form(app, thread_id: str, request: dict, values: dict, *,
+                  upn: str) -> bool:
+    """The approval form itself. Returns whether a decision was submitted.
+
+    Lives here rather than in the dialog module so the evidence rows, the
+    per-process input, and the four-eyes handling exist exactly once --
+    the dialog is the frame, this is the content.
+    """
     kind = request.get("kind", "")
     config = process_registry.for_interrupt(kind)
     agent_id = (config.approval_agent_id if config else None) or "buchung"
@@ -111,12 +143,24 @@ def _decision_form(app, thread_id: str, request: dict, values: dict, *,
     else:
         st.markdown("#### Wartet auf Bestätigung")
 
+    # `reason` is the policy's own wording, written verbatim into the audit
+    # trail ("Buchungs-Agent ist Human-in-the-loop -- Freigabe
+    # erforderlich"). That belongs in the trail, where it must not be
+    # reworded, but not in front of an approver: it is the concept's
+    # vocabulary (tests/test_ui_language.py), and for a standing
+    # human-in-the-loop stop it only restates what the dialog's own
+    # headline already says in plain language. On an escalation it carries
+    # real evidence ("Der Beleg nennt keine Kostenstellenreferenz") and
+    # stays.
+    shown = ("finding", "escalation") if _is_oversight_stop(request) else (
+        "reason", "finding", "escalation")
     rows = "".join(
         f"<div class='feldzeile'><b>{field(s, request[s])[0]}:</b> "
         f"{field(s, request[s])[1]}</div>"
-        for s in ("reason", "finding", "escalation") if request.get(s)
+        for s in shown if request.get(s)
     )
-    st.markdown(f'<div class="karte">{rows}</div>', unsafe_allow_html=True)
+    if rows:
+        st.markdown(f'<div class="karte">{rows}</div>', unsafe_allow_html=True)
 
     if request.get("line_items"):
         st.markdown("**Rechnungsposten:** " + ", ".join(request["line_items"]))
@@ -146,7 +190,7 @@ def _decision_form(app, thread_id: str, request: dict, values: dict, *,
         st.session_state[f"ablehnen_bestaetigt_{thread_id}"] = True
         st.warning("Ablehnen beendet den Vorgang endgültig. Zum Fortfahren "
                    "erneut auf „Ablehnen“ klicken.")
-        return
+        return False
 
     if confirm or reject:
         response = ApprovalResponse(
@@ -158,6 +202,8 @@ def _decision_form(app, thread_id: str, request: dict, values: dict, *,
         st.session_state.pop(f"ablehnen_bestaetigt_{thread_id}", None)
         resume(app, thread_id=thread_id, response=response)
         st.rerun()
+
+    return False
 
 
 def _outcome(values: dict, status: Status, process: str | None) -> None:

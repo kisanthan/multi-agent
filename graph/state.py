@@ -61,6 +61,11 @@ class SharedFields(TypedDict, total=False):
     approval_decision: str        # 'freigegeben' | 'verworfen'
     exception_case: bool
     exception_reason: str
+    # Which oversight rule stopped the case: the agent's standing
+    # human-in-the-loop mode, or an escalation out of human-on-the-loop.
+    # Set by the node that stops it, read by the approval dialog; see
+    # contracts.ApprovalTrigger.
+    approval_trigger: str
 
     # --- Outcome ---
     completed: bool

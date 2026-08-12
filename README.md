@@ -33,7 +33,7 @@ the thesis's five central architectural claims:
 | PDF → Markdown | PyMuPDF4LLM (primary), Docling (via config) | |
 | Models | Ollama (local) and/or Anthropic (cloud), switchable per agent | |
 | Persistence / mocks | SQLite, FastAPI | |
-| UI | Streamlit (approval queue) | |
+| UI | Streamlit (case cockpit, approval as a modal dialog) | |
 
 Details and rationale for the stack validation: [docs/architektur.md](docs/architektur.md).
 

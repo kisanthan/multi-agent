@@ -61,7 +61,12 @@ def render() -> None:
         [{
             "Agent": cfg.name,
             "Typ": cfg.type.value,
-            "Autonomiestufe": cfg.autonomy_level.value if cfg.autonomy_level else "—",
+            # `str(...)`, not the bare int: components without an autonomy
+            # level (reader, policy, audit) render "—" here, and a column
+            # mixing int and str has no Arrow type -- st.dataframe then
+            # fails to serialize it and the whole page raises.
+            "Autonomiestufe": (str(cfg.autonomy_level.value)
+                               if cfg.autonomy_level else "—"),
             "Aufsicht": cfg.oversight.value,
             "Modellklasse": cfg.model_class.value,
             "Prozesse": ", ".join(cfg.processes),

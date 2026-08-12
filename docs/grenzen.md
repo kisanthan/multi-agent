@@ -98,9 +98,10 @@ LangGraph checkpoint, not in the browser.
 ### L9 -- Extending the audit trail forces a chain rebuild
 Since the UI rework, the trail carries the fields `case_id`, `source`, and
 `outcome` as their own columns; they feed into the hash so they are just as
-tamper-evident as the rest of the entry (this also closes open point O2
-from
-[abschlussbericht-thesis-angleichung.md](abschlussbericht-thesis-angleichung.md)).
+tamper-evident as the rest of the entry. That covers the evidence the
+thesis asks for by name in §8.1 (*Auftraggeber, Agent, Datenquelle,
+Werkzeugaufruf, Policy-Entscheidung, Ergebnis*) in dedicated fields rather
+than inside an opaque payload.
 
 The flip side is more fundamental and instructive for the thesis: **a
 hash-chained table cannot be schema-migrated.** Existing entries were

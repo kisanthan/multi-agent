@@ -10,7 +10,14 @@ from __future__ import annotations
 from langgraph.types import interrupt
 
 from agents.incoming_invoice import archiving, cost_center
-from contracts import ApprovalDecision, ApprovalRequest, ApprovalResponse, CaseOutcome, InterruptKind
+from contracts import (
+    ApprovalDecision,
+    ApprovalRequest,
+    ApprovalResponse,
+    ApprovalTrigger,
+    CaseOutcome,
+    InterruptKind,
+)
 from governance.audit import Decision, log_entry
 from governance.policy import check_approval
 from graph.nodes.shared import case_reference, connection, note
@@ -71,6 +78,10 @@ def node_cost_center_approval(state: Case) -> dict:
 
     response = ApprovalResponse.from_resume(interrupt(ApprovalRequest(
         kind=InterruptKind.COST_CENTER_APPROVAL,
+        # Always an escalation: the cost-center agent is human-on-the-loop
+        # and only ever reaches this node when it could not resolve the
+        # reference itself (see route_cost_center).
+        trigger=ApprovalTrigger.ESCALATION,
         filename=state.get("filename"),
         supplier=state.get("supplier"),
         amount_eur=state.get("amount_eur"),

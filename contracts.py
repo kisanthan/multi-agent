@@ -54,6 +54,32 @@ class InterruptKind(str, Enum):
     COST_CENTER_APPROVAL = "kostenstellen_freigabe"  # process B
 
 
+class ApprovalTrigger(str, Enum):
+    """*Why* a case is waiting -- which oversight rule produced this stop.
+
+    Both values pause the case, but they come from opposite ends of the
+    thesis's oversight scale (Abschnitt 2.2, 7.4, Abbildung 6), and an
+    approver should be told which one they are looking at:
+
+    - `OVERSIGHT_MODE`: the agent is human-in-the-loop *by its mode*. It
+      stops every single time, on the happy path too -- the booking agent's
+      financially effective write is the case in point. Nothing went wrong.
+    - `ESCALATION`: the agent is human-on-the-loop and normally runs
+      through. It stopped because it could not decide on its own (no
+      unique cost-center reference, unknown invoice number, failed
+      extraction).
+
+    Derived from neither the finding nor the node name, because both would
+    be guesses: the node that raises the interrupt is shared by both
+    triggers (`node_exception_case`). It is therefore declared by whichever
+    node set the case waiting, carried in `state["approval_trigger"]`, and
+    read by the approval dialog.
+    """
+
+    OVERSIGHT_MODE = "aufsichtsmodus"
+    ESCALATION = "eskalation"
+
+
 class ApprovalDecision(str, Enum):
     """A human's verdict at a HITL point.
 
@@ -110,6 +136,9 @@ class ApprovalRequest:
     """
 
     kind: InterruptKind
+    # Why the case stopped. Defaults to ESCALATION: a stop is an exception
+    # unless a node explicitly declares it to be the agent's standing mode.
+    trigger: ApprovalTrigger = ApprovalTrigger.ESCALATION
     filename: str | None = None
     reason: str | None = None
     # --- evidence, process A (Zahlungsbestätigung) ---
@@ -127,7 +156,8 @@ class ApprovalRequest:
 
     def as_payload(self) -> dict[str, Any]:
         """The dict handed to `interrupt()` -- and stored in the checkpoint."""
-        payload: dict[str, Any] = {"kind": self.kind.value}
+        payload: dict[str, Any] = {"kind": self.kind.value,
+                                   "trigger": self.trigger.value}
         for name in ("filename", "reason", "finding", "number", "amount_eur",
                      "expected_amount_eur", "escalation", "supplier",
                      "reference", "unique"):
@@ -144,6 +174,11 @@ class ApprovalRequest:
     def from_payload(cls, payload: dict[str, Any]) -> ApprovalRequest:
         return cls(
             kind=InterruptKind(payload["kind"]),
+            # Checkpoints written before this field existed carry no
+            # `trigger`; they read back as an escalation, which is what
+            # they were.
+            trigger=ApprovalTrigger(payload.get("trigger")
+                                    or ApprovalTrigger.ESCALATION.value),
             filename=payload.get("filename"),
             reason=payload.get("reason"),
             finding=payload.get("finding"),

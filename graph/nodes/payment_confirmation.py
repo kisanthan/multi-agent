@@ -12,7 +12,14 @@ from langgraph.types import interrupt
 
 from agents.payment_confirmation import booking, reconciliation
 from agents.shared.schemas import DocumentType
-from contracts import ApprovalDecision, ApprovalRequest, ApprovalResponse, CaseOutcome, InterruptKind
+from contracts import (
+    ApprovalDecision,
+    ApprovalRequest,
+    ApprovalResponse,
+    ApprovalTrigger,
+    CaseOutcome,
+    InterruptKind,
+)
 from governance.audit import Decision, log_entry
 from governance.policy import check_approval
 from graph.nodes.shared import case_reference, connection, note
@@ -35,6 +42,9 @@ def node_reconciliation(state: Case) -> dict:
         "expected_amount_eur": e.expected_amount_eur,
         "exception_case": e.is_exception_case,
         "exception_reason": e.reason if e.is_exception_case else "",
+        # The reconciliation agent is human-on-the-loop; if it stops the
+        # case, it is because it could not resolve the number itself.
+        "approval_trigger": ApprovalTrigger.ESCALATION.value,
         "log": note(state, "abgleich", e.reason),
     }
 
@@ -60,6 +70,9 @@ def node_booking(state: Case) -> dict:
         return {
             "exception_case": True,
             "exception_reason": e.reason,
+            # Not an escalation: the booking agent is human-in-the-loop by
+            # mode and stops on the happy path too (thesis §7.4, table 11).
+            "approval_trigger": ApprovalTrigger.OVERSIGHT_MODE.value,
             "log": note(
                 state, "buchung",
                 "Die Buchung muss von einer Person bestätigt werden."),
@@ -88,6 +101,8 @@ def node_exception_case(state: Case) -> dict:
     """
     response = ApprovalResponse.from_resume(interrupt(ApprovalRequest(
         kind=InterruptKind.EXCEPTION_CASE,
+        trigger=ApprovalTrigger(state.get("approval_trigger")
+                                or ApprovalTrigger.ESCALATION.value),
         filename=state.get("filename"),
         reason=state.get("exception_reason"),
         finding=state.get("finding"),

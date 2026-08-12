@@ -122,7 +122,9 @@ def generate_master_data(con: sqlite3.Connection, rng: random.Random) -> list[di
     invoices = []
     for i in range(50):
         supplier = rng.choice(SUPPLIERS)[0]
-        # Wide amount range, so the booking threshold sees both sides.
+        # Wide amount range on purpose: it is what lets the scenarios show
+        # that the booking approval is owed regardless of amount (thesis
+        # §7.4 -- there is no threshold below which booking is automatic).
         amount = round(rng.uniform(150.0, 45_000.0), 2)
         due = CUTOFF_DATE + timedelta(days=rng.randint(-30, 60))
         r = {
@@ -308,7 +310,7 @@ def generate_documents(invoices: list[dict], rng: random.Random) -> list[Documen
             filename=name, process="A", scenario="2b_dublette",
             submitter="t.brandt@chg-meridian.com",
             incident=None if k == 1 else "dublette",
-            expectation=("Verbuchung" if k == 1
+            expectation=("HITL-Freigabe -> Verbuchung" if k == 1
                         else "bereits bezahlt -> Klaerfall, keine zweite Verbuchung"),
             number=duplicate["number"], amount_eur=duplicate["amount_eur"], supplier=sup[1],
         ))

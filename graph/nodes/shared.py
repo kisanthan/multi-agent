@@ -15,7 +15,7 @@ from pathlib import Path
 from agents.shared import classification
 from agents.shared.schemas import Classification, DocumentType
 from config import DB_PATH
-from contracts import CaseOutcome
+from contracts import ApprovalTrigger, CaseOutcome
 from governance.audit import CaseReference
 from graph.state import Case
 from tools.reader import AccessDenied, read_document
@@ -110,6 +110,9 @@ def node_classification(state: Case) -> dict:
             "exception_case": True,
             "exception_reason": e.escalation or "Extraktion fehlgeschlagen",
             "escalation": e.escalation,
+            # The classification agent is human-on-the-loop; reaching a
+            # human here means it escalated rather than guessed.
+            "approval_trigger": ApprovalTrigger.ESCALATION.value,
             "document_type": DocumentType.UNKNOWN.value,
             "log": note(
                 state, "klassifikation",

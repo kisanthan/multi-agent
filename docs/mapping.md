@@ -87,6 +87,28 @@ needed for that is a separate decision. Deterministic domain agents
 (reconciliation, cost center) therefore stand alongside the already
 deterministic cross-cutting components (reader, policy, audit).
 
+**Known divergence from figure 5 (as of the thesis revision of 11.08.2026).**
+Figure 5 assigns both agents a model after all -- DeepSeek-V4-Flash to the
+reconciliation agent, Claude Sonnet 4.6 / MiniMax M3 to the cost-center
+agent -- with the justification that the lookup itself is deterministic
+while *the model drives the tool call, checks uniqueness, and escalates
+exception cases*. The prototype does neither with a model: the tool call
+is an ordinary function call in `graph/nodes/*`, the uniqueness check is
+an `if`, and the escalation is a routing edge (`route_cost_center`), so
+the model class is `NO_MODEL` and no request is ever sent.
+
+This is a deliberate simplification, not an oversight, and it errs on the
+conservative side: the prototype is *more* deterministic than the figure
+requires, and every property the thesis claims for these two steps
+(exactness, reproducibility, auditability, §7.4) holds a fortiori. What it
+does not demonstrate is the model-driven tool-calling path the figure
+describes. Anyone comparing the submitted figure 5 against the agent table
+in `agent_registry.py` will see "kein Modell" where the figure names one --
+which is why it is recorded here rather than left to be discovered. To
+close it in the thesis instead, figure 5 would have to read "kein Modell"
+for both rows; that was considered during the 11.08.2026 revision and
+rejected, because it would have reduced process B to a single agent.
+
 ### I2 — Booking agent: always human-in-the-loop (aligned with Thesis §7.4)
 
 Per Thesis §7.4 and table 11, the financially effective booking step is
@@ -96,11 +118,13 @@ automatic, above it approval); this was removed because it would have
 weakened the continuous oversight the concept requires. Implemented via the
 oversight-mode rule in [governance/policy.py](../governance/policy.py).
 
-*(Remaining tension within the thesis itself: fig. 6 labels the booking
-agent as "human-on-the-loop", the text as "human-in-the-loop"; the
-evaluation table also names "manual intervention only in exceptional
-cases" for process A. The code follows the text/table. See
-[gap-analyse-thesis.md](gap-analyse-thesis.md) G3.)*
+*(Resolved on the thesis side by the revision of 11.08.2026: figure 6
+previously labelled the booking agent "human-on-the-loop" while the text
+and table 11 said "human-in-the-loop". The figure was corrected to match
+the text and gained an explicit "Buchungsfreigabe — Human-in-the-loop (vor
+Ausführung)" node between the booking agent and Navision. That is exactly
+the path this prototype takes: `node_booking` requests approval before the
+ERP call and only books once a human has decided.)*
 
 ### I3 — Autonomy levels "1-2"
 
