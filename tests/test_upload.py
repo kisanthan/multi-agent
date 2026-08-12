@@ -17,8 +17,8 @@ ACTOR = "einspeiser@chg-meridian.com"
 
 @pytest.fixture(autouse=True)
 def _intake_dir(tmp_path, monkeypatch):
-    """Writes to a temporary directory instead of data/eingang."""
-    monkeypatch.setattr(intake, "INTAKE_DIR", tmp_path / "eingang")
+    """Writes to a temporary directory instead of data/inbox."""
+    monkeypatch.setattr(intake, "INTAKE_DIR", tmp_path / "inbox")
 
 
 def test_valid_pdf_is_accepted(con):

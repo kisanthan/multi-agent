@@ -3,7 +3,7 @@
 Three things could otherwise drift apart unnoticed: the routing labels a
 graph node module returns, the step list `process_registry.py` declares for
 the UI, and the two copies of the generated diagram (`docs/flow.mmd` and
-its embed in `docs/architektur.md`). All three are checked here against
+its embed in `docs/architecture.md`). All three are checked here against
 LangGraph's own `get_graph()` -- the one thing that cannot be out of date,
 because it *is* the running graph, not a description of it.
 """
@@ -18,7 +18,7 @@ from graph.workflow import build_graph
 
 PROJECT_ROOT = Path(__file__).parent.parent
 FLOW_MMD = PROJECT_ROOT / "docs" / "flow.mmd"
-ARCHITEKTUR_MD = PROJECT_ROOT / "docs" / "architektur.md"
+ARCHITECTURE_MD = PROJECT_ROOT / "docs" / "architecture.md"
 
 
 # The compiled graph's edges, one section per node module (see
@@ -105,15 +105,15 @@ def test_flow_mmd_matches_the_compiled_graph():
     )
 
 
-def test_architektur_md_embeds_the_current_flow_diagram():
-    """docs/architektur.md keeps its own copy of the diagram so it renders
+def test_architecture_md_embeds_the_current_flow_diagram():
+    """docs/architecture.md keeps its own copy of the diagram so it renders
     inline without following a link to docs/flow.mmd. Checked separately
     from docs/flow.mmd (both against the compiled graph, not against each
     other) so a failure here points at exactly which copy went stale."""
-    text = ARCHITEKTUR_MD.read_text(encoding="utf-8")
+    text = ARCHITECTURE_MD.read_text(encoding="utf-8")
     match = re.search(r"```mermaid\n(.*?)```", text, re.DOTALL)
-    assert match, "docs/architektur.md no longer embeds a ```mermaid block."
+    assert match, "docs/architecture.md no longer embeds a ```mermaid block."
     assert _edge_lines(match.group(1)) == _current_flow_edges(), (
-        "The flow diagram embedded in docs/architektur.md is stale -- "
+        "The flow diagram embedded in docs/architecture.md is stale -- "
         "regenerate docs/flow.mmd and paste its graph body back in."
     )

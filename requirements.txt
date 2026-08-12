@@ -1,6 +1,6 @@
 # Full pinned dependency closure (direct + transitive), not a curated
 # top-level list -- this is what makes `pip install -r requirements.txt`
-# reproducible (docs/grenzen.md's environment note). Some entries look
+# reproducible (docs/limitations.md's environment note). Some entries look
 # unused because the project's own code never imports them directly, but
 # each is a real transitive dependency: GitPython/gitdb/smmap <- streamlit,
 # onnxruntime/flatbuffers <- pymupdf-layout <- pymupdf4llm, sqlite-vec <-

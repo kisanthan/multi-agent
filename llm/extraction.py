@@ -1,6 +1,6 @@
 """Validated, structured extraction with retry and HITL escalation.
 
-This module is the answer to risk R1 (docs/grenzen.md): local models do not
+This module is the answer to risk R1 (docs/limitations.md): local models do not
 reliably honor a supplied JSON schema -- for Ollama this is an open,
 documented bug (ollama/ollama#15540, as of April 2026).
 

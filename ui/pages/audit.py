@@ -3,6 +3,11 @@
 The chain check sits at the top and **always** refers to the complete
 trail, never to the filtered view: a filter must not create a statement
 about integrity. When filtering is active, that is stated explicitly.
+
+The frame around the table is translated -- headings, column names,
+filters. The cells are not: actor, reason, and outcome are what was
+recorded, and rephrasing them for display would mean rewriting the
+evidence (see `ui/shared/i18n.py`).
 """
 
 from __future__ import annotations
@@ -15,23 +20,30 @@ import streamlit as st
 import process_registry
 from governance import ad
 from governance.audit import read_all, verify_chain, cases_in_trail
-from ui.shared import style
+from ui.shared import i18n, style
 from ui.shared.formatting import timestamp
 from ui.shared.context import current_user, connection
 
-COLUMNS = ["#", "Zeitpunkt", "Person oder System", "Schritt", "Beleg",
-           "Bewertung", "Ergebnis", "Erläuterung", "Prüfsumme"]
+# Column order, as keys. The visible header of each comes from the catalog
+# (`audit.column.<key>`) and is resolved per render, so a language switch
+# retitles the table without touching this list.
+COLUMN_KEYS = ["id", "time", "actor", "step", "document",
+               "decision", "outcome", "reason", "checksum"]
 
 # The internal decision of an entry, in words. 'info' means: neither
 # allowed nor denied, simply recorded.
-DECISION_LABELS = {"erlaubt": "Erlaubt", "verweigert": "Abgelehnt", "info": "Vermerk"}
+DECISION_VALUES = ["erlaubt", "verweigert", "info"]
 
 # Components that have no process step of their own but still log entries.
-OTHER_PARTICIPANTS = {
-    "orchestrator": "Weiterleitung",
-    "policy": "Berechtigungsprüfung",
-    "audit": "Protokollierung",
-}
+OTHER_PARTICIPANTS = ("orchestrator", "policy", "audit")
+
+
+def _columns() -> dict[str, str]:
+    return {k: i18n.t(f"audit.column.{k}") for k in [*COLUMN_KEYS, "case"]}
+
+
+def _decision_label(value: str) -> str:
+    return i18n.t(f"audit.decision.{value}", default=value)
 
 
 def _step_name(agent_id: str | None) -> str:
@@ -56,31 +68,30 @@ def _step_name(agent_id: str | None) -> str:
     if not agent_id:
         return "—"
     if agent_id in OTHER_PARTICIPANTS:
-        return OTHER_PARTICIPANTS[agent_id]
-    return process_registry.step_title(agent_id)
+        return i18n.t(f"audit.participant.{agent_id}")
+    return i18n.t(f"step.{agent_id}.title",
+                  default=process_registry.step_title(agent_id))
 
 
-def _as_row(e) -> dict:
+def _as_row(e, columns: dict[str, str]) -> dict:
     return {
-        "#": e.id,
-        "Zeitpunkt": timestamp(e.ts),
-        "Person oder System": e.actor,
-        "Schritt": _step_name(e.agent),
-        "Beleg": e.source or "—",
-        "Bewertung": DECISION_LABELS.get(e.decision.value, e.decision.value),
-        "Ergebnis": e.outcome or "—",
-        "Erläuterung": e.reason,
-        "Prüfsumme": e.hash[:12] + "…",
-        "Vorgang": e.case_id or "—",
+        columns["id"]: e.id,
+        columns["time"]: timestamp(e.ts),
+        columns["actor"]: e.actor,
+        columns["step"]: _step_name(e.agent),
+        columns["document"]: e.source or "—",
+        columns["decision"]: _decision_label(e.decision.value),
+        columns["outcome"]: e.outcome or "—",
+        columns["reason"]: e.reason,
+        columns["checksum"]: e.hash[:12] + "…",
+        columns["case"]: e.case_id or "—",
     }
 
 
 def render() -> None:
     style.css()
-    st.title("Protokoll")
-    st.caption("Jeder Schritt jedes Vorgangs wird hier festgehalten – auch "
-               "abgelehnte Zugriffe und zurückgewiesene Uploads. Die Einträge "
-               "lassen sich nachträglich nicht ändern.")
+    st.title(i18n.t("audit.title"))
+    st.caption(i18n.t("audit.caption"))
 
     upn = current_user()
     con = connection()
@@ -93,39 +104,41 @@ def render() -> None:
         con.close()
 
     if chain.valid:
-        st.success(f"Das Protokoll ist unverändert – alle {chain.checked} "
-                   "Einträge sind lückenlos.")
+        st.success(i18n.t("audit.chain.valid", count=chain.checked))
     else:
-        st.error(f"Das Protokoll wurde nachträglich verändert. {chain}")
+        st.error(i18n.t("audit.chain.broken", detail=chain))
 
     if not all_entries:
-        st.info("Noch keine Einträge vorhanden.")
+        st.info(i18n.t("audit.empty"))
         return
 
-    # Preselected from a case (?vorgang=…).
-    preselected = st.query_params.get("vorgang")
-    options = ["Alle", *known_cases]
+    everything = i18n.t("word.all")
+
+    # Preselected from a case (?case=…).
+    preselected = st.query_params.get("case")
+    options = [everything, *known_cases]
     index = options.index(preselected) if preselected in options else 0
 
     top = st.columns([3, 3, 2, 2])
-    search = top[0].text_input("Suche", placeholder="Person, Beleg, Erläuterung …")
+    search = top[0].text_input(i18n.t("filter.search"),
+                               placeholder=i18n.t("audit.search.placeholder"))
     case = top[1].selectbox(
-        "Vorgang", options, index=index,
-        format_func=lambda v: v if v == "Alle" else v.rsplit("-", 1)[0])
+        i18n.t("audit.filter.case"), options, index=index,
+        format_func=lambda v: v if v == everything else v.rsplit("-", 1)[0])
     agent_ids = sorted({e.agent for e in all_entries if e.agent})
     agent = top[2].selectbox(
-        "Schritt", ["Alle", *agent_ids],
-        format_func=lambda a: a if a == "Alle" else _step_name(a))
+        i18n.t("audit.filter.step"), [everything, *agent_ids],
+        format_func=lambda a: a if a == everything else _step_name(a))
     decision = top[3].selectbox(
-        "Bewertung", ["Alle", "erlaubt", "verweigert", "info"],
-        format_func=lambda e: e if e == "Alle" else DECISION_LABELS[e])
+        i18n.t("audit.filter.decision"), [everything, *DECISION_VALUES],
+        format_func=lambda e: e if e == everything else _decision_label(e))
 
     matches = all_entries
-    if case != "Alle":
+    if case != everything:
         matches = [e for e in matches if e.case_id == case]
-    if agent != "Alle":
+    if agent != everything:
         matches = [e for e in matches if e.agent == agent]
-    if decision != "Alle":
+    if decision != everything:
         matches = [e for e in matches if e.decision.value == decision]
     if search:
         term = search.lower()
@@ -135,34 +148,35 @@ def render() -> None:
 
     filtered = len(matches) != len(all_entries)
     if filtered:
-        st.caption(f"{len(matches)} von {len(all_entries)} Einträgen. Die Aussage "
-                   "oben gilt für das vollständige Protokoll, nicht nur für "
-                   "diese Auswahl.")
+        st.caption(i18n.t("audit.filtered", shown=len(matches),
+                          total=len(all_entries)))
 
-    st.dataframe([_as_row(e) for e in reversed(matches)],
-                 column_order=COLUMNS, use_container_width=True, hide_index=True)
+    columns = _columns()
+    st.dataframe([_as_row(e, columns) for e in reversed(matches)],
+                 column_order=[columns[k] for k in COLUMN_KEYS],
+                 use_container_width=True, hide_index=True)
 
     if can_export:
         st.download_button(
-            "Auswahl als CSV herunterladen", _to_csv(matches, chain),
-            file_name="protokoll.csv", mime="text/csv",
+            i18n.t("audit.download"), _to_csv(matches, chain, columns),
+            file_name=i18n.t("audit.download.filename"), mime="text/csv",
         )
     else:
-        st.caption("Zum Herunterladen des Protokolls ist Ihr Konto nicht "
-                   "berechtigt.")
+        st.caption(i18n.t("audit.no_download"))
 
 
-def _to_csv(entries, chain) -> str:
+def _to_csv(entries, chain, columns: dict[str, str]) -> str:
     """CSV with the chain status in the header.
 
     The status belongs in the file: an exported excerpt without the
     statement of whether the chain was intact is worthless as evidence.
     """
     buffer = io.StringIO()
-    buffer.write(f"# Protokollprüfung: {chain}\n")
-    writer = csv.DictWriter(buffer, fieldnames=[*COLUMNS, "Vorgang"],
+    buffer.write(i18n.t("audit.csv.header", chain=chain) + "\n")
+    fieldnames = [columns[k] for k in [*COLUMN_KEYS, "case"]]
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames,
                             delimiter=";", extrasaction="ignore")
     writer.writeheader()
     for e in entries:
-        writer.writerow(_as_row(e))
+        writer.writerow(_as_row(e, columns))
     return buffer.getvalue()

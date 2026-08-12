@@ -7,6 +7,7 @@ Exports the same three names as `incoming_invoice.py`, so
 from __future__ import annotations
 
 from graph.effects import Effect
+from ui.shared import i18n
 
 RESULT_TEXTS = {
     "verbucht": "Die Zahlung ist verbucht. Die Rechnung gilt als bezahlt.",
@@ -21,6 +22,6 @@ def approval_inputs(request: dict, *, thread_id: str) -> dict:
 
 def effect_metric(effect: Effect) -> tuple[str, str] | None:
     if effect.navision_status:
-        return (f"Rechnung {effect.navision_number}",
+        return (i18n.t("payment.invoice", number=effect.navision_number),
                 effect.navision_status.capitalize())
     return None

@@ -22,7 +22,11 @@ the thesis's five central architectural claims:
 > **No real data, no real systems.** All data is synthetic, all target
 > systems (Navision, ELO, AD) are mocked. The prototype demonstrates the
 > feasibility of the **architecture**, not extraction quality on real data
-> (see [docs/grenzen.md](docs/grenzen.md)).
+> (see [docs/limitations.md](docs/limitations.md)).
+
+**New here?** [docs/guide.md](docs/guide.md) is the step-by-step
+operator's guide -- setup, running the demo/UI, and how to configure AI
+models per agent. This README stays the terser reference.
 
 ## Stack
 
@@ -35,7 +39,7 @@ the thesis's five central architectural claims:
 | Persistence / mocks | SQLite, FastAPI | |
 | UI | Streamlit (case cockpit, approval as a modal dialog) | |
 
-Details and rationale for the stack validation: [docs/architektur.md](docs/architektur.md).
+Details and rationale for the stack validation: [docs/architecture.md](docs/architecture.md).
 
 ## Setup
 
@@ -79,6 +83,11 @@ is checked with:
 
 For cloud or hybrid operation, set `MODEL_MODE=hybrid` (or `cloud`) and
 put `ANTHROPIC_API_KEY` in `.env`.
+
+Each model-calling agent (orchestrator, classification, booking, archiving)
+can also be pointed at a specific local or cloud model individually, live,
+from the UI's **KI-Modelle** page -- no `.env` edit or restart needed; see
+[docs/guide.md](docs/guide.md#4-configuring-ai-models-per-agent).
 
 ## Demo
 
@@ -128,23 +137,42 @@ currently has:
 | Area | Page | Route | Content |
 |---|---|---|---|
 | **Upload** | Neuer Beleg | `/` | drop documents via drag-and-drop (multi-select, intake check) and start processing; below it, the most recently submitted cases |
-| | Alle Vorgänge | `/historie` | all cases of both processes with search, filter, and date range |
-| **Vorgangsarten** | Zahlungsbestätigung | `/zahlungsbestaetigung` | metrics, open and completed cases — process A only |
-| | Eingangsrechnung | `/eingangsrechnung` | the same for process B |
-| **Nachweis** | Protokoll | `/protokoll` | hash-chained audit trail, filterable by case, step, and decision; CSV export |
-| | Architektur | `/architektur` | both processes as a flow plus the agent registry (autonomy level, oversight, model class) |
+| | Alle Vorgänge | `/cases` | all cases of both processes with search, filter, and date range |
+| **Vorgangsarten** | Zahlungsbestätigung | `/payment-confirmation` | metrics, open and completed cases — process A only |
+| | Eingangsrechnung | `/incoming-invoice` | the same for process B |
+| **Nachweis** | Protokoll | `/audit-trail` | hash-chained audit trail, filterable by case, step, and decision; CSV export |
+| | Architektur | `/architecture` | both processes as a flow plus the agent registry (autonomy level, oversight, model class) |
+| **Konfiguration** | KI-Modelle | `/ai-models` | live, per-agent model configuration -- local or cloud, no restart |
 
-**On language:** the working views get by without the thesis's domain terms
--- no "Prozess A", no "Human-in-the-loop", no security groups. Whoever
-needs those terms finds them bundled on the **Architektur** page; a test
-([tests/test_ui_language.py](tests/test_ui_language.py)) keeps the
-separation in place. The *content* of the audit trail remains exempt: it
-holds the recorded wording, because evidence that gets rephrased for
-display is not evidence.
+**German or English**, switchable in the sidebar at any time. The catalogs
+are one flat JSON per language under [ui/locales/](ui/locales/); the rules
+for what belongs in them live in
+[ui/shared/i18n.py](ui/shared/i18n.py). Two of those rules matter beyond
+the mechanics:
 
-A single case lives at `/vorgang?id=…` -- linkable and reload-proof, with a
+- **The interface is translated, the record is not.** Headings, buttons,
+  and column names follow the chosen language. What a node wrote into the
+  run log and what the audit trail recorded stays in the wording it was
+  written in -- evidence that gets rephrased for display is not evidence.
+  Number and date formats *do* follow the language, because "1.341,96" and
+  "1,341.96" are different numbers to different readers.
+- **German lives in exactly one place.** Process names, agent names, and
+  status labels stay in their registries; the catalogs carry only the other
+  languages, and [tests/test_i18n.py](tests/test_i18n.py) pins that a new
+  process or agent cannot silently stay German in the English interface.
+
+**On vocabulary:** the working views get by without the thesis's domain
+terms -- no "Prozess A", no "Human-in-the-loop", no security groups.
+Whoever needs those terms finds them bundled on the **Architektur** page; a
+test ([tests/test_ui_language.py](tests/test_ui_language.py)) keeps the
+separation in place, in both languages. That second language is where the
+rule earns its keep: the obvious English word for "Protokoll" *is* "audit
+trail", and the test is what stops it from getting there.
+
+A single case lives at `/case?id=…` -- linkable and reload-proof, with a
 process stepper, approval, confirmation, and a jump into the filtered audit
-trail.
+trail. Routes stay in one language regardless of the interface language: an
+address that moves when someone switches language cannot be shared.
 
 The user signed in via the sidebar is also the submitter. That makes both
 governance claims visible in the interaction flow, not just in the test: a
@@ -157,7 +185,7 @@ zum Hochladen von Belegen berechtigt" -- never the name of the group.
 A run takes one to three minutes with a local model and blocks the starting
 browser tab meanwhile; progress is shown node by node. Approvals from a
 second tab are unaffected by this, because the state lives in the
-checkpoint (see [docs/grenzen.md](docs/grenzen.md), L8).
+checkpoint (see [docs/limitations.md](docs/limitations.md), L8).
 
 **One more process** follows the same pattern throughout the codebase: one
 entry in [process_registry.py](process_registry.py) (which produces
@@ -228,19 +256,20 @@ agents/       domain agents
   incoming_invoice/      process B only: cost-center assignment, archiving
 governance/   deterministic, NO LLM: policy, ad, audit
 tools/        reader tool (PDF -> markdown, AD check as entry condition)
-llm/          provider abstraction, validated extraction, preflight
+llm/          provider abstraction, validated extraction, preflight, per-agent model overrides
 mocks/        FastAPI: Navision (ERP), ELO (DMS)
 graph/        LangGraph workflow, state model, case overview, target-system effect
   nodes/        graph nodes: shared.py (intake stretch) + one module per process
 data/         data generator (seed-fixed), SQLite, generated PDFs
 ui/           Streamlit UI
-  shared/       style, formatting, filter, runtime context (knows no business logic)
+  shared/       style, formatting, filter, i18n, runtime context (knows no business logic)
+  locales/      translation catalogs, one flat JSON per language (de, en)
   cases/        case list, shared detail-view shell, run, step derivation
     process_views/  per-process detail-view fragments (approval input, outcome text, metric)
   intake/       upload check and storage
-  pages/        upload, history, process (parameterized), audit, architecture
+  pages/        upload, history, process (parameterized), audit, architecture, KI-Modelle
 tests/        pytest
-docs/         architecture, concept->code mapping, limitations
+docs/         architecture, concept->code mapping, limitations, operator's guide
 agent_registry.py    agent configuration table (effective, not just documented)
 process_registry.py  processes as configuration: step sequence, target system, fields
 config.py     .env configuration

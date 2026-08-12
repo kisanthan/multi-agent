@@ -38,7 +38,7 @@ cost-center assignment and archiving under `agents/incoming_invoice/` --
 classification stays in `agents/shared/`, and the reader stays in `tools/`
 entirely outside `agents/`, because all three are genuinely shared by both
 processes. `graph/nodes/` mirrors the same split (see the new
-"A/B separation" section in [architektur.md](architektur.md)); this table
+"A/B separation" section in [architecture.md](architecture.md)); this table
 lists each agent once, not each file location per layer.
 
 ## Diagrams → implementation

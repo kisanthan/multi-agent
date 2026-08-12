@@ -30,15 +30,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import process_registry  # noqa: E402
 from config import DB_PATH  # noqa: E402
-from ui.shared import user, style  # noqa: E402
+from ui.shared import i18n, user, style  # noqa: E402
 from ui.shared.context import SESSION_USER, register_pages  # noqa: E402
 
-st.set_page_config(page_title="CHG-MERIDIAN Vorgangsbearbeitung",
+st.set_page_config(page_title=i18n.t("app.page_title"),
                    page_icon="📄", layout="wide")
 
 
 def _login() -> None:
-    """Sidebar: account selection and what this account may do.
+    """Sidebar: language, account selection, and what this account may do.
 
     In the prototype, a selection instead of a real sign-in -- but the
     rights behind it are the real group memberships from the directory
@@ -46,25 +46,15 @@ def _login() -> None:
 
     The *capability* is shown as a sentence, not membership in a security
     group: the group name helps no one who cannot manage it anyway.
+
+    The language picker comes first and runs before the pages are built, so
+    a switch takes effect on the same rerun -- navigation titles included.
     """
     con = sqlite3.connect(DB_PATH)
     try:
         accounts = con.execute(
             "SELECT upn, display_name FROM ad_users ORDER BY display_name"
         ).fetchall()
-        if not accounts:
-            st.sidebar.error("Keine Benutzerkonten vorhanden. "
-                             "Zuerst `python -m data.generate` ausführen.")
-            st.stop()
-
-        # Display name only: the sign-in name does not fit the narrow
-        # sidebar and was truncated there. It appears below it instead --
-        # unless two accounts share a name, then it must go into the
-        # selection.
-        names = [name for _, name in accounts]
-        unique = len(set(names)) == len(names)
-        labels = {(name if unique else f"{name} ({upn})"): upn
-                  for upn, name in accounts}
 
         # `with st.sidebar:` instead of individual `st.sidebar.xxx()` calls:
         # the status card is drawn via a plain `st.markdown()` (see
@@ -72,8 +62,22 @@ def _login() -> None:
         # way into the main area instead of the sidebar.
         with st.sidebar:
             style.css()
+            i18n.picker()
 
-            choice = st.selectbox("Angemeldet als", list(labels))
+            if not accounts:
+                st.error(i18n.t("app.no_accounts"))
+                st.stop()
+
+            # Display name only: the sign-in name does not fit the narrow
+            # sidebar and was truncated there. It appears below it instead
+            # -- unless two accounts share a name, then it must go into the
+            # selection.
+            names = [name for _, name in accounts]
+            unique = len(set(names)) == len(names)
+            labels = {(name if unique else f"{name} ({upn})"): upn
+                      for upn, name in accounts}
+
+            choice = st.selectbox(i18n.t("app.signed_in_as"), list(labels))
             upn = labels[choice]
             st.session_state[SESSION_USER] = upn
             person = user.load(con, upn)
@@ -99,8 +103,12 @@ def _build_pages() -> dict:
     explicit everywhere, because otherwise Streamlit derives the path from
     the function name and every page would be called `render`; slashes are
     not allowed in it.
+
+    The paths themselves stay in one language regardless of the interface
+    language: a URL is an address, and an address that moves when someone
+    switches language cannot be shared.
     """
-    from ui.pages import architecture, audit, history, process, upload, case
+    from ui.pages import architecture, audit, history, models, process, upload, case
 
     pages = {
         # 'Upload' is already the section -- the page is therefore not
@@ -110,22 +118,27 @@ def _build_pages() -> dict:
         #
         # No `url_path`: Streamlit's default page always sits at '/' and
         # ignores a custom one -- an '/upload' would go nowhere.
-        "upload": st.Page(upload.render, title="Neuer Beleg", icon="📥",
-                          default=True),
-        "historie": st.Page(history.render, title="Alle Vorgänge",
-                            icon="🗂️", url_path="historie"),
-        "audit": st.Page(audit.render, title="Protokoll", icon="🔐",
-                         url_path="protokoll"),
-        "architektur": st.Page(architecture.render, title="Architektur", icon="🏛️",
-                               url_path="architektur"),
+        "upload": st.Page(upload.render, title=i18n.t("page.upload"),
+                          icon="📥", default=True),
+        "history": st.Page(history.render, title=i18n.t("page.history"),
+                           icon="🗂️", url_path="cases"),
+        "audit": st.Page(audit.render, title=i18n.t("page.audit"), icon="🔐",
+                         url_path="record"),
+        "architecture": st.Page(architecture.render,
+                                title=i18n.t("page.architecture"), icon="🏛️",
+                                url_path="architecture"),
+        # Own nav section (see main()): a live configuration surface, kept
+        # separate from 'Architektur', which only reads the static default.
+        "models": st.Page(models.render, title=i18n.t("page.models"), icon="🧠",
+                          url_path="ai-models"),
         # No entry in the navigation: one arrives here from a list.
-        "vorgang": st.Page(case.render, title="Vorgang", icon="📄",
-                           url_path="vorgang", visibility="hidden"),
+        "case": st.Page(case.render, title=i18n.t("page.case"), icon="📄",
+                        url_path="case", visibility="hidden"),
     }
     for config in process_registry.all_processes():
         pages[config.route] = st.Page(
             functools.partial(process.render, config),
-            title=config.name, icon=config.icon,
+            title=i18n.process_text(config, "name"), icon=config.icon,
             url_path=config.route,
         )
     return pages
@@ -138,10 +151,12 @@ def main() -> None:
     register_pages(pages)
 
     st.navigation({
-        "Upload": [pages["upload"], pages["historie"]],
-        "Vorgangsarten": [pages[k.route] for k in process_registry.all_processes()],
-        "Nachweis": [pages["audit"], pages["architektur"]],
-        "": [pages["vorgang"]],
+        i18n.t("nav.upload"): [pages["upload"], pages["history"]],
+        i18n.t("nav.case_types"): [pages[k.route]
+                                   for k in process_registry.all_processes()],
+        i18n.t("nav.evidence"): [pages["audit"], pages["architecture"]],
+        i18n.t("nav.configuration"): [pages["models"]],
+        "": [pages["case"]],
     }).run()
 
 

@@ -20,6 +20,7 @@ from config import ModelMode, settings
 from governance.audit import read_all, verify_chain
 from llm.client import AnthropicClient, LLMUnreachable, ModelChoice, OllamaClient, choose_model
 from llm.extraction import MAX_ATTEMPTS, extract
+from llm.model_overrides import clear_override, load_overrides, save_override
 
 ACTOR = "einspeiser@chg-meridian.com"
 
@@ -88,6 +89,59 @@ def test_deterministic_components_get_no_model(agent_id):
     model."""
     with pytest.raises(ValueError, match="kein Sprachmodell"):
         choose_model(agent_id)
+
+
+# ------------------------------------------------- Per-agent model overrides
+
+@pytest.fixture(autouse=True)
+def _overrides_file(tmp_path, monkeypatch):
+    """Every override test gets its own scratch file -- never the real one."""
+    monkeypatch.setattr("llm.model_overrides.MODEL_OVERRIDES_PATH",
+                        tmp_path / "model_overrides.json")
+
+
+def test_no_override_falls_back_to_default():
+    with patch.object(settings, "model_mode", ModelMode.LOCAL):
+        assert choose_model("elo").provider == "ollama"
+
+
+def test_override_wins_over_mode():
+    save_override("buchung", "ollama", "qwen3:8b")
+    with patch.object(settings, "model_mode", ModelMode.CLOUD):
+        choice = choose_model("buchung")
+    assert choice.provider == "ollama"
+    assert choice.model_id == "qwen3:8b"
+
+
+def test_clear_override_restores_default():
+    save_override("elo", "anthropic", "claude-haiku-4-5")
+    clear_override("elo")
+    with patch.object(settings, "model_mode", ModelMode.LOCAL):
+        assert choose_model("elo").provider == "ollama"
+
+
+def test_save_override_rejects_unknown_agent():
+    with pytest.raises(KeyError):
+        save_override("nicht-vorhanden", "ollama", "qwen3:8b")
+
+
+def test_save_override_rejects_model_less_agent():
+    with pytest.raises(ValueError, match="kein Sprachmodell"):
+        save_override("policy", "ollama", "qwen3:8b")
+
+
+def test_save_override_rejects_unsupported_provider():
+    with pytest.raises(ValueError, match="Anbieter"):
+        save_override("elo", "openai", "gpt-x")
+
+
+def test_save_override_rejects_empty_model_id():
+    with pytest.raises(ValueError, match="Modell-ID"):
+        save_override("elo", "ollama", "  ")
+
+
+def test_load_overrides_empty_when_file_missing():
+    assert load_overrides() == {}
 
 
 # --------------------------------------------------- Provider clients (transport)

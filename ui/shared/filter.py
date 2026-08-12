@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from graph.cases import Status, CaseOverview
+from ui.shared import i18n
 
 PAGE_SIZE = 25
 
@@ -31,10 +32,17 @@ class Filter:
 
 
 def _matches_search(row: CaseOverview, term: str) -> bool:
+    """Searches what is on screen *and* what is recorded.
+
+    `status.label` is the German original from `graph/cases.py`, the
+    localized label is what the list actually shows. Both are searched, so
+    a term typed in the interface's language finds its row without the
+    recorded vocabulary becoming unfindable.
+    """
     if not term:
         return True
     haystack = " ".join([
-        row.filename, row.actor, row.status.label,
+        row.filename, row.actor, row.status.label, i18n.status_label(row.status),
         row.outcome or "", row.approved_by or "",
     ]).lower()
     return term.lower().strip() in haystack

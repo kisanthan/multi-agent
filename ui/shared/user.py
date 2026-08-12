@@ -7,6 +7,9 @@ as an audit entry and useless as on-screen text.
 This module is the translation layer between the two. It decides nothing --
 the rules stay in `governance/` -- it only phrases what they mean, and
 which hints make sense on which page at all.
+
+The wording itself lives in `ui/locales/`; every property below picks a key
+and fills it in. Nothing here is language-specific except that choice.
 """
 
 from __future__ import annotations
@@ -14,9 +17,9 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 
-import process_registry
 from governance import ad
-from ui.shared.formatting import enumerate_list, pluralize
+from ui.shared import i18n
+from ui.shared.formatting import enumerate_list
 
 
 @dataclass(frozen=True)
@@ -33,25 +36,26 @@ class User:
         return not (self.can_upload or self.can_confirm)
 
     @property
-    def capabilities(self) -> str:
-        """One sentence instead of two checkmarks -- and with the document
-        kinds spelled out.
+    def _document_kinds(self) -> str:
+        """The document kinds, spelled out and joined with "or".
 
         "Sie können Belege hochladen" leaves open *which*. The answer lives
         in the process registry and is spelled out here, so no one has to
         find out by trial and error what the system accepts.
         """
-        kinds = enumerate_list([pluralize(a) for a in process_registry.document_kinds()],
-                               connector="oder")
+        return enumerate_list(i18n.document_kinds_plural(),
+                              connector=i18n.t("word.or"))
 
+    @property
+    def capabilities(self) -> str:
+        """One sentence instead of two checkmarks."""
         if self.can_upload and self.can_confirm:
-            return (f"Sie können {kinds} hochladen und Vorgänge bestätigen.")
+            return i18n.t("user.capabilities.both", kinds=self._document_kinds)
         if self.can_upload:
-            return f"Sie können {kinds} hochladen."
+            return i18n.t("user.capabilities.upload", kinds=self._document_kinds)
         if self.can_confirm:
-            return ("Sie können Vorgänge bestätigen, aber keine Belege "
-                    "hochladen.")
-        return "Sie können Vorgänge ansehen, aber keine Belege hochladen."
+            return i18n.t("user.capabilities.confirm")
+        return i18n.t("user.capabilities.view")
 
     @property
     def rights_short(self) -> str:
@@ -72,12 +76,12 @@ class User:
         remain distinguishable in the badge itself.
         """
         if self.can_upload and self.can_confirm:
-            return "Beides"
+            return i18n.t("user.rights.both")
         if self.can_upload:
-            return "Hochladen"
+            return i18n.t("user.rights.upload")
         if self.can_confirm:
-            return "Bestätigen"
-        return "Nur lesen"
+            return i18n.t("user.rights.confirm")
+        return i18n.t("user.rights.view")
 
     @property
     def label_pending(self) -> str:
@@ -87,8 +91,8 @@ class User:
         else, a status figure. Using the same word for both would either be
         a wrong call to action or a wasted one.
         """
-        return ("Warten auf Ihre Bestätigung" if self.can_confirm
-                else "Warten auf Bestätigung")
+        return i18n.t("user.pending.own" if self.can_confirm
+                      else "user.pending.other")
 
     # --- Reasons for blocked actions ----------------------------------------
     # Always the same pattern: what does not work, and what to do about it.
@@ -97,21 +101,15 @@ class User:
 
     @property
     def upload_hint(self) -> str:
-        kinds = enumerate_list([pluralize(a) for a in process_registry.document_kinds()],
-                               connector="oder")
-        return (f"Ihr Konto ist nicht berechtigt, {kinds} hochzuladen. "
-                "Wenden Sie sich an Ihre IT, wenn Sie diese Berechtigung "
-                "benötigen.")
+        return i18n.t("user.hint.upload", kinds=self._document_kinds)
 
     @property
     def confirm_hint(self) -> str:
-        return ("Diesen Vorgang kann nur eine dafür berechtigte Person "
-                "bestätigen. Ihr Konto hat diese Berechtigung nicht.")
+        return i18n.t("user.hint.confirm")
 
     @property
     def own_document_hint(self) -> str:
-        return ("Sie haben diesen Beleg selbst hochgeladen. Vorgesehen ist, "
-                "dass eine zweite Person ihn bestätigt.")
+        return i18n.t("user.hint.own_document")
 
 
 def load(con: sqlite3.Connection, upn: str) -> User:

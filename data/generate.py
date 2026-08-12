@@ -266,7 +266,7 @@ def generate_documents(invoices: list[dict], rng: random.Random) -> list[Documen
     expensive = [r for r in invoices if r["amount_eur"] > 20_000][:2]
     for idx, r in enumerate(cheap + expensive):
         sup = supplier_by_id[r["supplier_id"]]
-        name = f"A_zahlung_ok_{idx + 1:02d}.pdf"
+        name = f"A_payment_ok_{idx + 1:02d}.pdf"
         payment_confirmation(
             INTAKE_DIR / name,
             number=r["number"], amount=r["amount_eur"], supplier_name=sup[1],
@@ -282,7 +282,7 @@ def generate_documents(invoices: list[dict], rng: random.Random) -> list[Documen
         ))
 
     # ---- Process A, incident: unknown number ---------------------------------
-    name = "A_zahlung_unbekannte_nummer.pdf"
+    name = "A_payment_unknown_number.pdf"
     unknown = "RE-2026-9999"
     payment_confirmation(
         INTAKE_DIR / name, number=unknown, amount=3_480.00,
@@ -301,7 +301,7 @@ def generate_documents(invoices: list[dict], rng: random.Random) -> list[Documen
     duplicate = cheap[0]
     sup = supplier_by_id[duplicate["supplier_id"]]
     for k in (1, 2):
-        name = f"A_zahlung_dublette_{k}.pdf"
+        name = f"A_payment_duplicate_{k}.pdf"
         payment_confirmation(
             INTAKE_DIR / name, number=duplicate["number"], amount=duplicate["amount_eur"],
             supplier_name=sup[1], bank=banks[1], date_=CUTOFF_DATE,
@@ -318,7 +318,7 @@ def generate_documents(invoices: list[dict], rng: random.Random) -> list[Documen
     # ---- Process A, incident: implausible amount -----------------------------
     mismatched = invoices[10]
     sup = supplier_by_id[mismatched["supplier_id"]]
-    name = "A_zahlung_betrag_unplausibel.pdf"
+    name = "A_payment_implausible_amount.pdf"
     wrong_amount = round(mismatched["amount_eur"] * 3.7, 2)
     payment_confirmation(
         INTAKE_DIR / name, number=mismatched["number"], amount=wrong_amount,
@@ -334,7 +334,7 @@ def generate_documents(invoices: list[dict], rng: random.Random) -> list[Documen
     # ---- Process A, incident: unauthorized submitter (scenario 5) -----------
     ok = invoices[20]
     sup = supplier_by_id[ok["supplier_id"]]
-    name = "A_zahlung_unberechtigt.pdf"
+    name = "A_payment_unauthorized.pdf"
     payment_confirmation(
         INTAKE_DIR / name, number=ok["number"], amount=ok["amount_eur"],
         supplier_name=sup[1], bank=banks[0], date_=CUTOFF_DATE,
@@ -364,7 +364,7 @@ def generate_documents(invoices: list[dict], rng: random.Random) -> list[Documen
         number = f"ER-2026-{7100 + idx:04d}"
         reference = reference_by_cost_center[kst]
         total = round(sum(p[1] for p in line_items), 2)
-        name = f"B_rechnung_ok_{idx:02d}.pdf"
+        name = f"B_invoice_ok_{idx:02d}.pdf"
         incoming_invoice(
             INTAKE_DIR / name, number=number, amount=total, supplier=sup,
             line_items=line_items, date_=CUTOFF_DATE - timedelta(days=rng.randint(1, 10)),
@@ -389,7 +389,7 @@ def generate_documents(invoices: list[dict], rng: random.Random) -> list[Documen
         ("Anwenderschulung SAP FI, 3 Tage, 12 Teilnehmer", 9_600.00),
     ]
     total = round(sum(p[1] for p in line_items), 2)
-    name = "B_rechnung_ohne_referenz.pdf"
+    name = "B_invoice_without_reference.pdf"
     incoming_invoice(
         INTAKE_DIR / name, number=number, amount=total, supplier=sup,
         line_items=line_items, date_=CUTOFF_DATE - timedelta(days=3),

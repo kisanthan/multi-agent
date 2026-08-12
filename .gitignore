@@ -1,20 +1,59 @@
-.venv/
+# --- Secrets ----------------------------------------------------------------
+# .env holds the Anthropic API key. .env.example is the tracked template.
+.env
+.env.*
+!.env.example
+
+# --- Python -----------------------------------------------------------------
 __pycache__/
 *.py[cod]
-.pytest_cache/
-.env
-.claude/
-.coverage
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
 
-# Generated artifacts: reproducible via `python -m data.generate` (fixed
-# seed), and therefore do not belong in version control.
-data/stammdaten.db
-data/stammdaten.db-wal
-data/stammdaten.db-shm
+# --- Virtual environments ---------------------------------------------------
+.venv/
+venv/
+env/
+ENV/
+
+# --- Test, coverage, type and lint caches -----------------------------------
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+
+# --- Editors and tooling ----------------------------------------------------
+.claude/
+.idea/
+.vscode/
+*.swp
+*~
+
+# --- Generated artifacts ----------------------------------------------------
+# Reproducible via `python -m data.generate` (fixed seed), and therefore do
+# not belong in version control.
+data/masterdata.db
+data/masterdata.db-wal
+data/masterdata.db-shm
 data/manifest.json
-data/eingang/*.pdf
+data/inbox/*.pdf
 data/checkpoints.sqlite
 data/checkpoints.sqlite-wal
 data/checkpoints.sqlite-shm
 
+# Runtime state, written by the UI (ui/pages/models.py): per-agent model
+# overrides. Machine-local operator configuration, not source.
+data/model_overrides.json
+
+# --- OS ---------------------------------------------------------------------
 .DS_Store
+Thumbs.db

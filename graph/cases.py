@@ -5,7 +5,7 @@ but does not expose them as an overview. This module reads the thread IDs
 from the checkpoint database and determines the business status per
 thread.
 
-Deliberately no separate case table in `stammdaten.db`: a case's state
+Deliberately no separate case table in `masterdata.db`: a case's state
 lives in the checkpoint, and that is the thesis's claim (the case survives
 the process and waits there for the human). A second table would be a
 second source of truth that could drift.

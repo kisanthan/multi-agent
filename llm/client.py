@@ -22,6 +22,7 @@ from pydantic import BaseModel
 
 from agent_registry import ModelClass, get_config
 from config import ModelMode, settings
+from llm.model_overrides import load_overrides
 
 
 class LLMUnreachable(Exception):
@@ -53,6 +54,12 @@ def choose_model(agent_id: str) -> ModelChoice:
         raise ValueError(
             f"{cfg.name} ruft kein Sprachmodell auf (Modellklasse KEINE)."
         )
+
+    override = load_overrides().get(agent_id)
+    if override is not None:
+        # A live per-agent override (ui/pages/models.py) always wins over
+        # the mode-based default below -- that is the point of it.
+        return ModelChoice(override.provider, override.model_id, cls.value)
 
     if mode is ModelMode.LOCAL:
         model = (settings.ollama_model_vision if cls is ModelClass.VISION
@@ -110,7 +117,7 @@ class OllamaClient(LLMClient):
                         {"role": "user", "content": prompt},
                     ],
                     # Ollama enforces the schema via a GBNF grammar. We
-                    # cannot rely on that -- see R1 in docs/grenzen.md and
+                    # cannot rely on that -- see R1 in docs/limitations.md and
                     # the validation in llm/extraction.py.
                     "format": schema.model_json_schema(),
                     "stream": False,

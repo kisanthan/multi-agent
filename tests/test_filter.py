@@ -13,7 +13,7 @@ from ui.shared import filter as filters
 
 def _row(**fields) -> CaseOverview:
     defaults = {
-        "thread_id": "t1", "filename": "A_zahlung_ok_01.pdf",
+        "thread_id": "t1", "filename": "A_payment_ok_01.pdf",
         "actor": "m.keller@chg-meridian.com", "status": Status.COMPLETED,
         "process": "A", "started_at": "2026-07-30T12:00:00+00:00",
         "outcome": "verbucht", "approved_by": None,
@@ -25,10 +25,10 @@ ROWS = [
     _row(thread_id="a", status=Status.WAITING_FOR_APPROVAL, process="A",
          started_at="2026-07-30T12:00:00+00:00", outcome=None),
     _row(thread_id="b", status=Status.COMPLETED, process="B",
-         filename="B_rechnung_ok_01.pdf", outcome="archiviert",
+         filename="B_invoice_ok_01.pdf", outcome="archiviert",
          started_at="2026-07-29T09:00:00+00:00"),
     _row(thread_id="c", status=Status.RUNNING, process=None,
-         filename="unbekannt.pdf", outcome=None,
+         filename="unknown.pdf", outcome=None,
          started_at="2026-07-28T08:00:00+00:00"),
 ]
 
@@ -48,7 +48,7 @@ def test_sorting_newest_first():
 
 
 def test_search_matches_filename():
-    matches = filters.apply(ROWS, filters.Filter(search="rechnung"))
+    matches = filters.apply(ROWS, filters.Filter(search="invoice"))
     assert [z.thread_id for z in matches] == ["b"]
 
 
