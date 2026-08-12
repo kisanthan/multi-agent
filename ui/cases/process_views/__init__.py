@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 import process_registry
 from graph.effects import Effect
+from ui.shared import i18n
 from ui.cases.process_views import incoming_invoice, payment_confirmation
 
 # Outcomes with no single owning process. `zugriff_verweigert` always has
@@ -72,10 +73,19 @@ def result_text(outcome: str, process: str | None) -> str:
     the pre-split flat lookup exactly: an outcome key exists in at most one
     process's `RESULT_TEXTS`, so merging "all of them" when the process is
     unknown can never pick the wrong one.
+
+    `outcome` is the recorded value (`verbucht`, `archiviert`) and stays
+    what it is; only the sentence built around it is translated. The German
+    sentences above are the fallback, so an outcome a catalog has not
+    caught up with still reads as a sentence.
     """
     texts = dict(SHARED_RESULT_TEXTS)
     views = [for_process(process)] if process else all_views()
     for view in views:
         if view:
             texts.update(view.result_texts)
-    return texts.get(outcome, f"Vorgang beendet: {outcome or 'unbekannt'}")
+
+    if outcome in texts:
+        return i18n.t(f"result.{outcome}", default=texts[outcome])
+    return i18n.t("result.unknown",
+                  outcome=outcome or i18n.t("result.unknown.value"))

@@ -12,7 +12,7 @@ import streamlit as st
 
 from config import DB_PATH
 
-SESSION_USER = "angemeldeter_nutzer"
+SESSION_USER = "signed_in_user"
 
 
 @st.cache_resource
@@ -49,13 +49,13 @@ def open_case(thread_id: str) -> None:
     """
     st.query_params.clear()
     st.query_params["id"] = thread_id
-    st.switch_page(get_page("vorgang"))
+    st.switch_page(get_page("case"))
 
 
 def show_audit_for(thread_id: str) -> None:
     """Jumps into the audit trail, pre-filtered to this case."""
     st.query_params.clear()
-    st.query_params["vorgang"] = thread_id
+    st.query_params["case"] = thread_id
     st.switch_page(get_page("audit"))
 
 

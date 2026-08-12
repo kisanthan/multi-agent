@@ -92,6 +92,15 @@ Intake (PDF + submitter UPN)
 | Agents | `agents/` | some | call governance + LLM + mocks |
 | Orchestration | `graph/`, `graph/nodes/` | no | wires up agents, sets HITL interrupts |
 | Target systems | `mocks/` | no | check their own preconditions |
+| Presentation | `ui/` | no | reads the layers above; translates only itself |
+
+The presentation layer's boundary runs through language, not through
+imports. `ui/shared/i18n.py` translates what the interface *says* -- labels,
+headings, column names -- and leaves what the system *recorded* untouched:
+run-log entries and audit-trail reasons keep the wording they were written
+in. German display text keeps a single home per string (a process name lives
+in `process_registry.py`, not additionally in `ui/locales/de.json`), so the
+catalogs can never disagree with the registry they describe.
 
 The most important boundary is that of the **governance layer**:
 `governance/policy.py`, `ad.py`, and `audit.py` import no LLM client and
@@ -283,7 +292,7 @@ instance (`OLLAMA_BASE_URL`) whose models are provisioned outside it.
 
 ## Data flow and persistence
 
-A shared SQLite database (`data/stammdaten.db`) holds master data, the AD
+A shared SQLite database (`data/masterdata.db`) holds master data, the AD
 mock, target-system state, and the audit trail -- deliberately a single
 file, because the thesis argues from a *shared* data layer. The LangGraph
 checkpointer uses a separate file (`data/checkpoints.sqlite`).

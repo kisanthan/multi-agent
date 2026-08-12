@@ -8,7 +8,7 @@ config:
 %% Regenerate after any change to graph/workflow.py:
 %%   .venv/Scripts/python.exe -c "from graph.workflow import build_graph; print(build_graph().compile().get_graph().draw_mermaid(), end='')" > docs/flow.mmd
 %% tests/test_flow.py compares this file's edges (and the copy embedded in
-%% docs/architektur.md) against the compiled graph on every test run.
+%% docs/architecture.md) against the compiled graph on every test run.
 graph TD;
 	__start__([<p>__start__</p>]):::first
 	reader(reader)

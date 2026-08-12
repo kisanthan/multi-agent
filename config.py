@@ -14,10 +14,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).parent
 DATA_DIR = PROJECT_ROOT / "data"
-DB_PATH = DATA_DIR / "stammdaten.db"
+DB_PATH = DATA_DIR / "masterdata.db"
 CHECKPOINT_PATH = DATA_DIR / "checkpoints.sqlite"
-INTAKE_DIR = DATA_DIR / "eingang"
+INTAKE_DIR = DATA_DIR / "inbox"
 MANIFEST_PATH = DATA_DIR / "manifest.json"
+# Per-agent model overrides set live from the UI (ui/pages/models.py) --
+# takes precedence over MODEL_MODE below. See llm/model_overrides.py.
+MODEL_OVERRIDES_PATH = DATA_DIR / "model_overrides.json"
 
 
 class ModelMode(str, Enum):
@@ -48,11 +51,11 @@ class Settings(BaseSettings):
     # llama3.2-vision:11b (the model named in the original functional
     # concept) failed to load in this project's own testing ("unknown model
     # architecture: mllama"); qwen2.5vl:7b is confirmed working -- see
-    # docs/grenzen.md.
+    # docs/limitations.md.
     ollama_model_vision: str = "qwen2.5vl:7b"
 
     anthropic_api_key: str = ""
-    # Model IDs as of 2026-07-17 (change quarterly -- see docs/grenzen.md).
+    # Model IDs as of 2026-07-17 (change quarterly -- see docs/limitations.md).
     cloud_model_frontier: str = "claude-opus-4-8"
     cloud_model_small: str = "claude-haiku-4-5"
 

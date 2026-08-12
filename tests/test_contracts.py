@@ -28,7 +28,7 @@ def test_payment_confirmation_request_omits_unset_fields():
     it does not have."""
     request = ApprovalRequest(
         kind=InterruptKind.EXCEPTION_CASE,
-        filename="A_zahlung_unbekannte_nummer.pdf",
+        filename="A_payment_unknown_number.pdf",
         reason="Nummer nicht in den Stammdaten.",
         finding="unbekannt",
         number="RE-2026-9999",
@@ -52,7 +52,7 @@ def test_payment_confirmation_request_full_key_set():
     request = ApprovalRequest(
         kind=InterruptKind.EXCEPTION_CASE,
         trigger=ApprovalTrigger.OVERSIGHT_MODE,
-        filename="A_zahlung_ok_01.pdf", reason="…", finding="ok",
+        filename="A_payment_ok_01.pdf", reason="…", finding="ok",
         number="RE-2026-4200", amount_eur=1500.0, expected_amount_eur=1500.0,
         escalation="…",
     )
@@ -67,7 +67,7 @@ def test_incoming_invoice_request_full_key_set():
     what graph/nodes/incoming_invoice.py declares (10 keys)."""
     request = ApprovalRequest(
         kind=InterruptKind.COST_CENTER_APPROVAL,
-        filename="B_rechnung_ohne_referenz.pdf", supplier="SAP Deutschland SE",
+        filename="B_invoice_without_reference.pdf", supplier="SAP Deutschland SE",
         amount_eur=24400.0, line_items=("Pos 1", "Pos 2"), reference=None,
         reason="Der Beleg nennt keine Kostenstellenreferenz.",
         catalog=({"id": "KST-1000", "name": "IT", "reference": "KTR-ITINFRA"},),

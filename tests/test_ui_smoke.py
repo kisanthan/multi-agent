@@ -17,6 +17,7 @@ import pytest
 
 import process_registry
 from config import DB_PATH, MANIFEST_PATH, PROJECT_ROOT
+from ui.shared import i18n
 
 pytest.importorskip("streamlit.testing.v1")
 from streamlit.testing.v1 import AppTest  # noqa: E402
@@ -90,24 +91,58 @@ def test_navigation_has_unique_routes():
     """Streamlit rejects duplicate `url_path` -- and every process needs one."""
     routes = [k.route for k in process_registry.all_processes()]
     # The upload page is the default page and sits at '/' without its own path.
-    fixed = ["historie", "protokoll", "architektur", "vorgang"]
+    fixed = ["cases", "record", "architecture", "ai-models", "case"]
 
     assert len(set(routes)) == len(routes)
     assert not set(routes) & set(fixed)
 
 
+def _account_selector(at: AppTest):
+    """The sign-in selector, found by its label rather than by position.
+
+    The language picker sits above it in the sidebar, so an index would
+    silently point at the wrong widget the next time one is added.
+    """
+    return next(s for s in at.sidebar.selectbox
+                if s.label == i18n.t("app.signed_in_as"))
+
+
 def test_sidebar_offers_ad_users_for_sign_in():
-    selection = _app().sidebar.selectbox[0]
+    selection = _account_selector(_app())
 
     assert selection.label == "Angemeldet als"
     assert selection.options, "Ohne AD-Nutzer wäre keine Anmeldung möglich"
+
+
+def test_sidebar_offers_every_language():
+    """Each language under its own name -- someone looking for the English
+    interface looks for "English", not for "Englisch". The options carry the
+    rendered labels, not the codes behind them."""
+    picker = next(s for s in _app().sidebar.selectbox
+                  if s.label == i18n.t("app.language"))
+
+    assert set(picker.options) == set(i18n.LANGUAGES.values())
+
+
+def test_switching_the_language_translates_the_interface():
+    """The picker runs before the pages are built, so a switch has to reach
+    the navigation itself -- not just the body of the current page."""
+    at = _app()
+    picker = next(s for s in at.sidebar.selectbox
+                  if s.label == i18n.t("app.language"))
+
+    picker.set_value("en").run()
+
+    assert not at.exception
+    account = next(s for s in at.sidebar.selectbox if s.label == "Signed in as")
+    assert account.options, "Die Kontoauswahl muss auch auf Englisch stehen"
 
 
 def test_sidebar_names_the_accounts_capabilities():
     """The sidebar states what this account can do -- not which security
     group it is in."""
     at = _app()
-    options = at.sidebar.selectbox[0].options
+    options = _account_selector(at).options
 
     # The selection carries display names -- the sign-in name did not fit
     # the narrow sidebar and sits below it.
@@ -116,7 +151,7 @@ def test_sidebar_names_the_accounts_capabilities():
     if not (extern and keller):
         pytest.skip("Erwartete Testkonten fehlen in den Stammdaten.")
 
-    at.sidebar.selectbox[0].set_value(extern[0]).run()
+    _account_selector(at).set_value(extern[0]).run()
     text = " ".join(m.body for m in at.sidebar.markdown)
     assert "Nur lesen" in text
     assert "SG-CHG" not in text
@@ -124,7 +159,7 @@ def test_sidebar_names_the_accounts_capabilities():
     # the selection.
     assert "e.extern@partner-consulting.de" in text
 
-    at.sidebar.selectbox[0].set_value(keller[0]).run()
+    _account_selector(at).set_value(keller[0]).run()
     text = " ".join(m.body for m in at.sidebar.markdown)
     # The badge stays terse ("Hochladen"); the document kinds are spelled
     # out in the sentence below it.

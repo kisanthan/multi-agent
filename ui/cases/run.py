@@ -3,7 +3,7 @@
 Blocking, and deliberately so: a run with a local model takes one to three
 minutes, and during that time it should be visible what is happening. A
 silent spinner would look like a crash. The operational limit is documented
-in docs/grenzen.md (L8).
+in docs/limitations.md (L8).
 """
 
 from __future__ import annotations
@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import streamlit as st
+
+from ui.shared import i18n
 
 
 def _stream_run(app, thread: dict, payload, title: str) -> bool:
@@ -32,10 +34,10 @@ def _stream_run(app, thread: dict, payload, title: str) -> bool:
                     st.write(f"**{entry['node']}** — {entry['text']}")
                 shown = max(shown, len(log))
         except Exception as e:  # noqa: BLE001 - the user should see the reason
-            box.update(label=f"Vorgang abgebrochen: {e}", state="error")
+            box.update(label=i18n.t("run.aborted", error=e), state="error")
             st.exception(e)
             return False
-        box.update(label="Verarbeitung beendet", state="complete")
+        box.update(label=i18n.t("run.finished"), state="complete")
     return True
 
 
@@ -51,7 +53,7 @@ def start(app, *, path: Path | str, actor: str, upload_id: str | None = None) ->
         "case_id": thread_id,
         "started_at": datetime.now(timezone.utc).isoformat(),
         "log": [],
-    }, f"Vorgang läuft: {filename}")
+    }, i18n.t("run.running", filename=filename))
 
     return thread_id
 
@@ -61,4 +63,4 @@ def resume(app, *, thread_id: str, response: dict) -> None:
     from langgraph.types import Command
 
     _stream_run(app, {"configurable": {"thread_id": thread_id}},
-               Command(resume=response), "Entscheidung wird verarbeitet")
+               Command(resume=response), i18n.t("run.deciding"))

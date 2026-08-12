@@ -16,14 +16,19 @@ from enum import Enum
 import process_registry
 from graph.cases import Status
 from process_registry import SHARED_STEPS, ProcessStep
+from ui.shared import i18n
 
 
 class StepStatus(str, Enum):
-    DONE = "erledigt"
-    ACTIVE = "aktiv"
-    OPEN = "offen"
-    SKIPPED = "uebersprungen"
-    FAILED = "gescheitert"
+    """The value is the CSS class the stepper draws with (see
+    `ui/shared/style.py`) -- it reaches the browser and is therefore
+    English, like every other name in the rendered markup."""
+
+    DONE = "done"
+    ACTIVE = "active"
+    OPEN = "open"
+    SKIPPED = "skipped"
+    FAILED = "failed"
 
 
 @dataclass(frozen=True)
@@ -67,14 +72,14 @@ def _step_status(node: str, counts: dict[str, int], *, waiting_at: str | None,
       skipped step.
     """
     if node == waiting_at:
-        return StepStatus.ACTIVE, "Wartet auf Entscheidung"
+        return StepStatus.ACTIVE, i18n.t("step.hint.waiting")
 
     ran = counts.get(node, 0)
     done = status is Status.COMPLETED
 
     if node == "reader":
         if status is Status.DENIED:
-            return StepStatus.FAILED, "Zugriff verweigert"
+            return StepStatus.FAILED, i18n.t("step.hint.access_denied")
         return (StepStatus.DONE, "") if ran else (StepStatus.OPEN, "")
 
     # The last step carries the overall outcome: it counts as done exactly
@@ -83,13 +88,12 @@ def _step_status(node: str, counts: dict[str, int], *, waiting_at: str | None,
         if done:
             return StepStatus.DONE, ""
         if status is Status.FAILED and ran:
-            return StepStatus.FAILED, "Zielsystem hat abgelehnt"
+            return StepStatus.FAILED, i18n.t("step.hint.target_rejected")
         return StepStatus.OPEN, ""
 
     if node == "freigabe" and not ran:
         if counts.get(final_node) or done:
-            return (StepStatus.SKIPPED,
-                    "Nicht nötig – die Kostenstelle war eindeutig")
+            return StepStatus.SKIPPED, i18n.t("step.hint.cost_center_clear")
         return StepStatus.OPEN, ""
 
     if node == "klaerfall" and not ran and done:
@@ -120,7 +124,7 @@ def steps_for(
     final_node = raw_steps[-1].node if process else ""
 
     return [
-        Step(s.node, s.title, s.agent_id,
+        Step(s.node, i18n.step_title(s.node), s.agent_id,
              *_step_status(s.node, counts, waiting_at=waiting_at,
                            status=status, final_node=final_node))
         for s in raw_steps

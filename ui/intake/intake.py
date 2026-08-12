@@ -27,10 +27,20 @@ PDF_SIGNATURE = b"%PDF-"
 
 @dataclass(frozen=True)
 class CheckResult:
-    """Result of the intake check for a single file."""
+    """Result of the intake check for a single file.
+
+    Two fields say the same thing on purpose. `reason` is the wording that
+    goes into the audit trail on a rejection and must never be reworded --
+    it is the record. `code` and `params` say *why* in a form the interface
+    can translate for the person standing in front of it (see
+    `ui/shared/i18n.py`); German falls back to `reason` and is therefore
+    never a second copy.
+    """
 
     ok: bool
     reason: str
+    code: str = ""
+    params: dict | None = None
     duplicate_of: str | None = None   # upload_id of a file with identical content
 
     @property
@@ -65,23 +75,31 @@ def check(con: sqlite3.Connection, *, filename: str, data: bytes) -> CheckResult
     extension = Path(filename).suffix.lower()
     if extension not in ALLOWED_EXTENSIONS:
         allowed = ", ".join(sorted(ALLOWED_EXTENSIONS))
-        return CheckResult(False, f"Dateien vom Typ „{extension or 'ohne Endung'}“ "
-                                  f"können nicht verarbeitet werden. Möglich "
-                                  f"sind: {allowed}.")
+        return CheckResult(
+            False,
+            f"Dateien vom Typ „{extension or 'ohne Endung'}“ können nicht "
+            f"verarbeitet werden. Möglich sind: {allowed}.",
+            code="wrong_type" if extension else "no_extension",
+            params={"extension": extension, "allowed": allowed},
+        )
 
     if not data:
-        return CheckResult(False, "Die Datei enthält keine Daten.")
+        return CheckResult(False, "Die Datei enthält keine Daten.", code="empty")
 
     if len(data) > MAX_BYTES:
-        return CheckResult(False, f"Die Datei ist größer als "
-                                  f"{MAX_BYTES // (1024 * 1024)} MB und damit zu "
-                                  f"groß.")
+        limit = MAX_BYTES // (1024 * 1024)
+        return CheckResult(
+            False,
+            f"Die Datei ist größer als {limit} MB und damit zu groß.",
+            code="too_large", params={"limit": limit},
+        )
 
     # The extension is a claim, the header bytes are evidence. An image
     # named as a PDF would otherwise only fail in the reader -- with an
     # error message no one understands.
     if not data.startswith(PDF_SIGNATURE):
-        return CheckResult(False, "Die Datei ist kein PDF, auch wenn sie so heißt.")
+        return CheckResult(False, "Die Datei ist kein PDF, auch wenn sie so heißt.",
+                           code="not_a_pdf")
 
     existing = con.execute(
         "SELECT upload_id FROM uploads WHERE content_hash = ?", (content_hash(data),)
@@ -89,9 +107,9 @@ def check(con: sqlite3.Connection, *, filename: str, data: bytes) -> CheckResult
     if existing:
         return CheckResult(False, "Dieser Beleg wurde bereits hochgeladen – "
                                   "der Inhalt ist identisch.",
-                           duplicate_of=existing[0])
+                           code="duplicate", duplicate_of=existing[0])
 
-    return CheckResult(True, "Kann übernommen werden.")
+    return CheckResult(True, "Kann übernommen werden.", code="ok")
 
 
 def store(con: sqlite3.Connection, *, filename: str, data: bytes,

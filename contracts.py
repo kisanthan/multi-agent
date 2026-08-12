@@ -100,7 +100,7 @@ class CaseOutcome(str, Enum):
     `agents/incoming_invoice/archiving.py`. The two are different
     vocabularies that happen to share a word in English; keeping the names
     apart is the point (see the three-vocabularies table in
-    docs/architektur.md).
+    docs/architecture.md).
 
     This enum is the closed list of *values*; it deliberately does not say
     which of them count as a business success -- that is decided by each

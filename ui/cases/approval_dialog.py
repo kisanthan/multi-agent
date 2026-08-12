@@ -35,11 +35,12 @@ import agent_registry
 import process_registry
 from agent_registry import OversightMode
 from contracts import ApprovalTrigger
+from ui.shared import i18n
 
 # Session key of the case whose dialog was dismissed with "Später". Keeps
 # the modal from reopening on the very next rerun while the case stays in
 # the queue -- dismissing is not deciding.
-DISMISSED = "freigabe_dialog_zurueckgestellt"
+DISMISSED = "approval_dialog_dismissed"
 
 
 def agent_of(request: dict) -> tuple[str, str | None]:
@@ -75,53 +76,56 @@ def oversight_note(request: dict) -> tuple[str, str, str]:
 
     if trigger == ApprovalTrigger.OVERSIGHT_MODE.value:
         return (
-            "Dieser Schritt wird immer bestätigt",
-            "Bevor Geld bewegt wird, entscheidet eine Person – bei jedem "
-            "Betrag, auch wenn alles zusammenpasst. Es ist also nichts "
-            "schiefgelaufen: Der Vorgang wartet planmäßig auf Sie und wird "
-            "erst nach Ihrer Bestätigung verbucht.",
+            i18n.t("oversight.always.headline"),
+            i18n.t("oversight.always.text"),
             "🔒",
         )
 
     runs_through_normally = config.oversight is OversightMode.HUMAN_ON_THE_LOOP
     return (
-        "Hier kommt das System nicht weiter",
-        ("Dieser Schritt läuft sonst ohne Rückfrage durch. Diesmal reichen "
-         "die Angaben auf dem Beleg für eine eindeutige Zuordnung nicht aus – "
-         "statt zu raten, fragt das System nach."
-         if runs_through_normally else
-         "Der Vorgang lässt sich nicht eindeutig zuordnen und wartet auf "
-         "Ihre Entscheidung."),
+        i18n.t("oversight.stuck.headline"),
+        i18n.t("oversight.stuck.text.usually_automatic" if runs_through_normally
+               else "oversight.stuck.text.other"),
         "❓",
     )
 
 
-@st.dialog("Dieser Vorgang wartet auf Sie", width="large")
 def open_decision(app, thread_id: str, request: dict, values: dict, *,
                   upn: str) -> None:
-    """The modal. Blocks the page until it is decided or set aside."""
+    """The modal. Blocks the page until it is decided or set aside.
+
+    `st.dialog` takes its title at decoration time, so the decorated
+    function is built here on each call rather than once at import: only
+    then can the title follow the language the user just switched to.
+    """
     from ui.cases.detail import decision_form
 
-    headline, explanation, icon = oversight_note(request)
-    st.markdown(f"### {icon} {headline}")
-    st.info(explanation)
+    @st.dialog(i18n.t("dialog.title"), width="large")
+    def _modal() -> None:
+        headline, explanation, icon = oversight_note(request)
+        st.markdown(f"### {icon} {headline}")
+        st.info(explanation)
 
-    if values.get("filename"):
-        st.caption(f"Beleg: {values['filename']}")
+        if values.get("filename"):
+            st.caption(i18n.t("dialog.document", filename=values["filename"]))
 
-    # On a submitted decision this runs the graph and calls `st.rerun()`,
-    # which ends the script -- so nothing below executes in that case and
-    # the dialog closes on its own. Process A stops twice (exception case,
-    # then booking approval); the second stop opens a fresh dialog.
-    decision_form(app, thread_id, request, values, upn=upn)
+        # On a submitted decision this runs the graph and calls
+        # `st.rerun()`, which ends the script -- so nothing below executes
+        # in that case and the dialog closes on its own. Process A stops
+        # twice (exception case, then booking approval); the second stop
+        # opens a fresh dialog.
+        decision_form(app, thread_id, request, values, upn=upn)
 
-    st.divider()
-    if st.button("Später entscheiden", use_container_width=True,
-                 key=f"spaeter_{thread_id}"):
-        # The case stays in the checkpoint and in the list. That it can be
-        # set aside without being lost is the point of the checkpointer.
-        st.session_state[DISMISSED] = thread_id
-        st.rerun()
+        st.divider()
+        if st.button(i18n.t("dialog.later"), use_container_width=True,
+                     key=f"later_{thread_id}"):
+            # The case stays in the checkpoint and in the list. That it can
+            # be set aside without being lost is the point of the
+            # checkpointer.
+            st.session_state[DISMISSED] = thread_id
+            st.rerun()
+
+    _modal()
 
 
 def should_open(thread_id: str) -> bool:

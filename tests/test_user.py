@@ -121,8 +121,8 @@ def test_status_card_is_a_single_coherent_block():
     markup = style.status_card_html(UPLOAD_ONLY, upn="a@b.c")
 
     # A card opens and closes exactly once.
-    assert markup.count('class="statuskarte"') == 1
-    assert markup.startswith('<div class="statuskarte">')
+    assert markup.count('class="status-card"') == 1
+    assert markup.startswith('<div class="status-card">')
     assert markup.rstrip().endswith("</div>")
     # Badge and sentence both sit inside this one card.
     assert UPLOAD_ONLY.rights_short in markup
@@ -133,7 +133,7 @@ def test_status_card_shows_the_sign_in_name_only_if_given():
     without = style.status_card_html(UPLOAD_ONLY)
     with_upn = style.status_card_html(UPLOAD_ONLY, upn="a@b.c")
 
-    assert "konto-upn" not in without
+    assert "account-upn" not in without
     assert "a@b.c" in with_upn
 
 

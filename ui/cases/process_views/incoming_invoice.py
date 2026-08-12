@@ -10,6 +10,7 @@ import streamlit as st
 
 from agents.incoming_invoice import cost_center as cost_center_agent
 from graph.effects import Effect
+from ui.shared import i18n
 from ui.shared.context import connection
 
 RESULT_TEXTS = {
@@ -33,16 +34,15 @@ def approval_inputs(request: dict, *, thread_id: str) -> dict:
             con.close()
     labels = {e["id"]: f"{e['id']} — {e['name']} ({e['reference']})"
               for e in catalog}
-    st.warning("Auf dem Beleg steht keine Kostenstelle, die zugeordnet "
-               "werden konnte. Bitte wählen Sie die passende aus.")
+    st.warning(i18n.t("invoice.no_cost_center"))
     cost_center_id = st.selectbox(
-        "Kostenstelle", [e["id"] for e in catalog],
-        format_func=lambda o: labels.get(o, o), key=f"kst_{thread_id}",
+        i18n.t("invoice.cost_center"), [e["id"] for e in catalog],
+        format_func=lambda o: labels.get(o, o), key=f"cost_center_{thread_id}",
     )
     return {"cost_center_id": cost_center_id} if cost_center_id else {}
 
 
 def effect_metric(effect: Effect) -> tuple[str, str] | None:
     if effect.elo_archive_id:
-        return ("Im Archiv abgelegt unter", effect.elo_archive_id)
+        return (i18n.t("invoice.archived_as"), effect.elo_archive_id)
     return None

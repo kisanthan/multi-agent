@@ -25,7 +25,7 @@ from llm.extraction import ExtractionResult
 from ui.shared import filter as filters
 from ui.intake import intake
 
-PDF = (INTAKE_DIR / "A_zahlung_ok_01.pdf")
+PDF = (INTAKE_DIR / "A_payment_ok_01.pdf")
 SUBMITTER = "m.keller@chg-meridian.com"
 
 
@@ -103,10 +103,10 @@ def _start(app, *, upload_id: str | None, path: Path) -> str:
 
 
 def test_upload_creates_a_case_in_the_right_process(con, app, tmp_path, monkeypatch):
-    monkeypatch.setattr(intake, "INTAKE_DIR", tmp_path / "eingang")
+    monkeypatch.setattr(intake, "INTAKE_DIR", tmp_path / "inbox")
     graph, checkpoint = app
 
-    upload = intake.store(con, filename="A_zahlung_ok_01.pdf",
+    upload = intake.store(con, filename="A_payment_ok_01.pdf",
                           data=PDF.read_bytes(), actor=SUBMITTER)
     case_id = _start(graph, upload_id=upload.upload_id,
                      path=Path(upload.path))
@@ -123,10 +123,10 @@ def test_upload_creates_a_case_in_the_right_process(con, app, tmp_path, monkeypa
 def test_case_is_in_history_and_on_the_process_page(con, app, tmp_path,
                                                      monkeypatch):
     """Both views draw from the same source, just filtered differently."""
-    monkeypatch.setattr(intake, "INTAKE_DIR", tmp_path / "eingang")
+    monkeypatch.setattr(intake, "INTAKE_DIR", tmp_path / "inbox")
     graph, checkpoint = app
 
-    upload = intake.store(con, filename="A_zahlung_ok_01.pdf",
+    upload = intake.store(con, filename="A_payment_ok_01.pdf",
                           data=PDF.read_bytes(), actor=SUBMITTER)
     case_id = _start(graph, upload_id=upload.upload_id, path=Path(upload.path))
 
@@ -141,10 +141,10 @@ def test_case_is_in_history_and_on_the_process_page(con, app, tmp_path,
 
 def test_case_waits_for_booking_approval(con, app, tmp_path, monkeypatch):
     """Process A is human-in-the-loop -- even the happy path pauses."""
-    monkeypatch.setattr(intake, "INTAKE_DIR", tmp_path / "eingang")
+    monkeypatch.setattr(intake, "INTAKE_DIR", tmp_path / "inbox")
     graph, checkpoint = app
 
-    upload = intake.store(con, filename="A_zahlung_ok_01.pdf",
+    upload = intake.store(con, filename="A_payment_ok_01.pdf",
                           data=PDF.read_bytes(), actor=SUBMITTER)
     case_id = _start(graph, upload_id=upload.upload_id, path=Path(upload.path))
 
@@ -158,10 +158,10 @@ def test_case_waits_for_booking_approval(con, app, tmp_path, monkeypatch):
 def test_audit_is_filterable_by_case(con, app, tmp_path, monkeypatch,
                                      production):
     """The case -> evidence arc the detail page offers."""
-    monkeypatch.setattr(intake, "INTAKE_DIR", tmp_path / "eingang")
+    monkeypatch.setattr(intake, "INTAKE_DIR", tmp_path / "inbox")
     graph, _ = app
 
-    upload = intake.store(con, filename="A_zahlung_ok_01.pdf",
+    upload = intake.store(con, filename="A_payment_ok_01.pdf",
                           data=PDF.read_bytes(), actor=SUBMITTER)
     case_id = _start(graph, upload_id=upload.upload_id, path=Path(upload.path))
 
@@ -170,7 +170,7 @@ def test_audit_is_filterable_by_case(con, app, tmp_path, monkeypatch,
     assert entries, "Der Lauf muss im Trail auffindbar sein"
     assert {e.case_id for e in entries} == {case_id}
     # Every entry names the document it relates to.
-    assert all(e.source == "A_zahlung_ok_01.pdf" for e in entries)
+    assert all(e.source == "A_payment_ok_01.pdf" for e in entries)
     # The upload itself belongs to no case and is not among them.
     assert all(e.action != "datei_hochgeladen" for e in entries)
     assert verify_chain(production).valid
@@ -180,10 +180,10 @@ def test_second_run_of_the_same_file_is_its_own_case(con, app, tmp_path,
                                                       monkeypatch, production):
     """An upload can create several cases -- so the filename alone is not
     enough as a correlation."""
-    monkeypatch.setattr(intake, "INTAKE_DIR", tmp_path / "eingang")
+    monkeypatch.setattr(intake, "INTAKE_DIR", tmp_path / "inbox")
     graph, checkpoint = app
 
-    upload = intake.store(con, filename="A_zahlung_ok_01.pdf",
+    upload = intake.store(con, filename="A_payment_ok_01.pdf",
                           data=PDF.read_bytes(), actor=SUBMITTER)
     first = _start(graph, upload_id=upload.upload_id, path=Path(upload.path))
     second = _start(graph, upload_id=upload.upload_id, path=Path(upload.path))

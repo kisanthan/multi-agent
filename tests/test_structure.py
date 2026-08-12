@@ -32,6 +32,7 @@ DOCUMENTED_PATHS = [
     "llm/client.py",
     "llm/extraction.py",
     "llm/preflight.py",
+    "llm/model_overrides.py",
     "mocks/navision.py",
     "mocks/elo.py",
     "graph/workflow.py",
@@ -42,12 +43,18 @@ DOCUMENTED_PATHS = [
     "data/generate.py",
     "ui/app.py",
     "ui/shared",
+    "ui/shared/i18n.py",
+    "ui/locales",
+    "ui/locales/de.json",
+    "ui/locales/en.json",
     "ui/cases",
     "ui/cases/process_views",
     "ui/intake",
     "ui/pages",
+    "ui/pages/models.py",
     "tests",
     "docs",
+    "docs/guide.md",
 ]
 
 

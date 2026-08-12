@@ -134,7 +134,7 @@ def test_scenario1_valid_payment_needs_booking_approval(app, thread, monkeypatch
 
     from langgraph.types import Command
     state = app.invoke(
-        {"path": _pdf("A_zahlung_ok_01.pdf"), "actor": "m.keller@chg-meridian.com",
+        {"path": _pdf("A_payment_ok_01.pdf"), "actor": "m.keller@chg-meridian.com",
          "log": []},
         thread,
     )
@@ -175,7 +175,7 @@ def test_scenario1_large_amount_same_single_approval(app, thread, monkeypatch):
 
     from langgraph.types import Command
     state = app.invoke(
-        {"path": _pdf("A_zahlung_ok_01.pdf"), "actor": "m.keller@chg-meridian.com",
+        {"path": _pdf("A_payment_ok_01.pdf"), "actor": "m.keller@chg-meridian.com",
          "log": []},
         thread,
     )
@@ -211,7 +211,7 @@ def test_scenario2_unknown_number_becomes_an_exception_case(app, thread, monkeyp
 
     from langgraph.types import Command
     state = app.invoke(
-        {"path": _pdf("A_zahlung_unbekannte_nummer.pdf"),
+        {"path": _pdf("A_payment_unknown_number.pdf"),
          "actor": "m.keller@chg-meridian.com", "log": []},
         thread,
     )
@@ -248,7 +248,7 @@ def test_scenario2_approval_by_unauthorized_user_is_denied(app, thread, monkeypa
     )
     from langgraph.types import Command
     state = app.invoke(
-        {"path": _pdf("A_zahlung_unbekannte_nummer.pdf"),
+        {"path": _pdf("A_payment_unknown_number.pdf"),
          "actor": "t.brandt@chg-meridian.com", "log": []},
         thread,
     )
@@ -282,7 +282,7 @@ def test_scenario2_approval_by_unknown_user_is_denied(app, thread, monkeypatch):
     )
     from langgraph.types import Command
     state = app.invoke(
-        {"path": _pdf("A_zahlung_unbekannte_nummer.pdf"),
+        {"path": _pdf("A_payment_unknown_number.pdf"),
          "actor": "t.brandt@chg-meridian.com", "log": []},
         thread,
     )
@@ -313,7 +313,7 @@ def test_scenario2_rejecting_does_not_book(app, thread, monkeypatch):
     )
     from langgraph.types import Command
     state = app.invoke(
-        {"path": _pdf("A_zahlung_unbekannte_nummer.pdf"),
+        {"path": _pdf("A_payment_unknown_number.pdf"),
          "actor": "m.keller@chg-meridian.com", "log": []},
         thread,
     )
@@ -329,7 +329,7 @@ def test_scenario2b_duplicate_is_flagged_not_rebooked(app, thread, monkeypatch):
     """Scenario 2b (data/generate.py): the same invoice number submitted a
     second time must be recognized as already paid, not booked again.
 
-    Uses the purpose-built fixture pair A_zahlung_dublette_1.pdf / _2.pdf --
+    Uses the purpose-built fixture pair A_payment_duplicate_1.pdf / _2.pdf --
     generated specifically for this case but previously never wired into
     pytest (reconciliation.Finding.ALREADY_PAID was untested)."""
     _reset_status("RE-2026-4211")
@@ -342,7 +342,7 @@ def test_scenario2b_duplicate_is_flagged_not_rebooked(app, thread, monkeypatch):
     from langgraph.types import Command
     # First submission: happy path, ends up paid.
     state = app.invoke(
-        {"path": _pdf("A_zahlung_dublette_1.pdf"), "actor": "t.brandt@chg-meridian.com",
+        {"path": _pdf("A_payment_duplicate_1.pdf"), "actor": "t.brandt@chg-meridian.com",
          "log": []},
         thread,
     )
@@ -359,7 +359,7 @@ def test_scenario2b_duplicate_is_flagged_not_rebooked(app, thread, monkeypatch):
     # must recognize it is already paid, not book it again.
     thread2 = {"configurable": {"thread_id": f"test-{uuid.uuid4().hex[:8]}"}}
     state = app.invoke(
-        {"path": _pdf("A_zahlung_dublette_2.pdf"), "actor": "t.brandt@chg-meridian.com",
+        {"path": _pdf("A_payment_duplicate_2.pdf"), "actor": "t.brandt@chg-meridian.com",
          "log": []},
         thread2,
     )
@@ -388,7 +388,7 @@ def test_scenario2c_amount_mismatch_becomes_exception_case(app, thread, monkeypa
 
     from langgraph.types import Command
     state = app.invoke(
-        {"path": _pdf("A_zahlung_betrag_unplausibel.pdf"),
+        {"path": _pdf("A_payment_implausible_amount.pdf"),
          "actor": "t.brandt@chg-meridian.com", "log": []},
         thread,
     )
@@ -420,7 +420,7 @@ def test_corrected_number_that_is_already_paid_is_refused_by_navision(app, threa
 
     from langgraph.types import Command
     state = app.invoke(
-        {"path": _pdf("A_zahlung_unbekannte_nummer.pdf"),
+        {"path": _pdf("A_payment_unknown_number.pdf"),
          "actor": "m.keller@chg-meridian.com", "log": []},
         thread,
     )
@@ -463,7 +463,7 @@ def test_scenario3_unique_cost_center_is_archived_automatically(app, thread, mon
     )
 
     state = app.invoke(
-        {"path": _pdf("B_rechnung_ok_02.pdf"), "actor": "m.keller@chg-meridian.com",
+        {"path": _pdf("B_invoice_ok_02.pdf"), "actor": "m.keller@chg-meridian.com",
          "log": []},
         thread,
     )
@@ -498,7 +498,7 @@ def test_second_archiving_of_the_same_document_is_idempotent(app, thread, monkey
     )
 
     state = app.invoke(
-        {"path": _pdf("B_rechnung_ok_02.pdf"), "actor": "m.keller@chg-meridian.com",
+        {"path": _pdf("B_invoice_ok_02.pdf"), "actor": "m.keller@chg-meridian.com",
          "log": []},
         thread,
     )
@@ -507,7 +507,7 @@ def test_second_archiving_of_the_same_document_is_idempotent(app, thread, monkey
 
     thread2 = {"configurable": {"thread_id": f"test-{uuid.uuid4().hex[:8]}"}}
     state = app.invoke(
-        {"path": _pdf("B_rechnung_ok_02.pdf"), "actor": "m.keller@chg-meridian.com",
+        {"path": _pdf("B_invoice_ok_02.pdf"), "actor": "m.keller@chg-meridian.com",
          "log": []},
         thread2,
     )
@@ -542,7 +542,7 @@ def test_scenario4_missing_reference_lets_a_human_decide(app, thread, monkeypatc
 
     from langgraph.types import Command
     state = app.invoke(
-        {"path": _pdf("B_rechnung_ohne_referenz.pdf"),
+        {"path": _pdf("B_invoice_without_reference.pdf"),
          "actor": "t.brandt@chg-meridian.com", "log": []},
         thread,
     )
@@ -589,7 +589,7 @@ def test_scenario4_approval_by_unauthorized_user_is_denied(app, thread, monkeypa
 
     from langgraph.types import Command
     state = app.invoke(
-        {"path": _pdf("B_rechnung_ohne_referenz.pdf"),
+        {"path": _pdf("B_invoice_without_reference.pdf"),
          "actor": "t.brandt@chg-meridian.com", "log": []},
         thread,
     )
@@ -619,7 +619,7 @@ def test_scenario4_approval_by_unauthorized_user_is_denied(app, thread, monkeypa
 def test_scenario5_unauthorized_submitter(app, thread):
     """AD check denies -> no model, no target system, one audit entry."""
     state = app.invoke(
-        {"path": _pdf("A_zahlung_unberechtigt.pdf"),
+        {"path": _pdf("A_payment_unauthorized.pdf"),
          "actor": "e.extern@partner-consulting.de", "log": []},
         thread,
     )
@@ -656,7 +656,7 @@ def test_total_extraction_failure_approved_ends_cleanly_not_booked(app, thread, 
 
     from langgraph.types import Command
     state = app.invoke(
-        {"path": _pdf("A_zahlung_ok_01.pdf"), "actor": "m.keller@chg-meridian.com",
+        {"path": _pdf("A_payment_ok_01.pdf"), "actor": "m.keller@chg-meridian.com",
          "log": []},
         thread,
     )
@@ -702,7 +702,7 @@ def test_unreachable_navision_is_audited_from_the_caller_side(app, thread, monke
 
     from langgraph.types import Command
     state = app.invoke(
-        {"path": _pdf("A_zahlung_ok_01.pdf"), "actor": "m.keller@chg-meridian.com",
+        {"path": _pdf("A_payment_ok_01.pdf"), "actor": "m.keller@chg-meridian.com",
          "log": []},
         thread,
     )
@@ -771,7 +771,7 @@ def test_unreachable_elo_is_audited_from_the_caller_side(app, thread, monkeypatc
     con.close()
 
     state = app.invoke(
-        {"path": _pdf("B_rechnung_ok_02.pdf"), "actor": "m.keller@chg-meridian.com",
+        {"path": _pdf("B_invoice_ok_02.pdf"), "actor": "m.keller@chg-meridian.com",
          "log": []},
         thread,
     )
@@ -806,7 +806,7 @@ def test_number_still_missing_after_approval_ends_cleanly_not_booked(app, thread
 
     from langgraph.types import Command
     state = app.invoke(
-        {"path": _pdf("A_zahlung_ok_01.pdf"), "actor": "m.keller@chg-meridian.com",
+        {"path": _pdf("A_payment_ok_01.pdf"), "actor": "m.keller@chg-meridian.com",
          "log": []},
         thread,
     )

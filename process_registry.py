@@ -59,6 +59,10 @@ SHARED_STEPS: tuple[ProcessStep, ...] = (
 
 @dataclass(frozen=True)
 class ProcessConfig:
+    # The display strings below are German, and this module is their only
+    # home: `ui/locales/` carries the other languages keyed by
+    # `process.<key>.<field>`, never a second German copy. See
+    # `ui/shared/i18n.py`.
     key: str                 # 'A' | 'B' -- the thesis's short designation
     route: str                # URL path; single-level, Streamlit disallows '/'
     name: str                 # process name ('Zahlungseingang')
@@ -93,7 +97,7 @@ class ProcessConfig:
 PROCESSES: dict[str, ProcessConfig] = {
     "A": ProcessConfig(
         key="A",
-        route="zahlungsbestaetigung",
+        route="payment-confirmation",
         name="Zahlungsbestätigung",
         document_kind="Zahlungsbestätigung",
         icon="💶",
@@ -116,7 +120,7 @@ PROCESSES: dict[str, ProcessConfig] = {
     ),
     "B": ProcessConfig(
         key="B",
-        route="eingangsrechnung",
+        route="incoming-invoice",
         name="Eingangsrechnung",
         document_kind="Eingangsrechnung",
         icon="🧾",
@@ -164,10 +168,6 @@ def for_document_type(document_type: str | None) -> ProcessConfig | None:
     return next((p for p in PROCESSES.values() if p.document_type.value == document_type), None)
 
 
-def for_route(route: str) -> ProcessConfig | None:
-    return next((p for p in PROCESSES.values() if p.route == route), None)
-
-
 def for_interrupt(kind: str | None) -> ProcessConfig | None:
     """Maps an interrupt's `kind` to the process it belongs to.
 
@@ -202,11 +202,6 @@ def document_kinds() -> list[str]:
     process is added, the UI names it on its own.
     """
     return [p.document_kind for p in all_processes()]
-
-
-def document_kind_for(key: str | None) -> str | None:
-    """The document kind of a process ('Zahlungsbestaetigung')."""
-    return get_config(key).document_kind if key else None
 
 
 def successful_outcomes() -> frozenset[str]:

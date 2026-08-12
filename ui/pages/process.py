@@ -13,6 +13,7 @@ from config import CHECKPOINT_PATH
 from graph.cases import overview
 from agent_registry import REGISTRY, OversightMode
 from process_registry import ProcessConfig
+from ui.shared import i18n
 from ui.shared import user
 from ui.shared import filter as filters
 from ui.shared import style
@@ -23,11 +24,11 @@ from ui.cases.steps import steps_for
 
 def render(config: ProcessConfig) -> None:
     style.css()
-    st.title(config.name)
-    st.caption(config.description)
+    st.title(i18n.process_text(config, "name"))
+    st.caption(i18n.process_text(config, "description"))
 
     app, _ = graph()
-    key = f"prozess_{config.key}"
+    key = f"process_{config.key}"
     own_rows = filters.for_process(overview(app, CHECKPOINT_PATH),
                                    config.key)
 
@@ -40,15 +41,16 @@ def render(config: ProcessConfig) -> None:
     counts = filters.counts(own_rows)
     columns = st.columns(4)
     columns[0].metric(person.label_pending, counts["pending"])
-    columns[1].metric("In Bearbeitung", counts["running"])
-    columns[2].metric("Abgeschlossen", counts["completed"])
-    columns[3].metric("Nicht abgeschlossen", counts["failed"])
-    st.caption(f"Am Ende steht: {config.process_end} – "
-               f"festgehalten in: {config.target_system}.")
+    columns[1].metric(i18n.t("metric.in_progress"), counts["running"])
+    columns[2].metric(i18n.t("metric.completed"), counts["completed"])
+    columns[3].metric(i18n.t("metric.not_completed"), counts["failed"])
+    st.caption(i18n.t("process.ends_with",
+                      end=i18n.process_text(config, "process_end"),
+                      system=i18n.process_text(config, "target_system")))
 
     if not own_rows:
-        st.info(f"Hier liegt noch kein Vorgang. Laden Sie unter „Upload“ eine "
-                f"{config.document_kind} hoch.")
+        st.info(i18n.t("process.empty",
+                       kind=i18n.process_text(config, "document_kind")))
         _flow_overview(config)
         return
 
@@ -57,15 +59,15 @@ def render(config: ProcessConfig) -> None:
     matches = filters.apply(own_rows, selection)
 
     case_list.section(
-        filters.open_cases(matches), title="In Bearbeitung",
-        key=f"{key}_offen", view="karten",
-        empty_text="Zurzeit ist hier nichts in Bearbeitung.",
+        filters.open_cases(matches), title=i18n.t("section.in_progress"),
+        key=f"{key}_open", view="cards",
+        empty_text=i18n.t("process.empty.open"),
         config=config, filter_active=not selection.is_empty,
     )
     case_list.section(
-        filters.closed_cases(matches), title="Erledigt",
-        key=f"{key}_fertig",
-        empty_text="Hier ist noch nichts erledigt.",
+        filters.closed_cases(matches), title=i18n.t("section.done"),
+        key=f"{key}_done",
+        empty_text=i18n.t("process.empty.done"),
         config=config, filter_active=not selection.is_empty,
     )
 
@@ -74,21 +76,21 @@ def render(config: ProcessConfig) -> None:
 
 def _flow_overview(config: ProcessConfig) -> None:
     """The process-specific slice of what the architecture page shows in full."""
-    with st.expander("So läuft dieser Vorgang ab"):
+    with st.expander(i18n.t("process.flow")):
         style.stepper(steps_for(config.key, []))
         for step in config.steps:
             if not step.agent_id:
                 continue
             cfg = REGISTRY[step.agent_id]
             if cfg.oversight is OversightMode.HUMAN_IN_THE_LOOP:
-                note = "🔒 Eine Person muss diesen Schritt bestätigen."
+                note = i18n.t("process.flow.confirmed")
             elif cfg.can_write:
-                note = "Wird automatisch ausgeführt und protokolliert."
+                note = i18n.t("process.flow.writes")
             else:
-                note = "Wird automatisch ausgeführt, ohne etwas zu ändern."
+                note = i18n.t("process.flow.reads")
             st.markdown(
-                f'<div class="feldzeile"><b>{step.title}</b> — {note}</div>',
+                f'<div class="field-row"><b>{i18n.step_title(step.node)}</b>'
+                f' — {note}</div>',
                 unsafe_allow_html=True,
             )
-        st.caption("Welche Rolle und welche Berechtigung hinter jedem Schritt "
-                   "steht, zeigt die Seite „Architektur“.")
+        st.caption(i18n.t("process.flow.footer"))

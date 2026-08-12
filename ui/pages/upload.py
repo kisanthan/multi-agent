@@ -18,7 +18,7 @@ import streamlit as st
 import process_registry
 from config import INTAKE_DIR, MANIFEST_PATH
 from graph.cases import overview
-from ui.shared import user, style
+from ui.shared import i18n, user, style
 from ui.shared.formatting import enumerate_list, file_size
 from ui.shared.context import current_user, graph, open_case, connection
 from ui.intake import intake
@@ -26,6 +26,11 @@ from ui.cases import list as case_list
 from ui.cases.run import start
 
 RECENT_COUNT = 5
+
+# The widget key is also the CSS class Streamlit attaches to the container
+# (`st-key-upload_documents`), and that is what styles the drop area -- see
+# ui/shared/style.py. Renaming it here means renaming it there too.
+UPLOADER_KEY = "upload_documents"
 
 
 def _manifest() -> dict[str, dict]:
@@ -38,6 +43,18 @@ def _manifest() -> dict[str, dict]:
         return {}
     return {d["filename"]: d
             for d in json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))}
+
+
+def _check_text(result) -> str:
+    """The intake verdict, in the reader's language.
+
+    Falls back to the recorded German reason for a result that predates the
+    codes (see `ui/intake/intake.py::CheckResult`).
+    """
+    if not result.code:
+        return result.reason
+    return i18n.t(f"intake.{result.code}", default=result.reason,
+                  **(result.params or {}))
 
 
 # ------------------------------------------------------------- Upload area
@@ -53,12 +70,12 @@ def _upload_section(person) -> None:
     # twice.
     #
     # The key is not just a state key: Streamlit attaches it as the CSS
-    # class `st-key-upload_belege` to the container, and that is exactly
+    # class `st-key-upload_documents` to the container, and that is exactly
     # what styles the drop area. Wrapping a <div> around it via markdown
     # does not work -- Streamlit closes such blocks right away.
     files = st.file_uploader(
-        "Belege hierher ziehen oder auswählen",
-        type=["pdf"], accept_multiple_files=True, key="upload_belege",
+        i18n.t("upload.uploader_label"),
+        type=["pdf"], accept_multiple_files=True, key=UPLOADER_KEY,
         label_visibility="collapsed",
     )
 
@@ -68,7 +85,7 @@ def _upload_section(person) -> None:
     # What Streamlit lists below the area are the chosen files with a
     # remove button. Here, next to them, is something else: the result of
     # the intake check -- i.e. why a file passes or not.
-    st.markdown("**Eingangsprüfung**")
+    st.markdown(f"**{i18n.t('upload.intake_check')}**")
     con = connection()
     try:
         checked = [(d, intake.check(con, filename=d.name, data=d.getvalue()))
@@ -80,16 +97,13 @@ def _upload_section(person) -> None:
         columns = st.columns([4, 2, 4])
         columns[0].markdown(f"`{file.name}`")
         columns[1].caption(file_size(len(file.getvalue())))
-        if result.ok:
-            columns[2].caption("✓ " + result.reason)
-        else:
-            columns[2].caption("✕ " + result.reason)
+        columns[2].caption(("✓ " if result.ok else "✕ ") + _check_text(result))
 
     acceptable = [d for d, p in checked if p.ok]
-    button_label = ("Beleg übernehmen" if len(acceptable) == 1
-                    else f"{len(acceptable)} Belege übernehmen")
+    button_label = (i18n.t("upload.accept_one") if len(acceptable) == 1
+                    else i18n.t("upload.accept_many", count=len(acceptable)))
     clicked = st.button(
-        button_label if acceptable else "Übernehmen",
+        button_label if acceptable else i18n.t("upload.accept"),
         type="primary", disabled=not acceptable, use_container_width=True,
     )
 
@@ -101,15 +115,16 @@ def _upload_section(person) -> None:
                     intake.store(con, filename=file.name,
                                 data=file.getvalue(), actor=person.upn)
                 else:
+                    # The recorded reason, not the displayed one: the trail
+                    # keeps one wording regardless of who was looking.
                     intake.log_rejection(
                         con, filename=file.name, actor=person.upn,
                         reason=result.reason)
         finally:
             con.close()
-        st.success("Übernommen. Die Verarbeitung starten Sie unten mit "
-                   "„Starten“ – sie dauert ein bis drei Minuten.")
+        st.success(i18n.t("upload.accepted"))
         # Clear the widget, otherwise the same selection reappears after the rerun.
-        st.session_state.pop("upload_belege", None)
+        st.session_state.pop(UPLOADER_KEY, None)
         st.rerun()
 
 
@@ -118,13 +133,13 @@ def _upload_section(person) -> None:
 def _document_list(upn: str, app) -> None:
     documents = sorted(INTAKE_DIR.glob("*.pdf")) if INTAKE_DIR.is_dir() else []
     if not documents:
-        st.info("Noch keine Belege vorhanden. Laden Sie oben ein PDF hoch.")
+        st.info(i18n.t("upload.no_documents"))
         return
 
     manifest = _manifest()
-    with st.expander(f"Bereitliegende Belege ({len(documents)})", expanded=not manifest):
-        st.caption("„Starten“ legt einen neuen Vorgang an. Derselbe Beleg kann "
-                   "mehrfach verarbeitet werden.")
+    with st.expander(i18n.t("upload.ready", count=len(documents)),
+                     expanded=not manifest):
+        st.caption(i18n.t("upload.ready_caption"))
         for document in documents:
             entry = manifest.get(document.name, {})
             head, button_col = st.columns([5, 1])
@@ -132,13 +147,15 @@ def _document_list(upn: str, app) -> None:
                 st.markdown(f"**{document.name}**")
                 if entry:
                     kind = process_registry.get_config(entry["process"])
-                    special_case = (" · Sonderfall zum Ausprobieren"
+                    special_case = (i18n.t("upload.special_case")
                                     if entry.get("incident") else "")
-                    st.caption(f"{kind.document_kind}{special_case}")
+                    st.caption(f"{i18n.process_text(kind, 'document_kind')}"
+                               f"{special_case}")
                 else:
                     st.caption(file_size(document.stat().st_size))
-            start_clicked = button_col.button("Starten", key=f"start_{document.name}",
-                                              use_container_width=True)
+            start_clicked = button_col.button(
+                i18n.t("upload.start"), key=f"start_{document.name}",
+                use_container_width=True)
 
             if start_clicked:
                 con = connection()
@@ -156,12 +173,11 @@ def _document_list(upn: str, app) -> None:
 def render() -> None:
     # The document kinds appear in the drop area itself -- right where the
     # file is headed, not just in a line above it.
-    kinds = enumerate_list(process_registry.document_kinds(), connector="oder")
-    style.css(dropzone_hint=f"{kinds} hierher ziehen oder auswählen")
+    kinds = enumerate_list(i18n.document_kinds(), connector=i18n.t("word.or"))
+    style.css(dropzone_hint=i18n.t("upload.dropzone.hint", kinds=kinds))
 
-    st.title("Upload")
-    st.caption("Welche Belegart vorliegt, erkennt das System selbst und legt "
-               "den Vorgang entsprechend an.")
+    st.title(i18n.t("upload.title"))
+    st.caption(i18n.t("upload.caption"))
 
     upn = current_user()
     app, _ = graph()
@@ -178,15 +194,15 @@ def render() -> None:
     _document_list(upn, app)
 
     st.divider()
-    st.markdown("### Zuletzt hochgeladen")
+    st.markdown(f"### {i18n.t('upload.recent')}")
     from config import CHECKPOINT_PATH
     rows = overview(app, CHECKPOINT_PATH)
 
     if not rows:
-        st.info("Noch keine Vorgänge. Starten Sie oben einen Beleg.")
+        st.info(i18n.t("upload.no_cases"))
         return
 
     case_list.as_cards(rows[:RECENT_COUNT], key="upload")
     if len(rows) > RECENT_COUNT:
-        st.caption(f"{RECENT_COUNT} von {len(rows)} Vorgängen. "
-                   "Die vollständige Liste steht unter „Alle Vorgänge“.")
+        st.caption(i18n.t("upload.recent_count",
+                          shown=RECENT_COUNT, total=len(rows)))

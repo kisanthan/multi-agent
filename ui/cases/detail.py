@@ -18,6 +18,7 @@ from governance.audit import verify_chain
 from governance.policy import check_approval
 from graph.cases import Status, process_of, determine_status
 from graph.effects import read_effect
+from ui.shared import i18n
 from ui.shared import style
 from ui.shared import user
 from ui.shared.formatting import field
@@ -33,8 +34,7 @@ def render(app, thread_id: str, *, upn: str, with_title: bool = True) -> None:
     values = snapshot.values or {}
 
     if not values:
-        st.warning("Zu diesem Vorgang liegen keine Daten vor. "
-                   "Möglicherweise wurde er nie gestartet.")
+        st.warning(i18n.t("detail.no_data"))
         return
 
     request = snapshot.interrupts[0].value if snapshot.interrupts else None
@@ -50,17 +50,19 @@ def render(app, thread_id: str, *, upn: str, with_title: bool = True) -> None:
     else:
         _outcome(values, status, process)
 
-    with st.expander("Was bisher geschah"):
+    # The step name is translated, the recorded text is not: what a node
+    # wrote down is evidence and stays in the wording it was written in
+    # (see ui/shared/i18n.py).
+    with st.expander(i18n.t("detail.history")):
         for entry in values.get("log", []):
             st.markdown(
-                f"**{process_registry.step_title(entry['node'])}** — "
-                f"{entry['text']}")
+                f"**{i18n.step_title(entry['node'])}** — {entry['text']}")
 
     _document_preview(values.get("path"))
 
-    if st.button("Protokoll zu diesem Vorgang", key=f"audit_{thread_id}",
+    if st.button(i18n.t("detail.audit_button"), key=f"audit_{thread_id}",
                  use_container_width=False,
-                 help="Zeigt alle protokollierten Schritte dieses Vorgangs"):
+                 help=i18n.t("detail.audit_button.help")):
         show_audit_for(thread_id)
 
 
@@ -71,8 +73,8 @@ def _header(values: dict, status: Status, process: str | None, thread_id: str, *
     # document, and "Zahlungsbestätigung" says more about it than
     # "Zahlungseingang". No "Prozess A" -- the A/B assignment lives on the
     # architecture page.
-    process_text = (config.document_kind if config
-                    else "Belegart wird noch erkannt")
+    process_text = (i18n.process_text(config, "document_kind") if config
+                    else i18n.t("detail.kind_detecting"))
 
     if with_title:
         st.subheader(values.get("filename") or thread_id)
@@ -106,8 +108,8 @@ def _waiting_card(app, thread_id: str, request: dict, values: dict, *,
 
     if approval_dialog.should_open(thread_id):
         approval_dialog.open_decision(app, thread_id, request, values, upn=upn)
-    elif st.button("Entscheidung öffnen", type="primary",
-                   key=f"oeffnen_{thread_id}", use_container_width=True):
+    elif st.button(i18n.t("detail.reopen"), type="primary",
+                   key=f"reopen_{thread_id}", use_container_width=True):
         approval_dialog.reset(thread_id)
         st.rerun()
 
@@ -139,9 +141,9 @@ def decision_form(app, thread_id: str, request: dict, values: dict, *,
     # What appears here depends on who is looking: whoever may decide is
     # prompted to; whoever may not gets context instead of a prompt.
     if decision.allowed:
-        st.markdown("#### Ihre Entscheidung")
+        st.markdown(f"#### {i18n.t('detail.your_decision')}")
     else:
-        st.markdown("#### Wartet auf Bestätigung")
+        st.markdown(f"#### {i18n.t('detail.waiting')}")
 
     # `reason` is the policy's own wording, written verbatim into the audit
     # trail ("Buchungs-Agent ist Human-in-the-loop -- Freigabe
@@ -151,19 +153,21 @@ def decision_form(app, thread_id: str, request: dict, values: dict, *,
     # human-in-the-loop stop it only restates what the dialog's own
     # headline already says in plain language. On an escalation it carries
     # real evidence ("Der Beleg nennt keine Kostenstellenreferenz") and
-    # stays.
+    # stays -- and stays in its recorded wording, untranslated, for exactly
+    # the same reason it is not reworded (see ui/shared/i18n.py).
     shown = ("finding", "escalation") if _is_oversight_stop(request) else (
         "reason", "finding", "escalation")
     rows = "".join(
-        f"<div class='feldzeile'><b>{field(s, request[s])[0]}:</b> "
+        f"<div class='field-row'><b>{field(s, request[s])[0]}:</b> "
         f"{field(s, request[s])[1]}</div>"
         for s in shown if request.get(s)
     )
     if rows:
-        st.markdown(f'<div class="karte">{rows}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="card">{rows}</div>', unsafe_allow_html=True)
 
     if request.get("line_items"):
-        st.markdown("**Rechnungsposten:** " + ", ".join(request["line_items"]))
+        st.markdown(f"**{i18n.t('detail.line_items')}:** "
+                    + ", ".join(request["line_items"]))
 
     view = process_views.for_interrupt(kind)
     extra_response = view.approval_inputs(request, thread_id=thread_id) if view else {}
@@ -175,21 +179,22 @@ def decision_form(app, thread_id: str, request: dict, values: dict, *,
     elif values.get("actor") == upn:
         # Hint only. What is technically enforced so far is group
         # membership (governance/policy.py) -- forbidding the same person
-        # would be a governance change (docs/grenzen.md L10).
+        # would be a governance change (docs/limitations.md L10).
         st.warning(person.own_document_hint)
 
     left, right = st.columns(2)
     with left:
-        confirm = st.button("Bestätigen", key=f"f_{thread_id}", type="primary",
-                            disabled=not decision.allowed, use_container_width=True)
+        confirm = st.button(i18n.t("detail.confirm"), key=f"confirm_{thread_id}",
+                            type="primary", disabled=not decision.allowed,
+                            use_container_width=True)
     with right:
-        reject = st.button("Ablehnen", key=f"v_{thread_id}",
-                           disabled=not decision.allowed, use_container_width=True)
+        reject = st.button(i18n.t("detail.reject"), key=f"reject_{thread_id}",
+                           disabled=not decision.allowed,
+                           use_container_width=True)
 
-    if reject and not st.session_state.get(f"ablehnen_bestaetigt_{thread_id}"):
-        st.session_state[f"ablehnen_bestaetigt_{thread_id}"] = True
-        st.warning("Ablehnen beendet den Vorgang endgültig. Zum Fortfahren "
-                   "erneut auf „Ablehnen“ klicken.")
+    if reject and not st.session_state.get(f"reject_confirmed_{thread_id}"):
+        st.session_state[f"reject_confirmed_{thread_id}"] = True
+        st.warning(i18n.t("detail.reject.again"))
         return False
 
     if confirm or reject:
@@ -199,7 +204,7 @@ def decision_form(app, thread_id: str, request: dict, values: dict, *,
             number=request.get("number"),
             cost_center_id=extra_response.get("cost_center_id"),
         ).as_resume()
-        st.session_state.pop(f"ablehnen_bestaetigt_{thread_id}", None)
+        st.session_state.pop(f"reject_confirmed_{thread_id}", None)
         resume(app, thread_id=thread_id, response=response)
         st.rerun()
 
@@ -209,12 +214,12 @@ def decision_form(app, thread_id: str, request: dict, values: dict, *,
 def _outcome(values: dict, status: Status, process: str | None) -> None:
     """Completion card: what actually happened in the end?"""
     if not values.get("completed"):
-        st.info("Der Vorgang wird gerade bearbeitet.")
+        st.info(i18n.t("detail.in_progress"))
         return
 
     text = process_views.result_text(values.get("outcome", ""), process)
 
-    st.markdown("#### Ergebnis")
+    st.markdown(f"#### {i18n.t('detail.result')}")
     if status is Status.COMPLETED:
         st.success(text)
     elif status is Status.REJECTED:
@@ -223,7 +228,7 @@ def _outcome(values: dict, status: Status, process: str | None) -> None:
         st.error(text)
 
     if values.get("error"):
-        st.caption(f"Rückmeldung: {values['error']}")
+        st.caption(i18n.t("detail.feedback", error=values["error"]))
 
     con = connection()
     try:
@@ -241,12 +246,11 @@ def _outcome(values: dict, status: Status, process: str | None) -> None:
                 col.metric(*metric)
 
     if values.get("approved_by"):
-        st.caption(f"Bestätigt von {values['approved_by']}")
+        st.caption(i18n.t("detail.approved_by", approver=values["approved_by"]))
 
     st.caption(
-        "✓ Das Protokoll dieses Systems ist unverändert."
-        if chain.valid else
-        f"✕ Das Protokoll wurde nachträglich verändert. {chain}"
+        i18n.t("detail.chain.valid") if chain.valid
+        else i18n.t("detail.chain.broken", detail=chain)
     )
 
 
@@ -254,7 +258,7 @@ def _document_preview(path: str | None) -> None:
     """Shows the original PDF -- an approver does not decide without the document."""
     if not path or not Path(path).is_file():
         return
-    with st.expander("Beleg ansehen"):
+    with st.expander(i18n.t("detail.view_document")):
         data = base64.b64encode(Path(path).read_bytes()).decode("ascii")
         st.markdown(
             f'<iframe src="data:application/pdf;base64,{data}" '

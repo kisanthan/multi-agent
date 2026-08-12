@@ -8,7 +8,9 @@ creating a second place to maintain.
 **Domain jargon belongs here on purpose.** Every working view is
 deliberately free of "Prozess A", "Human-in-the-loop", or security groups --
 a case worker does not need them. Whoever wants to assess the architecture
-needs exactly them, and finds them in this one place.
+needs exactly them, and finds them in this one place. That holds in either
+language: the English catalog translates the vocabulary, it does not drop
+it.
 """
 
 from __future__ import annotations
@@ -19,22 +21,20 @@ import process_registry
 from agent_registry import REGISTRY, OversightMode
 from config import settings
 from governance import ad
-from ui.shared import style
+from ui.shared import i18n, style
 from ui.cases.steps import steps_for
 
 
 def render() -> None:
     style.css()
-    st.title("Architektur")
-    st.caption("Fachliche Sicht auf das System: welche Rolle handelt in "
-               "welchem Schritt, mit welcher Autonomiestufe und unter welcher "
-               "Aufsicht. Die Arbeitsansichten kommen bewusst ohne diese "
-               "Begriffe aus.")
+    st.title(i18n.t("architecture.title"))
+    st.caption(i18n.t("architecture.caption"))
 
     for config in process_registry.all_processes():
-        st.markdown(f"### Prozess {config.key} · "
-                    f"{config.name}")
-        st.write(config.description)
+        st.markdown("### " + i18n.t("architecture.process_heading",
+                                    key=config.key,
+                                    name=i18n.process_text(config, "name")))
+        st.write(i18n.process_text(config, "description"))
         # All steps shown neutrally: this explains the flow, not a case.
         style.stepper(steps_for(config.key, []))
 
@@ -43,55 +43,56 @@ def render() -> None:
                 continue
             cfg = REGISTRY[step.agent_id]
             marker = "🔒 " if cfg.oversight is OversightMode.HUMAN_IN_THE_LOOP else ""
-            level = (f"Stufe {cfg.autonomy_level.value}"
-                    if cfg.autonomy_level else "keine Stufe")
+            level = (i18n.t("architecture.level", level=cfg.autonomy_level.value)
+                     if cfg.autonomy_level else i18n.t("architecture.no_level"))
             st.markdown(
-                f'<div class="feldzeile">{marker}<b>{step.title}</b> — '
-                f'{cfg.name} · {level} · {cfg.oversight.value} · '
-                f'{cfg.model_class.value}</div>',
+                f'<div class="field-row">{marker}'
+                f'<b>{i18n.step_title(step.node)}</b> — '
+                f'{i18n.agent_text(step.agent_id, "name")} · {level} · '
+                f'{i18n.enum_label("oversight", cfg.oversight.value)} · '
+                f'{i18n.enum_label("model_class", cfg.model_class.value)}</div>',
                 unsafe_allow_html=True,
             )
         st.divider()
 
-    st.markdown("### Agentenkonfiguration")
-    st.caption("Aus `agent_registry.py`. Eine Änderung dort ändert das "
-               "Laufzeitverhalten – die Tabelle ist Durchsetzung, nicht "
-               "Dokumentation.")
+    st.markdown(f"### {i18n.t('architecture.agent_config')}")
+    st.caption(i18n.t("architecture.agent_config.caption"))
+    column = {k: i18n.t(f"architecture.column.{k}") for k in
+              ("agent", "type", "autonomy", "oversight", "model_class",
+               "processes", "write")}
     st.dataframe(
         [{
-            "Agent": cfg.name,
-            "Typ": cfg.type.value,
+            column["agent"]: i18n.agent_text(agent_id, "name"),
+            column["type"]: i18n.enum_label("type", cfg.type.value),
             # `str(...)`, not the bare int: components without an autonomy
             # level (reader, policy, audit) render "—" here, and a column
             # mixing int and str has no Arrow type -- st.dataframe then
             # fails to serialize it and the whole page raises.
-            "Autonomiestufe": (str(cfg.autonomy_level.value)
-                               if cfg.autonomy_level else "—"),
-            "Aufsicht": cfg.oversight.value,
-            "Modellklasse": cfg.model_class.value,
-            "Prozesse": ", ".join(cfg.processes),
-            "Schreibrecht": "ja" if cfg.can_write else "nein",
-        } for cfg in REGISTRY.values()],
+            column["autonomy"]: (str(cfg.autonomy_level.value)
+                                 if cfg.autonomy_level else "—"),
+            column["oversight"]: i18n.enum_label("oversight", cfg.oversight.value),
+            column["model_class"]: i18n.enum_label("model_class",
+                                                   cfg.model_class.value),
+            column["processes"]: ", ".join(cfg.processes),
+            column["write"]: i18n.t("word.yes" if cfg.can_write else "word.no"),
+        } for agent_id, cfg in REGISTRY.items()],
         use_container_width=True, hide_index=True,
     )
 
-    st.markdown("### Human-in-the-loop-Punkte")
-    for cfg in REGISTRY.values():
+    st.markdown(f"### {i18n.t('architecture.hitl_points')}")
+    for agent_id, cfg in REGISTRY.items():
         if cfg.oversight is OversightMode.HUMAN_IN_THE_LOOP:
-            st.warning(f"**{cfg.name}** — {cfg.description}")
+            st.warning(f"**{i18n.agent_text(agent_id, 'name')}** — "
+                       f"{i18n.agent_text(agent_id, 'description')}")
 
-    st.markdown("### Berechtigungen und Betrieb")
+    st.markdown(f"### {i18n.t('architecture.permissions')}")
     st.markdown(
-        f'<div class="feldzeile"><b>Belege einspeisen:</b> Mitglieder von '
-        f'<code>{ad.READER_GROUP}</code> — geprüft im Reader-Tool, vor jedem '
-        f'Dateizugriff (Least Privilege).</div>'
-        f'<div class="feldzeile"><b>Freigaben erteilen:</b> Mitglieder von '
-        f'<code>{ad.APPROVAL_GROUP}</code> — Vier-Augen-Prinzip an den '
-        f'Human-in-the-loop-Punkten.</div>'
-        f'<div class="feldzeile"><b>Modell-Modus:</b> '
+        f'<div class="field-row"><b>{i18n.t("architecture.feed")}:</b> '
+        f'{i18n.t("architecture.feed.text", group=ad.READER_GROUP)}</div>'
+        f'<div class="field-row"><b>{i18n.t("architecture.approve")}:</b> '
+        f'{i18n.t("architecture.approve.text", group=ad.APPROVAL_GROUP)}</div>'
+        f'<div class="field-row"><b>{i18n.t("architecture.model_mode")}:</b> '
         f'<code>{settings.model_mode.value}</code></div>',
         unsafe_allow_html=True,
     )
-    st.caption("Diese Gruppennamen erscheinen nur hier. In den "
-               "Arbeitsansichten steht stattdessen, was eine Person tun kann "
-               "und was nicht.")
+    st.caption(i18n.t("architecture.footer"))
