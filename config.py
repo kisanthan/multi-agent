@@ -23,6 +23,29 @@ MANIFEST_PATH = DATA_DIR / "manifest.json"
 MODEL_OVERRIDES_PATH = DATA_DIR / "model_overrides.json"
 
 
+class UnknownSettingError(Exception):
+    """A key in `.env` that no setting reads.
+
+    Its own exception rather than pydantic's `extra="forbid"`: the useful
+    thing to say here is not "extra input not permitted" but *which* name
+    was meant instead.
+    """
+
+
+# The rename from German to English identifiers. A `.env` written before it
+# is not partially valid -- it is inert: every key falls back to the default
+# below while looking, from the outside, like a working configuration. The
+# old names are kept here purely so the error can say "you meant X".
+RENAMED_KEYS = {
+    "BETRAG_TOLERANZ_EUR": "AMOUNT_TOLERANCE_EUR",
+    "MODELL_MODUS": "MODEL_MODE",
+    "OLLAMA_MODELL_KLEIN": "OLLAMA_MODEL_SMALL",
+    "OLLAMA_MODELL_VISION": "OLLAMA_MODEL_VISION",
+    "CLOUD_MODELL_FRONTIER": "CLOUD_MODEL_FRONTIER",
+    "CLOUD_MODELL_KLEIN": "CLOUD_MODEL_SMALL",
+}
+
+
 class ModelMode(str, Enum):
     LOCAL = "lokal"
     HYBRID = "hybrid"
@@ -34,7 +57,58 @@ class ReaderParser(str, Enum):
     DOCLING = "docling"
 
 
+def _env_file_keys(path: Path) -> list[str]:
+    """The assignment names in a `.env` file, in file order.
+
+    A deliberately small parser: all this needs to know is what stands left
+    of an `=`. Reading the file through pydantic-settings instead would mean
+    asking the very layer that is being checked.
+    """
+    keys = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key = line.split("=", 1)[0].strip()
+        if key.startswith("export "):
+            key = key.removeprefix("export ").strip()
+        if key:
+            keys.append(key)
+    return keys
+
+
+def check_env_file(path: Path, known: set[str]) -> None:
+    """Refuses a `.env` carrying keys that no setting reads.
+
+    Raises instead of warning, and checks the file rather than the process
+    environment. Both follow from the failure this exists to prevent: an
+    ignored key is indistinguishable from a correct one at runtime, and the
+    place it hurts most is the Streamlit UI, where a warning on stderr is
+    invisible. The OS environment is deliberately not checked -- it is full
+    of names that have nothing to do with this project, and only the file is
+    something a person wrote *for* it.
+    """
+    if not path.is_file():
+        return
+
+    unknown = [k for k in _env_file_keys(path) if k.upper() not in known]
+    if not unknown:
+        return
+
+    lines = [f"{path.name}: Schluessel, die keine Einstellung liest -- "
+             "sie wirken nicht, es greift jeweils der Standardwert."]
+    for key in unknown:
+        renamed = RENAMED_KEYS.get(key.upper())
+        lines.append(f"  - {key}" + (f"   heisst jetzt: {renamed}" if renamed else ""))
+    lines.append("")
+    lines.append("Gueltige Namen stehen vollstaendig in .env.example.")
+    raise UnknownSettingError("\n".join(lines))
+
+
 class Settings(BaseSettings):
+    # `extra="ignore"` stays: the process environment legitimately holds
+    # names this class knows nothing about. Unknown keys in the *file* are a
+    # different matter and are caught by check_env_file() below.
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env", env_file_encoding="utf-8", extra="ignore"
     )
@@ -64,5 +138,7 @@ class Settings(BaseSettings):
     navision_url: str = "http://localhost:8001"
     elo_url: str = "http://localhost:8002"
 
+
+check_env_file(PROJECT_ROOT / ".env", {f.upper() for f in Settings.model_fields})
 
 settings = Settings()

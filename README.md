@@ -238,14 +238,16 @@ Coverage (optional, `pytest-cov` is in `requirements.txt`):
   --cov=llm --cov=tools --cov=mocks --cov=ui --cov-report=term-missing
 ```
 
-As of this writing: 85% overall, 86-98% across `agents/`, `governance/`,
+As of this writing: 82% overall, 95-97% across `agents/`, `governance/`,
 `graph/`, and `llm/` -- the layers the thesis's architectural claims rest
-on. The one honest, expected gap is the Streamlit UI's approval-decision
-screens (`ui/cases/detail.py`, `ui/cases/run.py`), which have no dedicated
-UI-level tests (see `tests/test_ui_smoke.py`'s own docstring); the
-authorization logic they call into is covered directly at its source
-(`tests/test_scenarios.py`'s unauthorized-approver tests,
-`tests/test_booking.py`).
+on. The honest, expected gap is the Streamlit UI's decision screens
+(`ui/cases/detail.py`, `ui/cases/run.py`, `ui/cases/approval_dialog.py`)
+and the model-configuration page (`ui/pages/models.py`), which have no
+dedicated UI-level tests (see `tests/test_ui_smoke.py`'s own docstring).
+The logic behind them is covered directly at its source all the same: the
+authorization checks by `tests/test_scenarios.py`'s unauthorized-approver
+tests and `tests/test_booking.py`, the per-agent model overrides by
+`tests/test_llm.py`.
 
 ## Project structure
 

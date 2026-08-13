@@ -16,6 +16,22 @@ from config import ModelMode, settings
 from llm import preflight
 
 
+@pytest.fixture(autouse=True)
+def pinned_model_names(monkeypatch):
+    """Fixes both Ollama model names for every test in this file.
+
+    Without this, the assertions below read whatever `.env` happens to say
+    on the machine running them -- and one of them requires the small and
+    the vision model to be *different* names, which no configuration
+    promises. Pointing both at one model is legitimate and deliberate: the
+    reader hands the classification agent markdown, not an image, so a text
+    model covers both roles. This suite went red on exactly that the day a
+    stale `.env` stopped being silently ignored.
+    """
+    monkeypatch.setattr(settings, "ollama_model_small", "test-klein:1b")
+    monkeypatch.setattr(settings, "ollama_model_vision", "test-vision:1b")
+
+
 # ------------------------------------------------------------ required_models()
 
 def test_required_models_under_local_mode_includes_both_roles(monkeypatch):
