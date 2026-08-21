@@ -70,15 +70,18 @@ then reports every key that file is still missing.
 
 ## 4. Configuring AI models per agent
 
-Every step in the workflow that calls a language model at all -- routing
-(`orchestrator`), classification & extraction (`klassifikation`, shared by
-both processes), booking (`buchung`, process A / payment confirmation), and
-archiving (`elo`, process B / incoming invoice) -- can be pointed at a
-specific model, live, from the UI's **KI-Modelle** page. This sits
-deliberately apart from the **Architektur** page: Architektur reads the
-static, risk-based default assignment (`agent_registry.py` -- a thesis
-architectural claim); KI-Modelle lets an operator override that default per
-agent, per instance, without editing `.env` or restarting the app.
+The registry exposes model profiles for routing (`orchestrator`),
+classification & extraction (`klassifikation`), booking (`buchung`), and
+archiving (`elo`) on the **KI-Modelle** page. In the current implementation,
+however, only `klassifikation` actually calls `llm/client.py`; routing,
+booking, and archiving are deterministic code. Their entries are risk/target
+profiles, not active runtime dependencies. This distinction and its current
+preflight consequence are documented in [architecture.md](architecture.md).
+
+An exposed profile can be pointed at a specific model live, without editing
+`.env` or restarting. For `klassifikation` the override affects the next
+real model call. For the other three profiles it is currently stored and
+displayed but has no inference call on which to take effect.
 
 **How the default is derived** (unchanged, see
 [architecture.md](architecture.md)): each agent has a risk/model class in
@@ -96,14 +99,15 @@ its current effective provider and model id, and a small form: pick
 "Lokal (Ollama)" or "Cloud (Anthropic)", enter the model id (any name your
 Ollama instance has loaded, or any Anthropic model id), and press
 "Speichern". The change is written to `data/model_overrides.json` and
-applies to the very next call that agent makes -- no restart, and it also
-takes effect for `demo.py` and `demo.py --check`, since both go through the
-same `llm/client.py::choose_model` that the UI does. Press
+applies to the next call that profile makes -- for the current code, only
+`klassifikation` has such a call. It also affects `demo.py` and
+`demo.py --check`, since both go through the same
+`llm/client.py::choose_model` that the UI does. Press
 "Auf Standard zurücksetzen" to drop the override and fall back to the
 mode-derived default again.
 
-An override always wins over `MODEL_MODE` for that one agent; every other
-agent without an override keeps following the global mode as before. Every
+An override always wins over `MODEL_MODE` for that one profile; every other
+profile without an override keeps following the global mode as before. Every
 override change is written to the audit trail ("Protokoll" page), the same
 tamper-evident chain everything else in the system is recorded in.
 

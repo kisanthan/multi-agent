@@ -84,10 +84,13 @@ is checked with:
 For cloud or hybrid operation, set `MODEL_MODE=hybrid` (or `cloud`) and
 put `ANTHROPIC_API_KEY` in `.env`.
 
-Each model-calling agent (orchestrator, classification, booking, archiving)
-can also be pointed at a specific local or cloud model individually, live,
-from the UI's **KI-Modelle** page -- no `.env` edit or restart needed; see
-[docs/guide.md](docs/guide.md#4-configuring-ai-models-per-agent).
+The UI's **KI-Modelle** page exposes the registry's model profiles for
+orchestrator, classification, booking, and archiving. Currently only the
+classification/extraction agent actually performs model inference; the
+other profiles describe the intended risk/model assignment but their
+runtime logic is deterministic. See
+[docs/architecture.md](docs/architecture.md#agentenmodell-versus-reale-llm-nutzung)
+and [docs/guide.md](docs/guide.md#4-configuring-ai-models-per-agent).
 
 ## Demo
 
