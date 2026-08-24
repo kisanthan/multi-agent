@@ -1,0 +1,4 @@
+INFO:     127.0.0.1:53306 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51959 - "GET / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51966 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55793 - "GET /docs HTTP/1.1" 200 OK
