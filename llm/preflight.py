@@ -12,8 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from agent_registry import REGISTRY, ModelClass
-from config import ModelMode, settings
-from llm.client import choose_model
+from config import ModelMode, ProfileId, Provider, settings
+from llm.client import LLMUnreachable, choose_model, choose_profile, list_models
 
 
 @dataclass
@@ -44,8 +44,43 @@ def required_models() -> list[str]:
     return sorted(ids)
 
 
+def check_profile(profile_id: ProfileId | str) -> Readiness:
+    """Check one effective profile without making a billable model request."""
+    choice = choose_profile(profile_id)
+    try:
+        available = list_models(choice.provider)
+    except LLMUnreachable as e:
+        return Readiness(False, [str(e)], required_models=[choice.model_id])
+    normalized = {n.split(":")[0] if n.endswith(":latest") else n for n in available}
+    present = choice.model_id in available or choice.model_id in normalized
+    if not present:
+        return Readiness(
+            False,
+            [f"Verbindung steht, Modell {choice.model_id!r} wurde aber nicht gefunden."],
+            required_models=[choice.model_id], available_models=available,
+        )
+    return Readiness(
+        True, [f"{choice.provider}: {choice.model_id} ist verfügbar."],
+        required_models=[choice.model_id], available_models=available,
+    )
+
+
+def check_profiles() -> dict[ProfileId, Readiness]:
+    return {profile_id: check_profile(profile_id) for profile_id in ProfileId}
+
+
 def check() -> Readiness:
     """Checks reachability and loaded models. Loads nothing itself."""
+    if any(getattr(settings, f"llm_{p.value}_provider") is not None for p in ProfileId):
+        checks = check_profiles()
+        return Readiness(
+            all(result.ready for result in checks.values()),
+            [f"{profile.value}: {message}"
+             for profile, result in checks.items() for message in result.messages],
+            required_models=[m for result in checks.values() for m in result.required_models],
+            available_models=sorted({m for result in checks.values()
+                                     for m in result.available_models}),
+        )
     mode = settings.model_mode
 
     if mode is ModelMode.CLOUD:
@@ -55,6 +90,10 @@ def check() -> Readiness:
 
     needed = required_models()
     if not needed:
+        if mode is ModelMode.HYBRID:
+            if not settings.anthropic_api_key:
+                return Readiness(False, ["MODEL_MODE=hybrid, aber ANTHROPIC_API_KEY ist leer."])
+            return Readiness(True, ["Hybrid-Modus: alle aktiven Modellprofile laufen in der Cloud."])
         return Readiness(True, ["Keine lokalen Modelle noetig."])
 
     import httpx

@@ -212,7 +212,7 @@ def enum_label(group: str, value: str) -> str:
 # --- Language picker --------------------------------------------------------
 
 def picker(label_key: str = "app.language") -> None:
-    """Sidebar control. Writes straight into the session, so the rerun that
+    """Language setting. Writes straight into the session, so the rerun that
     follows the selection already renders in the new language."""
     import streamlit as st
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from langgraph.types import interrupt
 
-from agents.payment_confirmation import booking, reconciliation
+from agents.payment_confirmation import booking, reconciliation, extraction
 from agents.shared.schemas import DocumentType
 from contracts import (
     ApprovalDecision,
@@ -24,6 +24,46 @@ from governance.audit import Decision, log_entry
 from governance.policy import check_approval
 from graph.nodes.shared import case_reference, connection, note
 from graph.state import Case
+
+
+def node_payment_extraction(state: Case) -> dict:
+    """Use process A's independently configured extraction profile."""
+    con = connection()
+    try:
+        result = extraction.extract_payment(
+            con, markdown=state["markdown"], actor=state["actor"],
+            reference=case_reference(state),
+            profile_snapshot=state.get("model_profiles"),
+        )
+    finally:
+        con.close()
+    if not result.succeeded:
+        if result.unreachable:
+            return {
+                "completed": True,
+                "outcome": CaseOutcome.MODEL_UNAVAILABLE.value,
+                "error": result.escalation,
+                "log": note(state, "extraktion_zahlung",
+                            "Zahlungsextraktion nicht erreichbar – sicher angehalten."),
+            }
+        return {
+            "number": None, "amount_eur": None,
+            "exception_case": True,
+            "exception_reason": result.escalation or "Extraktion fehlgeschlagen",
+            "escalation": result.escalation,
+            "log": note(state, "extraktion_zahlung",
+                        "Zahlungsdaten konnten nicht sicher ausgelesen werden."),
+        }
+    data = result.data
+    return {
+        "number": data.number,
+        "amount_eur": data.amount_eur,
+        "log": note(state, "extraktion_zahlung", "Zahlungsdaten ausgelesen."),
+    }
+
+
+def route_payment_extraction(state: Case) -> str:
+    return "ende" if state.get("completed") else "abgleich"
 
 
 def node_reconciliation(state: Case) -> dict:

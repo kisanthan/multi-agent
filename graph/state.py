@@ -36,6 +36,10 @@ class SharedFields(TypedDict, total=False):
     # checkpoint metadata, because LangGraph does not reliably expose the
     # start time -- but the case list needs it for sorting.
     started_at: str
+    configuration_revision: int
+    # Non-secret provider/model snapshot. Credentials are resolved centrally
+    # and are never persisted in a case checkpoint.
+    model_profiles: dict[str, dict[str, str]]
 
     # --- Reader ---
     markdown: str
@@ -47,9 +51,8 @@ class SharedFields(TypedDict, total=False):
     amount_eur: float | None
     supplier: str | None
     line_items: list[str]
-    # Extracted from the document by the shared classification agent;
-    # only meaningful for process B, but the field belongs here because
-    # that is the node that writes it.
+    # Extracted by the incoming-invoice extraction agent; meaningful only
+    # for process B.
     cost_center_reference: str | None
     escalation: str | None
 

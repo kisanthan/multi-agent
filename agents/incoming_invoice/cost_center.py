@@ -9,7 +9,7 @@ The same reasoning therefore applies to this agent as to the reconciliation
 agent (cf. agents/reconciliation.py, docs/mapping.md I1): the role and
 autonomy level remain valid, but the actual assignment is a deterministic
 database lookup, not a model call. Extracting the reference from the
-document itself is done by the upstream classification/extraction agent.
+document itself is done by the incoming-invoice extraction agent.
 
 "Assignment unique?" (diagram part 3) means here: the extracted reference
 resolves to exactly one cost center. If the reference is missing or

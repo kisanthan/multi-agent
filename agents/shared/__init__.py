@@ -1,9 +1,7 @@
 """Agent code genuinely shared by both processes.
 
-`schemas.py` (the Pydantic extraction schemas: `DocumentType`,
-`Classification`) and `classification.py` (the classification & extraction
-agent) sit here because neither belongs to one process more than the
-other -- classification is what determines *which* process a case belongs
-to, before that is even known. Everything that IS process-specific lives
-under `agents/payment_confirmation/` or `agents/incoming_invoice/` instead.
+`schemas.py` defines the structured contracts and `classification.py`
+contains the shared document router. The router decides only *which*
+process owns a case; process-specific extraction lives below
+`agents/payment_confirmation/` and `agents/incoming_invoice/`.
 """

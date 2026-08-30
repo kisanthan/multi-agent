@@ -118,7 +118,7 @@ def as_table(rows: list[CaseOverview], *, key: str,
     if config:
         columns.remove(head["document_kind"])
 
-    st.dataframe(
+    style.dataframe(
         [{
             head["document"]: z.filename,
             **({} if config else

@@ -1,5 +1,5 @@
 # --- Secrets ----------------------------------------------------------------
-# .env holds the Anthropic API key. .env.example is the tracked template.
+# .env holds local provider credentials. .env.example is the tracked template.
 .env
 .env.*
 !.env.example
@@ -30,6 +30,7 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 .dmypy.json
+.runtime_logs/
 
 # --- Editors and tooling ----------------------------------------------------
 .claude/

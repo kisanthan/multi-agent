@@ -37,7 +37,6 @@ def pinned_model_names(monkeypatch):
 def test_required_models_under_local_mode_includes_both_roles(monkeypatch):
     monkeypatch.setattr(settings, "model_mode", ModelMode.LOCAL)
     needed = preflight.required_models()
-    assert settings.ollama_model_small in needed
     assert settings.ollama_model_vision in needed
 
 
@@ -52,8 +51,7 @@ def test_required_models_under_hybrid_mode_excludes_risk_bearing_roles(monkeypat
     risk-bearing roles (klassifikation, buchung) go to Anthropic."""
     monkeypatch.setattr(settings, "model_mode", ModelMode.HYBRID)
     needed = preflight.required_models()
-    assert settings.ollama_model_small in needed
-    assert settings.ollama_model_vision not in needed
+    assert needed == []
 
 
 # ------------------------------------------------------------------------ check()
@@ -102,8 +100,8 @@ def test_check_local_mode_missing_models_are_named(monkeypatch):
 
     readiness = preflight.check()
     assert readiness.ready is False
-    assert settings.ollama_model_small in readiness.required_models
-    assert any(settings.ollama_model_small in m for m in readiness.messages)
+    assert settings.ollama_model_vision in readiness.required_models
+    assert any(settings.ollama_model_vision in m for m in readiness.messages)
 
 
 def test_check_local_mode_all_models_loaded_is_ready(monkeypatch):
@@ -114,8 +112,7 @@ def test_check_local_mode_all_models_loaded_is_ready(monkeypatch):
             pass
 
         def json(self):
-            return {"models": [{"name": settings.ollama_model_small},
-                               {"name": settings.ollama_model_vision}]}
+            return {"models": [{"name": settings.ollama_model_vision}]}
 
     monkeypatch.setattr("httpx.get", lambda *a, **k: FakeResponse())
 
@@ -127,15 +124,14 @@ def test_check_local_mode_accepts_latest_tag_normalization(monkeypatch):
     """Ollama lists an untagged pull as 'name:latest'; a required model
     named without a tag must still match."""
     monkeypatch.setattr(settings, "model_mode", ModelMode.LOCAL)
-    monkeypatch.setattr(settings, "ollama_model_small", "qwen3")
+    monkeypatch.setattr(settings, "ollama_model_vision", "qwen2.5vl")
 
     class FakeResponse:
         def raise_for_status(self):
             pass
 
         def json(self):
-            return {"models": [{"name": "qwen3:latest"},
-                               {"name": settings.ollama_model_vision}]}
+            return {"models": [{"name": "qwen2.5vl:latest"}]}
 
     monkeypatch.setattr("httpx.get", lambda *a, **k: FakeResponse())
 
@@ -146,15 +142,6 @@ def test_check_local_mode_accepts_latest_tag_normalization(monkeypatch):
 def test_check_hybrid_mode_needs_api_key_in_addition_to_ollama(monkeypatch):
     monkeypatch.setattr(settings, "model_mode", ModelMode.HYBRID)
     monkeypatch.setattr(settings, "anthropic_api_key", "")
-
-    class FakeResponse:
-        def raise_for_status(self):
-            pass
-
-        def json(self):
-            return {"models": [{"name": settings.ollama_model_small}]}
-
-    monkeypatch.setattr("httpx.get", lambda *a, **k: FakeResponse())
 
     readiness = preflight.check()
     assert readiness.ready is False

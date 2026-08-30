@@ -95,13 +95,13 @@ REGISTRY: dict[str, AgentConfig] = {
         type=AgentType.ORCHESTRATOR,
         autonomy_level=None,
         oversight=OversightMode.HUMAN_ON_THE_LOOP,
-        model_class=ModelClass.LOCAL_SMALL,
+        model_class=ModelClass.NO_MODEL,
         processes=("A", "B"),
         can_write=False,
         description="Routet nach Dokumenttyp und steuert den Workflow.",
     ),
     "klassifikation": AgentConfig(
-        name="Klassifikations- & Extraktions-Agent",
+        name="Belegart-Router",
         type=AgentType.SHARED_DOMAIN,
         # The table names "1-2"; the upper bound governs, because the policy
         # checks against the highest claimed level.
@@ -110,8 +110,30 @@ REGISTRY: dict[str, AgentConfig] = {
         model_class=ModelClass.VISION,
         processes=("A", "B"),
         can_write=False,
-        description="Bestimmt in einem Durchgang Dokumenttyp UND extrahiert die "
-        "relevanten Felder.",
+        description="Bestimmt ausschließlich die Belegart und übergibt danach "
+                    "an den passenden prozessspezifischen Extraktions-Agenten.",
+    ),
+    "extraktion_zahlung": AgentConfig(
+        name="Extraktions-Agent Zahlungsbestätigung",
+        type=AgentType.SHARED_DOMAIN,
+        autonomy_level=AutonomyLevel.PROPOSAL,
+        oversight=OversightMode.HUMAN_ON_THE_LOOP,
+        model_class=ModelClass.VISION,
+        processes=("A",),
+        can_write=False,
+        description="Extrahiert Rechnungsnummer und Zahlungsbetrag nach der "
+                    "Zuordnung zu Prozess A.",
+    ),
+    "extraktion_rechnung": AgentConfig(
+        name="Extraktions-Agent Eingangsrechnung",
+        type=AgentType.SHARED_DOMAIN,
+        autonomy_level=AutonomyLevel.PROPOSAL,
+        oversight=OversightMode.HUMAN_ON_THE_LOOP,
+        model_class=ModelClass.VISION,
+        processes=("B",),
+        can_write=False,
+        description="Extrahiert Lieferant, Betrag, Positionen und "
+                    "Kostenstellenreferenz nach der Zuordnung zu Prozess B.",
     ),
     "abgleich": AgentConfig(
         name="Abgleich-Agent",
@@ -134,7 +156,7 @@ REGISTRY: dict[str, AgentConfig] = {
         # human-in-the-loop -- every booking requires human approval.
         # Coupling "rising autonomy -> tighter oversight" (chapter 2.2).
         oversight=OversightMode.HUMAN_IN_THE_LOOP,
-        model_class=ModelClass.FRONTIER,
+        model_class=ModelClass.NO_MODEL,
         processes=("A",),
         can_write=True,
         description="Verbucht die Zahlung im ERP, Status offen -> bezahlt. "
@@ -164,7 +186,7 @@ REGISTRY: dict[str, AgentConfig] = {
         type=AgentType.SHARED_DOMAIN,
         autonomy_level=AutonomyLevel.REVERSIBLE_WRITE,
         oversight=OversightMode.HUMAN_ON_THE_LOOP,
-        model_class=ModelClass.LOCAL_SMALL,
+        model_class=ModelClass.NO_MODEL,
         processes=("B",),
         can_write=True,
         description="Archiviert die Rechnung revisionssicher im DMS. "

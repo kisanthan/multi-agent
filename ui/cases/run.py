@@ -14,6 +14,7 @@ from pathlib import Path
 
 import streamlit as st
 
+from config import settings
 from ui.shared import i18n
 
 
@@ -52,6 +53,8 @@ def start(app, *, path: Path | str, actor: str, upload_id: str | None = None) ->
         "upload_id": upload_id,
         "case_id": thread_id,
         "started_at": datetime.now(timezone.utc).isoformat(),
+        "configuration_revision": settings.configuration_revision,
+        "model_profiles": settings.profile_snapshot(),
         "log": [],
     }, i18n.t("run.running", filename=filename))
 

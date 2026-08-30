@@ -30,7 +30,7 @@ def test_process_a_waits_for_booking_approval():
     yet, the node only requested approval.
     """
     steps = steps_for(
-        "A", _log("reader", "klassifikation", "abgleich", "buchung"),
+        "A", _log("reader", "klassifikation", "extraktion_zahlung", "abgleich", "buchung"),
         waiting_on="klaerfall", status=Status.WAITING_FOR_APPROVAL,
     )
     by_node = _by_node(steps)
@@ -42,7 +42,7 @@ def test_process_a_waits_for_booking_approval():
 
 def test_process_a_booked_after_approval():
     steps = steps_for(
-        "A", _log("reader", "klassifikation", "abgleich", "buchung",
+        "A", _log("reader", "klassifikation", "extraktion_zahlung", "abgleich", "buchung",
                   "klaerfall", "buchung"),
         status=Status.COMPLETED,
     )
@@ -56,7 +56,7 @@ def test_process_a_booked_after_approval():
 def test_process_a_target_system_rejects():
     """Navision rejects the booking -- the step has failed."""
     steps = steps_for(
-        "A", _log("reader", "klassifikation", "abgleich", "buchung",
+        "A", _log("reader", "klassifikation", "extraktion_zahlung", "abgleich", "buchung",
                   "klaerfall", "buchung"),
         status=Status.FAILED,
     )
@@ -66,7 +66,7 @@ def test_process_a_target_system_rejects():
 
 def test_rejected_case_does_not_book():
     steps = steps_for(
-        "A", _log("reader", "klassifikation", "abgleich", "buchung", "klaerfall"),
+        "A", _log("reader", "klassifikation", "extraktion_zahlung", "abgleich", "buchung", "klaerfall"),
         status=Status.REJECTED,
     )
 
@@ -78,7 +78,7 @@ def test_rejected_case_does_not_book():
 def test_process_b_skips_approval_on_unique_reference():
     """The normal case in B: human-on-the-loop, no approval needed."""
     steps = steps_for(
-        "B", _log("reader", "klassifikation", "kostenstelle", "elo"),
+        "B", _log("reader", "klassifikation", "extraktion_rechnung", "kostenstelle", "elo"),
         status=Status.COMPLETED,
     )
     by_node = _by_node(steps)
@@ -89,7 +89,7 @@ def test_process_b_skips_approval_on_unique_reference():
 
 def test_process_b_waits_for_cost_center_approval():
     steps = steps_for(
-        "B", _log("reader", "klassifikation", "kostenstelle"),
+        "B", _log("reader", "klassifikation", "extraktion_rechnung", "kostenstelle"),
         waiting_on="kostenstellen_freigabe", status=Status.WAITING_FOR_APPROVAL,
     )
     by_node = _by_node(steps)
@@ -101,7 +101,7 @@ def test_process_b_waits_for_cost_center_approval():
 
 def test_process_b_archived_after_approval():
     steps = steps_for(
-        "B", _log("reader", "klassifikation", "kostenstelle", "freigabe", "elo"),
+        "B", _log("reader", "klassifikation", "extraktion_rechnung", "kostenstelle", "freigabe", "elo"),
         status=Status.COMPLETED,
     )
 

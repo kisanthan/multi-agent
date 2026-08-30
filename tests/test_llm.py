@@ -56,33 +56,32 @@ def model_responds(*responses, model: str = "qwen3:8b", provider: str = "ollama"
 
 def test_local_mode_uses_ollama_everywhere():
     with patch.object(settings, "model_mode", ModelMode.LOCAL):
-        for agent in ("orchestrator", "klassifikation", "buchung", "elo"):
+        for agent in ("klassifikation", "extraktion_zahlung", "extraktion_rechnung"):
             assert choose_model(agent).provider == "ollama"
 
 
 def test_hybrid_mode_splits_by_risk_class():
     """The core claim of teil2_ki_modelle.png, followed through in code."""
     with patch.object(settings, "model_mode", ModelMode.HYBRID):
-        # Reading/uncritical roles stay local -> data sovereignty.
-        assert choose_model("orchestrator").provider == "ollama"
-        assert choose_model("elo").provider == "ollama"
-        # Risk-bearing roles get a frontier model.
-        assert choose_model("buchung").provider == "anthropic"
+        # All actual model calls use the legacy frontier route; the remaining
+        # agents are deterministic and therefore do not call a provider.
         assert choose_model("klassifikation").provider == "anthropic"
+        assert choose_model("extraktion_zahlung").provider == "anthropic"
 
 
 def test_cloud_mode_uses_anthropic_everywhere():
     with patch.object(settings, "model_mode", ModelMode.CLOUD):
         assert choose_model("klassifikation").provider == "anthropic"
-        assert choose_model("buchung").provider == "anthropic"
+        assert choose_model("extraktion_rechnung").provider == "anthropic"
 
 
 def test_frontier_agent_gets_frontier_model():
     with patch.object(settings, "model_mode", ModelMode.HYBRID):
-        assert choose_model("buchung").model_id == settings.cloud_model_frontier
+        assert choose_model("extraktion_zahlung").model_id == settings.cloud_model_frontier
 
 
-@pytest.mark.parametrize("agent_id", ["reader", "policy", "audit", "abgleich", "kostenstelle"])
+@pytest.mark.parametrize("agent_id", ["reader", "policy", "audit", "abgleich",
+                                      "kostenstelle", "orchestrator", "buchung", "elo"])
 def test_deterministic_components_get_no_model(agent_id):
     """Reader/Policy/Audit AND the deterministically working domain agents
     (reconciliation, cost-center -- exact lookup) never call a language
@@ -102,22 +101,22 @@ def _overrides_file(tmp_path, monkeypatch):
 
 def test_no_override_falls_back_to_default():
     with patch.object(settings, "model_mode", ModelMode.LOCAL):
-        assert choose_model("elo").provider == "ollama"
+        assert choose_model("klassifikation").provider == "ollama"
 
 
 def test_override_wins_over_mode():
-    save_override("buchung", "ollama", "qwen3:8b")
+    save_override("klassifikation", "ollama", "qwen3:8b")
     with patch.object(settings, "model_mode", ModelMode.CLOUD):
-        choice = choose_model("buchung")
+        choice = choose_model("klassifikation")
     assert choice.provider == "ollama"
     assert choice.model_id == "qwen3:8b"
 
 
 def test_clear_override_restores_default():
-    save_override("elo", "anthropic", "claude-haiku-4-5")
-    clear_override("elo")
+    save_override("klassifikation", "anthropic", "claude-haiku-4-5")
+    clear_override("klassifikation")
     with patch.object(settings, "model_mode", ModelMode.LOCAL):
-        assert choose_model("elo").provider == "ollama"
+        assert choose_model("klassifikation").provider == "ollama"
 
 
 def test_save_override_rejects_unknown_agent():
@@ -132,12 +131,12 @@ def test_save_override_rejects_model_less_agent():
 
 def test_save_override_rejects_unsupported_provider():
     with pytest.raises(ValueError, match="Anbieter"):
-        save_override("elo", "openai", "gpt-x")
+        save_override("klassifikation", "unsupported", "model-x")
 
 
 def test_save_override_rejects_empty_model_id():
     with pytest.raises(ValueError, match="Modell-ID"):
-        save_override("elo", "ollama", "  ")
+        save_override("klassifikation", "ollama", "  ")
 
 
 def test_load_overrides_empty_when_file_missing():

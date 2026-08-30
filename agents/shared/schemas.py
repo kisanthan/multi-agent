@@ -19,14 +19,40 @@ class DocumentType(str, Enum):
     UNKNOWN = "unbekannt"
 
 
-class Classification(BaseModel):
-    """Result of the classification & extraction agent.
+class DocumentRouting(BaseModel):
+    """The shared router decides only which process owns the document."""
 
-    Type AND fields in a single pass (required by the functional concept).
-    The fields are optional because they are populated differently depending
-    on the document type -- a required field that a given document simply
-    does not have would force the model to invent one.
-    """
+    type: DocumentType = Field(
+        description="Dokumenttyp. 'zahlungsbestaetigung' = Bank bestaetigt eine "
+                    "Zahlung; 'eingangsrechnung' = Lieferant fordert Geld."
+    )
+
+
+class PaymentExtraction(BaseModel):
+    number: str | None = Field(
+        default=None, description="Rechnungs- oder Bestellnummer im Verwendungszweck."
+    )
+    amount_eur: float | None = Field(
+        default=None, description="Gezahlter Gesamtbetrag in Euro als Zahl."
+    )
+
+
+class InvoiceExtraction(BaseModel):
+    number: str | None = Field(default=None, description="Rechnungsnummer.")
+    amount_eur: float | None = Field(
+        default=None, description="Gesamtbetrag in Euro als Zahl."
+    )
+    supplier: str | None = Field(default=None, description="Name des Lieferanten.")
+    line_items: list[str] = Field(
+        default_factory=list, description="Bezeichnungen der Rechnungspositionen."
+    )
+    cost_center_reference: str | None = Field(
+        default=None, description="Kostenstellenreferenz, z.B. KTR-ITINFRA."
+    )
+
+
+class Classification(BaseModel):
+    """Legacy combined result retained for stored cases and compatibility."""
 
     type: DocumentType = Field(
         description="Dokumenttyp. 'zahlungsbestaetigung' = Bank bestaetigt eine "

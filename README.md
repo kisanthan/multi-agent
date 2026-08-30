@@ -35,7 +35,7 @@ models per agent. This README stays the terser reference.
 | Language | Python 3.12+ (tested on 3.14) | |
 | Orchestration | LangGraph 1.2 (`interrupt()` + SQLite checkpointer) | May 2026 |
 | PDF → Markdown | PyMuPDF4LLM (primary), Docling (via config) | |
-| Models | Ollama (local) and/or Anthropic (cloud), switchable per agent | |
+| Models | Ollama (local), Google, Anthropic, OpenAI; separate process profiles | |
 | Persistence / mocks | SQLite, FastAPI | |
 | UI | Streamlit (case cockpit, approval as a modal dialog) | |
 
@@ -81,16 +81,14 @@ is checked with:
 .venv/bin/python demo.py --check
 ```
 
-For cloud or hybrid operation, set `MODEL_MODE=hybrid` (or `cloud`) and
-put `ANTHROPIC_API_KEY` in `.env`.
-
-The UI's **KI-Modelle** page exposes the registry's model profiles for
-orchestrator, classification, booking, and archiving. Currently only the
-classification/extraction agent actually performs model inference; the
-other profiles describe the intended risk/model assignment but their
-runtime logic is deterministic. See
-[docs/architecture.md](docs/architecture.md#agentenmodell-versus-reale-llm-nutzung)
-and [docs/guide.md](docs/guide.md#4-configuring-ai-models-per-agent).
+`MODEL_MODE` remains supported for existing installations. The UI page
+**Agentenkonfiguration** is the preferred configuration path. Each of the
+three AI agents has its own area with provider-specific connection fields,
+connection status, dynamically discovered models and a custom model-id option.
+Google supports API key or Cloud OAuth, Anthropic API key or a
+developer-workspace profile, and OpenAI an API key. Consumer ChatGPT and
+Claude subscriptions do not include API usage. See
+[docs/guide.md](docs/guide.md#4-configuring-ai-models-per-agent).
 
 ## Demo
 
@@ -143,11 +141,13 @@ currently has:
 | | Alle Vorgänge | `/cases` | all cases of both processes with search, filter, and date range |
 | **Vorgangsarten** | Zahlungsbestätigung | `/payment-confirmation` | metrics, open and completed cases — process A only |
 | | Eingangsrechnung | `/incoming-invoice` | the same for process B |
-| **Nachweis** | Protokoll | `/audit-trail` | hash-chained audit trail, filterable by case, step, and decision; CSV export |
+| **Nachweis** | Protokoll | `/record` | hash-chained audit trail, filterable by case, step, and decision; CSV export |
 | | Architektur | `/architecture` | both processes as a flow plus the agent registry (autonomy level, oversight, model class) |
-| **Konfiguration** | KI-Modelle | `/ai-models` | live, per-agent model configuration -- local or cloud, no restart |
+| **System** | Einstellungen | `/preferences` | personal interface settings, including language and light/dark appearance |
+| | Agentenkonfiguration | `/settings` | provider connection, status and selectable models per agent profile; parser and payment tolerance; only configuration admins may edit |
 
-**German or English**, switchable in the sidebar at any time. The catalogs
+**German or English**, switchable under **System → Einstellungen** at
+any time. The catalogs
 are one flat JSON per language under [ui/locales/](ui/locales/); the rules
 for what belongs in them live in
 [ui/shared/i18n.py](ui/shared/i18n.py). Two of those rules matter beyond
@@ -245,23 +245,23 @@ As of this writing: 82% overall, 95-97% across `agents/`, `governance/`,
 `graph/`, and `llm/` -- the layers the thesis's architectural claims rest
 on. The honest, expected gap is the Streamlit UI's decision screens
 (`ui/cases/detail.py`, `ui/cases/run.py`, `ui/cases/approval_dialog.py`)
-and the model-configuration page (`ui/pages/models.py`), which have no
-dedicated UI-level tests (see `tests/test_ui_smoke.py`'s own docstring).
+and some interactive decision screens, which have less UI-level coverage
+(see `tests/test_ui_smoke.py`'s own docstring).
 The logic behind them is covered directly at its source all the same: the
 authorization checks by `tests/test_scenarios.py`'s unauthorized-approver
-tests and `tests/test_booking.py`, the per-agent model overrides by
-`tests/test_llm.py`.
+tests and `tests/test_booking.py`; provider/profile configuration is covered
+by `tests/test_settings.py` and `tests/test_ui_smoke.py`.
 
 ## Project structure
 
 ```
 agents/       domain agents
-  shared/       extraction schemas + classification agent (shared by A and B)
-  payment_confirmation/  process A only: reconciliation, booking
-  incoming_invoice/      process B only: cost-center assignment, archiving
+  shared/       schemas + document router (shared by A and B)
+  payment_confirmation/  process A: extraction, reconciliation, booking
+  incoming_invoice/      process B: extraction, cost-center assignment, archiving
 governance/   deterministic, NO LLM: policy, ad, audit
 tools/        reader tool (PDF -> markdown, AD check as entry condition)
-llm/          provider abstraction, validated extraction, preflight, per-agent model overrides
+llm/          provider abstraction, validated extraction, profile routing, preflight
 mocks/        FastAPI: Navision (ERP), ELO (DMS)
 graph/        LangGraph workflow, state model, case overview, target-system effect
   nodes/        graph nodes: shared.py (intake stretch) + one module per process
@@ -272,7 +272,7 @@ ui/           Streamlit UI
   cases/        case list, shared detail-view shell, run, step derivation
     process_views/  per-process detail-view fragments (approval input, outcome text, metric)
   intake/       upload check and storage
-  pages/        upload, history, process (parameterized), audit, architecture, KI-Modelle
+  pages/        upload, history, process, audit, architecture, agent configuration
 tests/        pytest
 docs/         architecture, concept->code mapping, limitations, operator's guide
 agent_registry.py    agent configuration table (effective, not just documented)

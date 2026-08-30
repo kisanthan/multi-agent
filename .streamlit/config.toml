@@ -11,3 +11,55 @@ gatherUsageStats = false
 
 [theme]
 primaryColor = "#0b5cad"
+showSidebarBorder = true
+showWidgetBorder = true
+baseRadius = "10px"
+buttonRadius = "8px"
+baseFontSize = 16
+baseFontWeight = 400
+headingFontWeights = [700, 600, 600, 600, 600, 600]
+linkUnderline = false
+
+[theme.light]
+primaryColor = "#0b5cad"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f6f8fb"
+textColor = "#1f2937"
+borderColor = "#d6dbe3"
+dataframeBorderColor = "#d6dbe3"
+dataframeHeaderBackgroundColor = "#eef2f7"
+codeBackgroundColor = "#f2f4f7"
+codeTextColor = "#1f2937"
+linkColor = "#0b5cad"
+grayColor = "#667085"
+
+[theme.light.sidebar]
+backgroundColor = "#f6f8fb"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#1f2937"
+borderColor = "#d6dbe3"
+primaryColor = "#0b5cad"
+codeBackgroundColor = "#f2f4f7"
+codeTextColor = "#1f2937"
+
+[theme.dark]
+primaryColor = "#69b3ff"
+backgroundColor = "#0e1117"
+secondaryBackgroundColor = "#171d27"
+textColor = "#f1f5f9"
+borderColor = "#3b4658"
+dataframeBorderColor = "#3b4658"
+dataframeHeaderBackgroundColor = "#202735"
+codeBackgroundColor = "#111722"
+codeTextColor = "#d9e6f2"
+linkColor = "#79bbff"
+grayColor = "#aab4c3"
+
+[theme.dark.sidebar]
+backgroundColor = "#171d27"
+secondaryBackgroundColor = "#202735"
+textColor = "#f1f5f9"
+borderColor = "#3b4658"
+primaryColor = "#69b3ff"
+codeBackgroundColor = "#111722"
+codeTextColor = "#d9e6f2"

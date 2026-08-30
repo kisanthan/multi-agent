@@ -81,14 +81,18 @@ def run_case(doc: dict, *, approver: str, decision: str, interactive: bool) -> N
     print(f"Erwartung:  {doc['expectation']}")
     if doc["incident"]:
         print(f"Stoerfall:  {doc['incident']}")
-    print(f"Modus:      MODEL_MODE={settings.model_mode.value}")
+    print(f"Konfiguration: Revision {settings.configuration_revision}")
+    for profile_id, profile in settings.profile_snapshot().items():
+        print(f"  {profile_id:9s} {profile['provider']} / {profile['model_id']}")
     print("-" * 78)
 
     try:
         state = app.invoke(
             {"path": str(INTAKE_DIR / doc["filename"]), "actor": doc["submitter"],
              "case_id": case_id,
-             "started_at": datetime.now(timezone.utc).isoformat(), "log": []},
+             "started_at": datetime.now(timezone.utc).isoformat(),
+             "configuration_revision": settings.configuration_revision,
+             "model_profiles": settings.profile_snapshot(), "log": []},
             thread,
         )
 

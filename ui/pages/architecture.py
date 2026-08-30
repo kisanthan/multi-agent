@@ -19,10 +19,23 @@ import streamlit as st
 
 import process_registry
 from agent_registry import REGISTRY, OversightMode
-from config import settings
+from config import ProfileId, settings
 from governance import ad
 from ui.shared import i18n, style
 from ui.cases.steps import steps_for
+
+
+def _active_model(agent_id: str) -> str:
+    profiles = {
+        "klassifikation": ProfileId.ROUTER,
+        "extraktion_zahlung": ProfileId.PAYMENT,
+        "extraktion_rechnung": ProfileId.INVOICE,
+    }
+    profile_id = profiles.get(agent_id)
+    if profile_id is None:
+        return i18n.t("architecture.no_ai")
+    profile = settings.profile(profile_id)
+    return f"{profile.provider.value} · {profile.model_id}"
 
 
 def render() -> None:
@@ -59,8 +72,8 @@ def render() -> None:
     st.caption(i18n.t("architecture.agent_config.caption"))
     column = {k: i18n.t(f"architecture.column.{k}") for k in
               ("agent", "type", "autonomy", "oversight", "model_class",
-               "processes", "write")}
-    st.dataframe(
+               "active_model", "processes", "write")}
+    style.dataframe(
         [{
             column["agent"]: i18n.agent_text(agent_id, "name"),
             column["type"]: i18n.enum_label("type", cfg.type.value),
@@ -73,6 +86,7 @@ def render() -> None:
             column["oversight"]: i18n.enum_label("oversight", cfg.oversight.value),
             column["model_class"]: i18n.enum_label("model_class",
                                                    cfg.model_class.value),
+            column["active_model"]: _active_model(agent_id),
             column["processes"]: ", ".join(cfg.processes),
             column["write"]: i18n.t("word.yes" if cfg.can_write else "word.no"),
         } for agent_id, cfg in REGISTRY.items()],
@@ -91,8 +105,10 @@ def render() -> None:
         f'{i18n.t("architecture.feed.text", group=ad.READER_GROUP)}</div>'
         f'<div class="field-row"><b>{i18n.t("architecture.approve")}:</b> '
         f'{i18n.t("architecture.approve.text", group=ad.APPROVAL_GROUP)}</div>'
-        f'<div class="field-row"><b>{i18n.t("architecture.model_mode")}:</b> '
-        f'<code>{settings.model_mode.value}</code></div>',
+        f'<div class="field-row"><b>{i18n.t("architecture.configure")}:</b> '
+        f'{i18n.t("architecture.configure.text", group=ad.CONFIGURATION_GROUP)}</div>'
+        f'<div class="field-row"><b>{i18n.t("architecture.configuration_revision")}:</b> '
+        f'<code>{settings.configuration_revision}</code></div>',
         unsafe_allow_html=True,
     )
     st.caption(i18n.t("architecture.footer"))

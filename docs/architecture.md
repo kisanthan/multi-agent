@@ -121,9 +121,11 @@ graph TD;
 	__start__([<p>__start__</p>]):::first
 	reader(reader)
 	klassifikation(klassifikation)
+	extraktion_zahlung(extraktion_zahlung)
 	abgleich(abgleich)
 	buchung(buchung)
 	klaerfall(klaerfall)
+	extraktion_rechnung(extraktion_rechnung)
 	kostenstelle(kostenstelle)
 	freigabe_kostenstelle(freigabe_kostenstelle)
 	elo(elo)
@@ -133,15 +135,19 @@ graph TD;
 	abgleich -. &nbsp;hitl&nbsp; .-> klaerfall;
 	buchung -. &nbsp;ende&nbsp; .-> __end__;
 	buchung -. &nbsp;hitl&nbsp; .-> klaerfall;
+	extraktion_rechnung -. &nbsp;ende&nbsp; .-> __end__;
+	extraktion_rechnung -.-> kostenstelle;
+	extraktion_zahlung -. &nbsp;ende&nbsp; .-> __end__;
+	extraktion_zahlung -.-> abgleich;
 	freigabe_kostenstelle -. &nbsp;ende&nbsp; .-> __end__;
 	freigabe_kostenstelle -.-> elo;
 	klaerfall -. &nbsp;ende&nbsp; .-> __end__;
 	klaerfall -.-> buchung;
 	klaerfall -.-> kostenstelle;
 	klassifikation -. &nbsp;ende&nbsp; .-> __end__;
-	klassifikation -. &nbsp;prozess_a&nbsp; .-> abgleich;
+	klassifikation -. &nbsp;prozess_b&nbsp; .-> extraktion_rechnung;
+	klassifikation -. &nbsp;prozess_a&nbsp; .-> extraktion_zahlung;
 	klassifikation -. &nbsp;hitl&nbsp; .-> klaerfall;
-	klassifikation -. &nbsp;prozess_b&nbsp; .-> kostenstelle;
 	kostenstelle -.-> elo;
 	kostenstelle -. &nbsp;freigabe&nbsp; .-> freigabe_kostenstelle;
 	reader -. &nbsp;ende&nbsp; .-> __end__;
@@ -162,12 +168,13 @@ graph TD;
    Modell und Zielsystem werden nicht aufgerufen.
 4. Bei Erfolg wird das PDF deterministisch in Markdown umgewandelt und der
    SHA-256 des Rohdokuments berechnet.
-5. `klassifikation` klassifiziert und extrahiert die Felder in einem
-   Modellaufruf. Pydantic validiert die Antwort. Nach maximal zwei ungültigen
-   Antworten wird eskaliert, nicht geraten.
-6. `route_document_type()` routet deterministisch anhand des bereits
-   extrahierten Dokumenttyps. Der Orchestrator führt keinen zweiten
-   Modellaufruf aus.
+5. `klassifikation` bestimmt als gemeinsamer KI-Router ausschließlich die
+   Belegart. Pydantic validiert die strukturierte Antwort.
+6. `route_document_type()` routet deterministisch anhand des erkannten
+   Dokumenttyps. Der Orchestrator führt keinen eigenen Modellaufruf aus.
+7. `extraktion_zahlung` oder `extraktion_rechnung` liest anschließend nur die
+   Felder des ausgewählten Prozesses mit seinem eigenen Modellprofil. Nach
+   maximal zwei ungültigen Antworten wird eskaliert, nicht geraten.
 
 ### Prozess A: Zahlungsbestätigung
 
@@ -266,32 +273,27 @@ ersetzt werden.
 
 `agent_registry.py` ist ein fachliches Rollen- und Risikomodell. Eine
 `model_class` dort ist derzeit **kein Beweis für einen Modellaufruf**. Die
-reale Call Chain lautet ausschließlich:
-
-`agents/shared/classification.py` → `llm/extraction.py` →
-`llm/client.py::client_for()` → Ollama oder Anthropic.
+reale Call Chain besteht aus dem gemeinsamen Router und genau einem
+prozessspezifischen Extraktionsagenten. Beide gehen über
+`llm/extraction.py` und `llm/client.py::client_for()` zum jeweils im Profil
+gewählten Anbieter (Ollama, Google, Anthropic oder OpenAI).
 
 | Komponente | deklarierte Modellklasse | tatsächlicher LLM-Aufruf |
 |---|---:|---:|
 | Reader | kein Modell | nein |
-| Orchestrator | lokal/klein | nein; deterministisches Routing |
-| Klassifikation/Extraktion | vision-fähig | **ja**, aber aktuell nur mit Markdown, ohne Bildinput |
+| Orchestrator | kein Modell | nein; deterministisches Routing |
+| Belegart-Router | vision-fähig | **ja**, bestimmt nur die Belegart |
+| Zahlungsextraktion | vision-fähig | **ja**, eigenes Provider-/Modellprofil |
+| Rechnungsextraktion | vision-fähig | **ja**, eigenes Provider-/Modellprofil |
 | Abgleich | kein Modell | nein; SQL-Lookup |
-| Buchung | Frontier | nein; Policy + HTTP |
+| Buchung | kein Modell | nein; Policy + HTTP |
 | Kostenstelle | kein Modell | nein; SQL-Lookup |
-| ELO | lokal/klein | nein; Policy + HTTP |
+| ELO | kein Modell | nein; Policy + HTTP |
 | Policy/Audit | kein Modell | nein |
 
-Das ist die wichtigste dokumentarische Abweichung im Projekt. Sie hat eine
-operative Folge: `llm/preflight.py` und die Seite `ui/pages/models.py`
-leiten Modellbedarf aus der Registry ab und verlangen beziehungsweise
-konfigurieren dadurch auch Modelle für Rollen, die sie im aktuellen Code
-nicht aufrufen. Bis dies im Code vereinheitlicht ist, gilt für Wartung:
-
-- Laufzeitabhängigkeiten immer über die Call Chain bestimmen.
-- Registry-Werte als Ziel-/Risikoklassifikation lesen.
-- Änderungen an Modellklassen gegen Preflight, Modellseite und tatsächliche
-  Aufrufer testen.
+Die Agentenkonfiguration und `llm/preflight.py` verwenden dieselben drei
+effektiven Profile. Deterministische Agenten erscheinen ausdrücklich als
+„keine KI erforderlich“ und können kein Modell auswählen.
 
 ## Persistenz und Datenverantwortung
 

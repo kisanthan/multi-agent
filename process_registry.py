@@ -53,7 +53,7 @@ class ProcessStep:
 # reader, shared classification agent, shared master data).
 SHARED_STEPS: tuple[ProcessStep, ...] = (
     ProcessStep("reader", "Beleg einlesen", "reader"),
-    ProcessStep("klassifikation", "Beleg auswerten", "klassifikation"),
+    ProcessStep("klassifikation", "Belegart erkennen", "klassifikation"),
 )
 
 
@@ -106,6 +106,8 @@ PROCESSES: dict[str, ProcessConfig] = {
         "Person wird die Zahlung verbucht: die Rechnung gilt als bezahlt.",
         document_type=DocumentType.PAYMENT_CONFIRMATION,
         own_steps=(
+            ProcessStep("extraktion_zahlung", "Zahlungsdaten auslesen",
+                        "extraktion_zahlung"),
             ProcessStep("abgleich", "Mit Rechnungsdaten abgleichen", "abgleich"),
             ProcessStep("klaerfall", "Bestätigung durch eine Person", "buchung"),
             ProcessStep("buchung", "Zahlung verbuchen", "buchung"),
@@ -129,6 +131,8 @@ PROCESSES: dict[str, ProcessConfig] = {
         "revisionssicher archiviert. Eine Zahlung wird hier nicht gebucht.",
         document_type=DocumentType.INCOMING_INVOICE,
         own_steps=(
+            ProcessStep("extraktion_rechnung", "Rechnungsdaten auslesen",
+                        "extraktion_rechnung"),
             ProcessStep("kostenstelle", "Kostenstelle zuordnen", "kostenstelle"),
             ProcessStep("freigabe", "Bestätigung durch eine Person", "kostenstelle",
                        graph_node="freigabe_kostenstelle"),

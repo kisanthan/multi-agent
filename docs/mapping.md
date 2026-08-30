@@ -56,8 +56,8 @@ lists each agent once, not each file location per layer.
 - **`teil1_agententypen.png` (taxonomy)** → [agent_registry.py](../agent_registry.py):
   `AgentType`, `AutonomyLevel`, `OversightMode` as enums.
 - **`teil2_ki_modelle.png` (model assignment)** → `ModelClass` per agent
-  plus [llm/client.py](../llm/client.py) `choose_model`: risk class × mode
-  → provider.
+  plus [llm/client.py](../llm/client.py) `choose_profile`: router, payment
+  and invoice profile → provider and model.
 - **`teil3_multiagentensystem.png` (overall synthesis, AD + governance)** →
   AD check in [tools/reader.py](../tools/reader.py), governance layer in
   `governance/`, layer boundary enforced via test.
@@ -78,7 +78,7 @@ both agents **deterministically**
 [agents/incoming_invoice/cost_center.py](../agents/incoming_invoice/cost_center.py)); the autonomy level and
 oversight mode remain valid, the model class is `NO_MODEL`. Extracting the
 number or the cost-center reference from the document itself is done by
-the upstream classification/extraction agent (which uses a model).
+the respective process-specific extraction agent (which uses a model).
 
 **Usable finding for the thesis:** an agent's role and autonomy level do
 not automatically imply model inference. The typology states *which role*
@@ -134,7 +134,7 @@ highest claimed level, otherwise the barrier would be ineffective.
 
 ### I4 — Orchestrator routes without another model call
 
-The document type is already known after the classification agent. The
+The document type is already known after the shared router. The
 orchestrator then *routes* on it (conditional edge) instead of asking a
 second model -- a second call could contradict the first.
 
@@ -168,7 +168,7 @@ system -- for *both* lookups: "the reconciliation in the payment receipt
 and the cost-center assignment in the incoming invoice are exact,
 referential lookups against structured master data" (translated from the
 German original). The thesis sees RAG only as a *complementary* addition,
-and at a different point: to support the classification/extraction agent
+and at a different point: to support the router and extraction agents
 with unusual document layouts, and to enrich the human exception-case
 review with contract/policy passages.
 

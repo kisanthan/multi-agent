@@ -23,10 +23,9 @@ cp .env.example .env
 ```
 
 `.env` is where every runtime switch lives: amount tolerance, model
-provisioning, which PDF parser, and the two mock target-system URLs. The
-prototype reads it once at startup (`config.py`); a changed `.env` needs a
-restart to take effect. The one exception is per-agent model overrides --
-see section 4 below, which take effect immediately, no restart needed.
+provisioning, which PDF parser, and the two mock target-system URLs. Changes
+made on the **Agentenkonfiguration** page are validated, written atomically
+and activated immediately without a restart.
 
 ## 3. Running it
 
@@ -59,62 +58,47 @@ run takes one to three minutes with a local model; approvals from a second
 browser tab work independently, because the case state lives in the
 LangGraph checkpoint, not in the tab.
 
-The topmost control in the sidebar switches the interface between **Deutsch**
-and **English**; it takes effect immediately, including the navigation
-itself. What was *recorded* -- the run log's entries and the audit trail's
+The language control under **System → Einstellungen** switches the
+interface between **Deutsch** and **English**; it
+takes effect immediately, including the navigation itself. What was
+*recorded* -- the run log's entries and the audit trail's
 reasons and outcomes -- deliberately stays in the language it was written
 in, so an exported trail reads the same regardless of who was looking at
 the screen. Adding a third language means one more file in `ui/locales/`
 and one more entry in `ui/shared/i18n.py::LANGUAGES`; `tests/test_i18n.py`
 then reports every key that file is still missing.
 
+The **Dunkelmodus / Dark mode** switch on the same page changes the whole
+interface between a light and dark appearance for the current browser
+session. Navigation, forms, cards, document upload, and process views all
+use the same central theme.
+
 ## 4. Configuring AI models per agent
 
-The registry exposes model profiles for routing (`orchestrator`),
-classification & extraction (`klassifikation`), booking (`buchung`), and
-archiving (`elo`) on the **KI-Modelle** page. In the current implementation,
-however, only `klassifikation` actually calls `llm/client.py`; routing,
-booking, and archiving are deterministic code. Their entries are risk/target
-profiles, not active runtime dependencies. This distinction and its current
-preflight consequence are documented in [architecture.md](architecture.md).
+Open **System → Agentenkonfiguration**. The page has one independent area
+for each real model call:
 
-An exposed profile can be pointed at a specific model live, without editing
-`.env` or restarting. For `klassifikation` the override affects the next
-real model call. For the other three profiles it is currently stored and
-displayed but has no inference call on which to take effect.
+- **Document type detection** selects the shared router provider and model.
+- **Payment confirmation** selects the payment-field extraction provider and model.
+- **Incoming invoice** selects the invoice-field extraction provider and model.
 
-**How the default is derived** (unchanged, see
-[architecture.md](architecture.md)): each agent has a risk/model class in
-`agent_registry.py` (none, local/small, vision-capable, frontier), and
-`.env`'s `MODEL_MODE` decides how that class maps to a concrete
-provider/model --
+In each area, first select Ollama, Google, Anthropic or OpenAI. Only the
+parameters relevant to that provider are shown: the Ollama host address,
+the cloud API key, or the supported account/workspace fields. Credentials
+are central and reused when two profiles select the same provider.
 
-- `lokal` -- everything via Ollama.
-- `cloud` -- everything via the Anthropic API.
-- `hybrid` -- reading/uncritical roles stay local (data sovereignty),
-  risk-bearing roles get a frontier cloud model.
+Press **Check connection & load models** to make a non-billable model-list
+request. The page then shows a connected/not-connected status and offers the
+discovered models in a selector. A custom model id remains possible. Save the
+agent configuration before running the separately labelled structured test;
+that test performs a model call and may incur provider cost.
 
-**Overriding one agent:** open **KI-Modelle** in the UI. Each agent shows
-its current effective provider and model id, and a small form: pick
-"Lokal (Ollama)" or "Cloud (Anthropic)", enter the model id (any name your
-Ollama instance has loaded, or any Anthropic model id), and press
-"Speichern". The change is written to `data/model_overrides.json` and
-applies to the next call that profile makes -- for the current code, only
-`klassifikation` has such a call. It also affects `demo.py` and
-`demo.py --check`, since both go through the same
-`llm/client.py::choose_model` that the UI does. Press
-"Auf Standard zurücksetzen" to drop the override and fall back to the
-mode-derived default again.
+All changes are written to `.env`, revisioned and audited without secrets.
+Cases already started retain their provider/model snapshot. `MODEL_MODE`
+remains only as a backwards-compatible default until explicit profiles have
+been saved.
 
-An override always wins over `MODEL_MODE` for that one profile; every other
-profile without an override keeps following the global mode as before. Every
-override change is written to the audit trail ("Protokoll" page), the same
-tamper-evident chain everything else in the system is recorded in.
-
-**Local models still have to be loaded outside the app** -- overriding an
-agent to a local model id it does not have loaded yet will fail with the
-same actionable "model not loaded" message `llm/client.py` already
-produces:
+**Local models still have to be loaded outside the app:**
 
 ```bash
 ollama serve
@@ -126,6 +110,6 @@ ollama pull <model>
 | Symptom | Cause | Fix |
 |---|---|---|
 | "Keine Verbindung zu Ollama" | `OLLAMA_BASE_URL` unreachable | `ollama serve`, or fix the URL in `.env` |
-| "Modell ... ist ... nicht geladen" | Model not pulled on that Ollama instance | `ollama pull <model>`, or point the agent at a model that is loaded (KI-Modelle page, or `OLLAMA_MODEL_SMALL`/`OLLAMA_MODEL_VISION` in `.env`) |
+| "Modell ... ist ... nicht geladen" | Model not pulled on that Ollama instance | `ollama pull <model>`, then reload the model list on the Agentenkonfiguration page |
 | "ANTHROPIC_API_KEY ist nicht gesetzt" | `MODEL_MODE=hybrid`/`cloud` (or a cloud override) without a key | Set `ANTHROPIC_API_KEY` in `.env`, or switch back to a local override/mode |
 | `demo.py --check` reports "NICHT BEREIT" | Any of the above | Read its message list -- it names exactly which model is missing where |

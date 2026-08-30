@@ -13,9 +13,11 @@ graph TD;
 	__start__([<p>__start__</p>]):::first
 	reader(reader)
 	klassifikation(klassifikation)
+	extraktion_zahlung(extraktion_zahlung)
 	abgleich(abgleich)
 	buchung(buchung)
 	klaerfall(klaerfall)
+	extraktion_rechnung(extraktion_rechnung)
 	kostenstelle(kostenstelle)
 	freigabe_kostenstelle(freigabe_kostenstelle)
 	elo(elo)
@@ -25,15 +27,19 @@ graph TD;
 	abgleich -. &nbsp;hitl&nbsp; .-> klaerfall;
 	buchung -. &nbsp;ende&nbsp; .-> __end__;
 	buchung -. &nbsp;hitl&nbsp; .-> klaerfall;
+	extraktion_rechnung -. &nbsp;ende&nbsp; .-> __end__;
+	extraktion_rechnung -.-> kostenstelle;
+	extraktion_zahlung -. &nbsp;ende&nbsp; .-> __end__;
+	extraktion_zahlung -.-> abgleich;
 	freigabe_kostenstelle -. &nbsp;ende&nbsp; .-> __end__;
 	freigabe_kostenstelle -.-> elo;
 	klaerfall -. &nbsp;ende&nbsp; .-> __end__;
 	klaerfall -.-> buchung;
 	klaerfall -.-> kostenstelle;
 	klassifikation -. &nbsp;ende&nbsp; .-> __end__;
-	klassifikation -. &nbsp;prozess_a&nbsp; .-> abgleich;
+	klassifikation -. &nbsp;prozess_b&nbsp; .-> extraktion_rechnung;
+	klassifikation -. &nbsp;prozess_a&nbsp; .-> extraktion_zahlung;
 	klassifikation -. &nbsp;hitl&nbsp; .-> klaerfall;
-	klassifikation -. &nbsp;prozess_b&nbsp; .-> kostenstelle;
 	kostenstelle -.-> elo;
 	kostenstelle -. &nbsp;freigabe&nbsp; .-> freigabe_kostenstelle;
 	reader -. &nbsp;ende&nbsp; .-> __end__;

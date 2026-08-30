@@ -152,9 +152,9 @@ def render() -> None:
                           total=len(all_entries)))
 
     columns = _columns()
-    st.dataframe([_as_row(e, columns) for e in reversed(matches)],
-                 column_order=[columns[k] for k in COLUMN_KEYS],
-                 use_container_width=True, hide_index=True)
+    style.dataframe([_as_row(e, columns) for e in reversed(matches)],
+                    column_order=[columns[k] for k in COLUMN_KEYS],
+                    use_container_width=True, hide_index=True)
 
     if can_export:
         st.download_button(

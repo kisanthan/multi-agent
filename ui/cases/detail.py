@@ -262,7 +262,7 @@ def _document_preview(path: str | None) -> None:
         data = base64.b64encode(Path(path).read_bytes()).decode("ascii")
         st.markdown(
             f'<iframe src="data:application/pdf;base64,{data}" '
-            'width="100%" height="620" style="border:1px solid #ccc; '
+            'width="100%" height="620" style="border:1px solid var(--app-border); '
             'border-radius:6px;"></iframe>',
             unsafe_allow_html=True,
         )

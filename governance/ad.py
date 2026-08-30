@@ -16,6 +16,8 @@ from enum import Enum
 READER_GROUP = "SG-CHG-DocIngest"
 # The group allowed to approve exception cases and cost-center assignments.
 APPROVAL_GROUP = "SG-CHG-Freigabe"
+# Dedicated right for changing provider credentials and global agent profiles.
+CONFIGURATION_GROUP = "SG-CHG-Konfiguration"
 
 
 class Role(str, Enum):
@@ -111,3 +113,30 @@ def check_approval_permission(con: sqlite3.Connection, upn: str) -> AccessResult
     return AccessResult(
         True, f"{user.display_name} ist freigabeberechtigt.", user
     )
+
+
+def check_configuration_permission(con: sqlite3.Connection, upn: str) -> AccessResult:
+    try:
+        user = load_user(con, upn)
+    except UnknownUser as e:
+        return AccessResult(False, f"Zero Trust: {e}")
+    if not user.is_member(CONFIGURATION_GROUP):
+        return AccessResult(False, "Das Konto darf die Systemkonfiguration nicht ändern.", user)
+    return AccessResult(True, f"{user.display_name} darf konfigurieren.", user)
+
+
+def ensure_configuration_seed(con: sqlite3.Connection) -> None:
+    """Non-destructive migration for databases generated before this feature."""
+    con.execute(
+        "INSERT OR IGNORE INTO ad_groups (name, description) VALUES (?,?)",
+        (CONFIGURATION_GROUP, "Darf Agenten- und Anbieter-Einstellungen ändern"),
+    )
+    exists = con.execute(
+        "SELECT 1 FROM ad_users WHERE upn = 's.hofmann@chg-meridian.com'"
+    ).fetchone()
+    if exists:
+        con.execute(
+            "INSERT OR IGNORE INTO ad_memberships (upn, group_name) VALUES (?,?)",
+            ("s.hofmann@chg-meridian.com", CONFIGURATION_GROUP),
+        )
+    con.commit()

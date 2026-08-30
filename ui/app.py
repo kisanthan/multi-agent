@@ -20,6 +20,7 @@ Start:  streamlit run ui/app.py
 from __future__ import annotations
 
 import functools
+import importlib
 import sqlite3
 import sys
 from pathlib import Path
@@ -30,7 +31,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import process_registry  # noqa: E402
 from config import DB_PATH  # noqa: E402
-from ui.shared import i18n, user, style  # noqa: E402
+from governance.ad import ensure_configuration_seed  # noqa: E402
+from ui.shared import i18n, style, theme, user  # noqa: E402
 from ui.shared.context import SESSION_USER, register_pages  # noqa: E402
 
 st.set_page_config(page_title=i18n.t("app.page_title"),
@@ -38,7 +40,7 @@ st.set_page_config(page_title=i18n.t("app.page_title"),
 
 
 def _login() -> None:
-    """Sidebar: language, account selection, and what this account may do.
+    """Sidebar: account selection and what this account may do.
 
     In the prototype, a selection instead of a real sign-in -- but the
     rights behind it are the real group memberships from the directory
@@ -47,11 +49,10 @@ def _login() -> None:
     The *capability* is shown as a sentence, not membership in a security
     group: the group name helps no one who cannot manage it anyway.
 
-    The language picker comes first and runs before the pages are built, so
-    a switch takes effect on the same rerun -- navigation titles included.
     """
     con = sqlite3.connect(DB_PATH)
     try:
+        ensure_configuration_seed(con)
         accounts = con.execute(
             "SELECT upn, display_name FROM ad_users ORDER BY display_name"
         ).fetchall()
@@ -62,7 +63,6 @@ def _login() -> None:
         # way into the main area instead of the sidebar.
         with st.sidebar:
             style.css()
-            i18n.picker()
 
             if not accounts:
                 st.error(i18n.t("app.no_accounts"))
@@ -108,7 +108,8 @@ def _build_pages() -> dict:
     language: a URL is an address, and an address that moves when someone
     switches language cannot be shared.
     """
-    from ui.pages import architecture, audit, history, models, process, upload, case
+    from ui.pages import (architecture, audit, case, history, preferences,
+                          process, settings, upload)
 
     pages = {
         # 'Upload' is already the section -- the page is therefore not
@@ -127,10 +128,12 @@ def _build_pages() -> dict:
         "architecture": st.Page(architecture.render,
                                 title=i18n.t("page.architecture"), icon="🏛️",
                                 url_path="architecture"),
-        # Own nav section (see main()): a live configuration surface, kept
-        # separate from 'Architektur', which only reads the static default.
-        "models": st.Page(models.render, title=i18n.t("page.models"), icon="🧠",
-                          url_path="ai-models"),
+        "settings": st.Page(settings.render, title=i18n.t("page.settings"),
+                            icon="⚙️", url_path="settings"),
+        "preferences": st.Page(
+            preferences.render, title=i18n.t("page.preferences"),
+            icon="🌐", url_path="preferences",
+        ),
         # No entry in the navigation: one arrives here from a list.
         "case": st.Page(case.render, title=i18n.t("page.case"), icon="📄",
                         url_path="case", visibility="hidden"),
@@ -145,6 +148,12 @@ def _build_pages() -> dict:
 
 
 def main() -> None:
+    sync_native = getattr(theme, "sync_native", None)
+    if sync_native is None:
+        # Streamlit can retain an imported helper module while hot-reloading
+        # this entry point. Reload only for that precise stale-module case.
+        sync_native = importlib.reload(theme).sync_native
+    sync_native()
     _login()
 
     pages = _build_pages()
@@ -155,7 +164,7 @@ def main() -> None:
         i18n.t("nav.case_types"): [pages[k.route]
                                    for k in process_registry.all_processes()],
         i18n.t("nav.evidence"): [pages["audit"], pages["architecture"]],
-        i18n.t("nav.configuration"): [pages["models"]],
+        i18n.t("nav.system"): [pages["preferences"], pages["settings"]],
         "": [pages["case"]],
     }).run()
 

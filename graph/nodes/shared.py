@@ -95,16 +95,27 @@ def node_reader(state: Case) -> dict:
 
 
 def node_classification(state: Case) -> dict:
-    """Classification & extraction agent: type and fields in one pass."""
+    """Route the document to exactly one process without extracting fields."""
     con = connection()
     try:
-        e = classification.classify(con, markdown=state["markdown"],
-                                    actor=state["actor"],
-                                    reference=case_reference(state))
+        e = classification.route(
+            con, markdown=state["markdown"], actor=state["actor"],
+            reference=case_reference(state),
+            profile_snapshot=state.get("model_profiles"),
+        )
     finally:
         con.close()
 
     if not e.succeeded:
+        if e.unreachable:
+            return {
+                "completed": True,
+                "outcome": CaseOutcome.MODEL_UNAVAILABLE.value,
+                "error": e.escalation,
+                "log": note(state, "klassifikation",
+                            "Belegarterkennung nicht erreichbar – der Vorgang "
+                            "wurde sicher angehalten."),
+            }
         # R1: the model does not honor the schema -> exception case instead of guessing.
         return {
             "exception_case": True,
@@ -123,20 +134,18 @@ def node_classification(state: Case) -> dict:
     d = e.data
     return {
         "document_type": d.type.value,
-        "number": d.number,
-        "amount_eur": d.amount_eur,
-        "supplier": d.supplier,
-        "line_items": d.line_items,
-        "cost_center_reference": d.cost_center_reference,
-        "log": note(state, "klassifikation", _extracted_fields(d)),
+        "log": note(state, "klassifikation",
+                    "Belegart erkannt: " +
+                    ("Zahlungsbestätigung." if d.type is DocumentType.PAYMENT_CONFIRMATION
+                     else "Eingangsrechnung.")),
     }
 
 
 def route_document_type(state: Case) -> str:
     """Orchestrator agent: conditional edge on document type.
 
-    No model call: the type is already known (the classification agent
-    determined it). The orchestrator merely *routes* on it -- asking a
+    No model call: the type is already known (the shared router determined
+    it). The orchestrator merely *routes* on it -- asking a
     model again here would be a second call with the potential to
     contradict the first.
     """

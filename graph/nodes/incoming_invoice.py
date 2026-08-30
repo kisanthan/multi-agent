@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from langgraph.types import interrupt
 
-from agents.incoming_invoice import archiving, cost_center
+from agents.incoming_invoice import archiving, cost_center, extraction
 from contracts import (
     ApprovalDecision,
     ApprovalRequest,
@@ -22,6 +22,50 @@ from governance.audit import Decision, log_entry
 from governance.policy import check_approval
 from graph.nodes.shared import case_reference, connection, note
 from graph.state import Case
+
+
+def node_invoice_extraction(state: Case) -> dict:
+    """Use process B's independently configured extraction profile."""
+    con = connection()
+    try:
+        result = extraction.extract_invoice(
+            con, markdown=state["markdown"], actor=state["actor"],
+            reference=case_reference(state),
+            profile_snapshot=state.get("model_profiles"),
+        )
+    finally:
+        con.close()
+    if not result.succeeded:
+        if result.unreachable:
+            return {
+                "completed": True,
+                "outcome": CaseOutcome.MODEL_UNAVAILABLE.value,
+                "error": result.escalation,
+                "log": note(state, "extraktion_rechnung",
+                            "Rechnungsextraktion nicht erreichbar – sicher angehalten."),
+            }
+        return {
+            "number": None, "amount_eur": None, "supplier": None,
+            "line_items": [], "cost_center_reference": None,
+            "exception_case": True,
+            "exception_reason": result.escalation or "Extraktion fehlgeschlagen",
+            "escalation": result.escalation,
+            "log": note(state, "extraktion_rechnung",
+                        "Rechnungsdaten konnten nicht sicher ausgelesen werden."),
+        }
+    data = result.data
+    return {
+        "number": data.number,
+        "amount_eur": data.amount_eur,
+        "supplier": data.supplier,
+        "line_items": data.line_items,
+        "cost_center_reference": data.cost_center_reference,
+        "log": note(state, "extraktion_rechnung", "Rechnungsdaten ausgelesen."),
+    }
+
+
+def route_invoice_extraction(state: Case) -> str:
+    return "ende" if state.get("completed") else "kostenstelle"
 
 
 def node_cost_center(state: Case) -> dict:

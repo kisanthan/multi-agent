@@ -66,6 +66,7 @@ SUPPLIERS = [
 AD_GROUPS = [
     ("SG-CHG-DocIngest", "Darf Dokumente in das Reader-Tool einspeisen"),
     ("SG-CHG-Freigabe", "Darf Klaerfaelle und Kostenstellen-Zuordnungen freigeben"),
+    ("SG-CHG-Konfiguration", "Darf Agenten- und Anbieter-Einstellungen aendern"),
 ]
 
 AD_USERS = [
@@ -73,7 +74,7 @@ AD_USERS = [
     ("m.keller@chg-meridian.com", "Martina Keller", "einspeiser", ["SG-CHG-DocIngest"]),
     ("t.brandt@chg-meridian.com", "Tobias Brandt", "einspeiser", ["SG-CHG-DocIngest"]),
     ("s.hofmann@chg-meridian.com", "Sabine Hofmann", "pruefer",
-     ["SG-CHG-DocIngest", "SG-CHG-Freigabe"]),
+     ["SG-CHG-DocIngest", "SG-CHG-Freigabe", "SG-CHG-Konfiguration"]),
     ("r.wagner@chg-meridian.com", "Robert Wagner", "pruefer", ["SG-CHG-Freigabe"]),
     # Not a member of the reader group -> scenario 5 (governance demo).
     ("e.extern@partner-consulting.de", "Erik Extern", "beobachter", []),

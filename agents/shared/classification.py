@@ -1,9 +1,7 @@
-"""Classification & extraction agent (Shared Domain, level 1-2).
+"""Shared document router (Shared Domain, level 1-2).
 
-Determines the document type AND extracts the relevant fields in a single
-pass -- as required by the functional concept. Two separate calls would be
-more expensive and could contradict each other (type 'invoice', but fields
-of a payment confirmation).
+Determines only the document type. The selected process-specific extraction
+agent reads the fields afterwards with its independently configured profile.
 
 Autonomy level 2: proposes, executes nothing. The agent writes nowhere --
 the policy enforces that (test_policy.py).
@@ -13,13 +11,14 @@ from __future__ import annotations
 
 import sqlite3
 
-from agents.shared.schemas import Classification
+from agents.shared.schemas import Classification, DocumentRouting
+from config import ProfileId
 from governance.audit import NO_REFERENCE, CaseReference
 from llm.extraction import ExtractionResult, extract
 
 AGENT_ID = "klassifikation"
 
-SYSTEM = """Du bist ein Extraktionsagent fuer Finanzdokumente eines deutschen \
+SYSTEM = """Du bist ein Routing-Agent fuer Finanzdokumente eines deutschen \
 IT-Leasing-Unternehmens (CHG-MERIDIAN). Du liest ein Dokument als Markdown und \
 gibst ausschliesslich strukturiertes JSON nach dem vorgegebenen Schema zurueck.
 
@@ -45,3 +44,20 @@ def classify(con: sqlite3.Connection, *, markdown: str, actor: str,
     )
     return extract(con, agent_id=AGENT_ID, actor=actor, system=SYSTEM,
                    prompt=prompt, schema=Classification, reference=reference)
+
+
+def route(con: sqlite3.Connection, *, markdown: str, actor: str,
+          reference: CaseReference = NO_REFERENCE,
+          profile_snapshot: dict[str, dict[str, str]] | None = None) -> ExtractionResult:
+    """Identify the process without extracting process-specific fields."""
+    prompt = (
+        "Ordne den folgenden Beleg genau einer Belegart zu.\n\n"
+        "--- DOKUMENT ---\n"
+        f"{markdown}\n"
+        "--- ENDE ---"
+    )
+    return extract(
+        con, agent_id=AGENT_ID, actor=actor, system=SYSTEM, prompt=prompt,
+        schema=DocumentRouting, reference=reference, profile_id=ProfileId.ROUTER,
+        profile_snapshot=profile_snapshot,
+    )

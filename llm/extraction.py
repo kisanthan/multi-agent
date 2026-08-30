@@ -23,6 +23,7 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel, ValidationError
 
+from config import ProfileId
 from governance.audit import NO_REFERENCE, CaseReference, Decision, log_entry
 from llm.client import LLMUnreachable, client_for
 
@@ -44,6 +45,9 @@ class ExtractionResult:
     provider: str
     escalation: str | None = None
     raw: str = ""
+    profile_id: str = "legacy"
+    configuration_revision: int = 1
+    unreachable: bool = False
 
     @property
     def succeeded(self) -> bool:
@@ -68,6 +72,8 @@ def extract(
     prompt: str,
     schema: type[BaseModel],
     reference: CaseReference = NO_REFERENCE,
+    profile_id: ProfileId | str | None = None,
+    profile_snapshot: dict[str, dict[str, str]] | None = None,
 ) -> ExtractionResult:
     """Calls the model and validates the response against `schema`.
 
@@ -76,7 +82,8 @@ def extract(
     because a model that fails the same schema twice does not understand
     the schema, and another pass only costs money and latency.
     """
-    client, choice = client_for(agent_id)
+    client, choice = client_for(
+        agent_id, profile_id=profile_id, snapshot=profile_snapshot)
     current_prompt = prompt
     last_error = ""
     raw = ""
@@ -90,13 +97,18 @@ def extract(
                 con, actor=actor, agent=agent_id, action="llm_aufruf",
                 decision=Decision.DENIED,
                 reason=f"Modell nicht erreichbar: {e}",
-                payload={"modell": choice.model_id, "anbieter": choice.provider},
+                payload={"modell": choice.model_id, "anbieter": choice.provider,
+                         "profil": choice.profile_id,
+                         "konfigurationsrevision": choice.configuration_revision},
                 reference=reference, outcome="modell_nicht_erreichbar",
             )
             con.commit()
             return ExtractionResult(
                 None, attempt, choice.model_id, choice.provider,
                 escalation=f"Modell nicht erreichbar: {e}",
+                profile_id=choice.profile_id,
+                configuration_revision=choice.configuration_revision,
+                unreachable=True,
             )
 
         try:
@@ -108,6 +120,8 @@ def extract(
                 decision=Decision.INFO,
                 reason=f"Versuch {attempt}/{MAX_ATTEMPTS} verletzt das Schema.",
                 payload={"modell": choice.model_id, "anbieter": choice.provider,
+                         "profil": choice.profile_id,
+                         "konfigurationsrevision": choice.configuration_revision,
                          "fehler": last_error},
                 reference=reference, outcome="schemaverletzung",
             )
@@ -125,11 +139,17 @@ def extract(
             decision=Decision.INFO,
             reason=f"Extraktion gelungen in Versuch {attempt}.",
             payload={"modell": choice.model_id, "anbieter": choice.provider,
+                     "profil": choice.profile_id,
+                     "konfigurationsrevision": choice.configuration_revision,
                      "ergebnis": json.loads(data.model_dump_json())},
             reference=reference, outcome=f"extrahiert (Versuch {attempt})",
         )
         con.commit()
-        return ExtractionResult(data, attempt, choice.model_id, choice.provider, raw=raw)
+        return ExtractionResult(
+            data, attempt, choice.model_id, choice.provider, raw=raw,
+            profile_id=choice.profile_id,
+            configuration_revision=choice.configuration_revision,
+        )
 
     # Both attempts failed -> exception case instead of guessing.
     escalation = (
@@ -139,11 +159,15 @@ def extract(
     log_entry(
         con, actor=actor, agent=agent_id, action="llm_eskalation",
         decision=Decision.DENIED, reason=escalation,
-        payload={"modell": choice.model_id, "anbieter": choice.provider, "roh": raw[:2000]},
+        payload={"modell": choice.model_id, "anbieter": choice.provider,
+                 "profil": choice.profile_id,
+                 "konfigurationsrevision": choice.configuration_revision,
+                 "roh": raw[:2000]},
         reference=reference, outcome="eskaliert",
     )
     con.commit()
     return ExtractionResult(
         None, MAX_ATTEMPTS, choice.model_id, choice.provider,
-        escalation=escalation, raw=raw,
+        escalation=escalation, raw=raw, profile_id=choice.profile_id,
+        configuration_revision=choice.configuration_revision,
     )

@@ -30,10 +30,11 @@ class User:
     display_name: str
     can_upload: bool
     can_confirm: bool
+    can_configure: bool = False
 
     @property
     def view_only(self) -> bool:
-        return not (self.can_upload or self.can_confirm)
+        return not (self.can_upload or self.can_confirm or self.can_configure)
 
     @property
     def _document_kinds(self) -> str:
@@ -129,4 +130,5 @@ def load(con: sqlite3.Connection, upn: str) -> User:
         display_name=display_name,
         can_upload=ad.check_reader_access(con, upn).allowed,
         can_confirm=ad.check_approval_permission(con, upn).allowed,
+        can_configure=ad.check_configuration_permission(con, upn).allowed,
     )

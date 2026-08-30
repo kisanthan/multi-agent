@@ -65,8 +65,8 @@ def build_graph() -> StateGraph:
     # shared.route_document_type).
     g.add_conditional_edges(
         "klassifikation", shared.route_document_type,
-        {"prozess_a": "abgleich",       # -> process A
-         "prozess_b": "kostenstelle",   # -> process B
+        {"prozess_a": "extraktion_zahlung",       # -> process A
+         "prozess_b": "extraktion_rechnung",      # -> process B
          "hitl": "klaerfall",           # extraction failed, see node_classification
          "ende": END},
     )
@@ -76,6 +76,12 @@ def build_graph() -> StateGraph:
     # and guards both callers. The booking node runs on the approval path
     # TWICE: once to request approval, once -- after a human decides -- to
     # actually book (see ui/cases/steps.py for how the stepper shows this).
+    g.add_node("extraktion_zahlung", payment_confirmation.node_payment_extraction)
+    g.add_conditional_edges(
+        "extraktion_zahlung", payment_confirmation.route_payment_extraction,
+        {"abgleich": "abgleich", "ende": END},
+    )
+
     g.add_node("abgleich", payment_confirmation.node_reconciliation)
     g.add_conditional_edges("abgleich", payment_confirmation.route_reconciliation,
                             {"hitl": "klaerfall", "buchung": "buchung"})
@@ -96,6 +102,12 @@ def build_graph() -> StateGraph:
     # kostenstelle -> (on ambiguity) freigabe_kostenstelle -> elo. Ends at
     # ELO (diagram part 3) -- no balance-sheet-effective booking happens in
     # process B; Navision is only ever addressed in process A.
+    g.add_node("extraktion_rechnung", incoming_invoice.node_invoice_extraction)
+    g.add_conditional_edges(
+        "extraktion_rechnung", incoming_invoice.route_invoice_extraction,
+        {"kostenstelle": "kostenstelle", "ende": END},
+    )
+
     g.add_node("kostenstelle", incoming_invoice.node_cost_center)
     # A unique assignment proceeds automatically to archiving; only on
     # ambiguity does the four-eyes approval kick in.
