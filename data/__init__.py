@@ -1,7 +1,6 @@
-"""Synthetic test data: generator and SQLite schema.
+"""Synthetic demo data, runtime bootstrap, generator and SQLite schema.
 
-`generate.py` is the only thing run directly (`python -m data.generate`);
-everything it produces (`masterdata.db`, `checkpoints.sqlite`, `inbox/`,
-`manifest.json`) is seed-fixed and reproducible, and lives in this
-directory without being committed.
+``data/demo`` contains the versioned immutable bundle. ``bootstrap.py``
+installs writable runtime copies; ``generate.py`` reproducibly rebuilds
+either the runtime files or, with ``--seed-bundle``, the tracked seeds.
 """

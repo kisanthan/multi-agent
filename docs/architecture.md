@@ -1,6 +1,6 @@
 # Technische Architektur und Wartungsleitfaden
 
-Stand: 2026-08-21 · Geltungsbereich: aktueller Prototyp im Repository
+Stand: 2026-08-30 · Geltungsbereich: aktueller Prototyp im Repository
 
 ## Zweck und Dokumentationsentscheidung
 
@@ -39,8 +39,8 @@ dass die beiden Abläufe unkontrolliert ineinander wachsen.
 nicht geeignet.** Die wichtigsten Grenzen sind die synchrone Ausführung in
 Streamlit, SQLite als gemeinsame Laufzeitdatenbank, die Nutzung des internen
 Checkpoint-Schemas als Fallübersicht, fehlende echte Authentifizierung und
-die teilweise Abweichung zwischen deklarierter Modellklasse und realem
-LLM-Aufruf. Eine Migration sollte jedoch von konkreten Last-, Sicherheits-
+die noch fehlende Produktionsidentität und Worker-/Queue-Infrastruktur.
+Eine Migration sollte jedoch von konkreten Last-, Sicherheits-
 oder Änderungsanforderungen ausgelöst werden, nicht vom Wunsch nach einer
 abstrakteren Architektur.
 
@@ -57,9 +57,10 @@ abstrakteren Architektur.
 
 ### Was Wartung erschwert
 
-- „Agent“, „Modellklasse“ und „LLM-Aufruf“ bedeuten nicht dasselbe. Aktuell
-  ruft nur die Klassifikation tatsächlich ein Modell auf; UI und Preflight
-  behandeln trotzdem vier Rollen als modellnutzend.
+- „Agent“, „Modellklasse“ und „LLM-Aufruf“ bedeuten nicht dasselbe. Die drei
+  tatsächlichen Aufrufer (Router und zwei Extraktionen) sind deshalb als
+  gemeinsame Profile in `config.py` zentralisiert; UI und Preflight lesen
+  genau diese Source of Truth.
 - Ein neuer Prozess ist nur teilweise registry-getrieben und erfordert
   weiterhin Änderungen an Graph, Routing, UI-View, Übersetzungen und Tests.
 - Fallzustand und Fallliste hängen am LangGraph-Checkpoint; es gibt keine
@@ -231,12 +232,12 @@ Prozess B endet mit der Archivierung. Er schreibt nie nach Navision.
 | Verträge/Konfiguration | `config.py`, `contracts.py`, `agent_registry.py`, `process_registry.py` | Einstellungen, persistierte Nachrichten, Agenten- und Prozessmetadaten | möglichst keine höheren Schichten |
 | Governance | `governance/ad.py`, `policy.py`, `audit.py` | Identität/Gruppen, Write-/Approval-Regeln, Audit-Kette | Konfiguration und Agenten-Registry; nie LLM, Graph oder UI |
 | Reader | `tools/reader.py` | autorisierter PDF-Zugriff, Parsing, Dokumenthash | Governance und Konfiguration |
-| LLM | `llm/client.py`, `extraction.py`, `preflight.py`, `model_overrides.py` | Providerwahl, Transport, Schema-Validierung, Readiness | Agenten-Registry und Konfiguration |
+| LLM | `llm/client.py`, `extraction.py`, `preflight.py` | Providerwahl, Transport, Schema-Validierung, Readiness | Agenten-Registry und Konfiguration |
 | Domain | `agents/shared/`, `agents/payment_confirmation/`, `agents/incoming_invoice/` | fachliche Entscheidungen und Zielsystemaufrufe | Governance, LLM beziehungsweise Adapter |
 | Orchestrierung | `graph/workflow.py`, `graph/nodes/`, `graph/state.py` | Nodes verdrahten, Status fortschreiben, HITL unterbrechen | Domain-Komponenten und Verträge |
 | Projektionen | `graph/cases.py`, `graph/effects.py` | Fallliste/-status und Nachweis des Zielsystemeffekts | Checkpoint beziehungsweise Stammdaten-DB |
 | Adapter | `mocks/navision.py`, `mocks/elo.py` | strikte simulierte Zielsysteme | DB und Audit |
-| Präsentation | `ui/`, `demo.py` | Start/Fortsetzung, Anzeige, Übersetzung | Graph, Projektionen, Registries; keine Policy-Entscheidung nur im UI |
+| Präsentation | `ui/`, `demo.py` | Start/Fortsetzung, Anzeige, Übersetzung; Identitätsadapter in `ui/shared/identity.py` | Graph, Projektionen, Registries; keine Policy-Entscheidung nur im UI |
 
 Die wichtigste erzwungene Grenze ist `governance/`: Eine
 Berechtigungsentscheidung darf weder ein LLM noch eine von ihr kontrollierte
@@ -299,11 +300,11 @@ effektiven Profile. Deterministische Agenten erscheinen ausdrücklich als
 
 | Speicher | Inhalt | Besitzer/Zugriff | Lebenszyklus |
 |---|---|---|---|
-| `data/inbox/*.pdf` | hochgeladene und generierte Rohbelege | Intake schreibt, Reader liest, UI zeigt Vorschau | zur Laufzeit keine Bereinigung; der Demo-Generator setzt PDFs zurück |
-| `data/masterdata.db` | Rechnungen, Kostenstellen, Lieferanten, AD-Mock, Uploads, Archiv-Mock, Audit | fast alle fachlichen Komponenten über kurze SQLite-Verbindungen | durch `data.generate` für Demo-Daten neu erzeugbar |
+| `data/demo/` | versionierte, unveränderliche Seed-DB, Manifest und 13 synthetische PDFs | Generator schreibt nur mit `--seed-bundle`; Bootstrap liest | immer im Repository vorhanden; eine Integritätsprüfung läuft im Test |
+| `data/inbox/<upload_id>/*.pdf` | hochgeladene Rohbelege; generierte Demo-Belege liegen direkt im Inbox-Ordner | Intake schreibt atomar und unveränderlich, Reader liest, UI zeigt Vorschau | gleiche Dateinamen überschreiben einander nicht; der Demo-Generator setzt Demo-PDFs zurück |
+| `data/masterdata.db` | beschreibbare Laufzeitkopie mit Rechnungen, Kostenstellen, Lieferanten, AD-Mock, Uploads, Archiv-Mock und Audit | fast alle fachlichen Komponenten über kurze SQLite-Verbindungen | wird bei Fehlen atomar aus `data/demo/masterdata.seed.db` kopiert; vorhandener Zustand gewinnt |
 | `data/checkpoints.sqlite` | LangGraph-State und Interrupts pro `thread_id` | kompilierter Graph; `graph/cases.py` liest Thread-IDs direkt | Fall ist hier die Source of Truth |
-| `data/model_overrides.json` | live gesetzte Provider-/Modellwahl | Modellseite und `llm/model_overrides.py` | sofort wirksam, ohne Neustart |
-| `.env` | globale Konfiguration | `config.py` beim Import | Änderung erfordert Neustart |
+| `.env` | Provider-, Verbindungs- und Modellprofile | `config.py`; die Agentenkonfiguration schreibt atomar | gespeicherte UI-Änderungen werden in der laufenden Sitzung neu geladen |
 
 ### Fall, Upload und Dokument sind verschiedene Identitäten
 
@@ -317,6 +318,11 @@ nicht in `masterdata.db` dupliziert, sondern ausschließlich aus dem
 Checkpoint gelesen. Die Fallübersicht scannt dafür alle Thread-IDs und ruft
 pro Thread `app.get_state()` auf; das ist für wenige Demo-Fälle akzeptabel,
 aber keine skalierbare Query-Schnittstelle.
+
+`data/bootstrap.py` trennt Repositoryzustand und Demo-Laufzeit: UI, CLI und
+Mocks installieren nur fehlende Dateien. Ein normaler Start überschreibt
+niemals eine bereits veränderte Datenbank oder ein vorhandenes PDF. Tests
+installieren denselben Seed-Bundle in ein temporäres Verzeichnis.
 
 ### Transaktionsgrenzen
 
@@ -442,8 +448,9 @@ Produktivadapter dahinter legen. Zusätzlich festlegen:
 
 ### Modell oder Provider ändern
 
-- Globale Defaults: `.env`/`config.py`; Neustart nötig.
-- Laufzeit-Override: `data/model_overrides.json`; sofort wirksam.
+- Eine Source of Truth: die drei Profile in `.env`, gelesen über
+  `config.py::Settings.profile()` und bearbeitet auf der Seite
+  „Agentenkonfiguration“.
 - Schema-/Retry-Verhalten: `llm/extraction.py`.
 - Tatsächlichen Aufrufer per `rg 'client_for\(|extract\('` verifizieren;
   nicht allein auf `model_class` vertrauen.
@@ -451,7 +458,9 @@ Produktivadapter dahinter legen. Zusätzlich festlegen:
 ## Test- und Verifikationsstrategie
 
 Die Tests prüfen überwiegend deterministische Architekturregeln; reale
-Modellqualität wird nicht gemessen.
+Modellqualität wird nicht gemessen. `tests/conftest.py` erzeugt dafür einmal
+pro Testlauf eine isolierte Laufzeitdatenbank samt Demo-PDFs. Entwicklerdaten
+unter `data/` werden weder gelesen noch verändert.
 
 | Risiko | Relevante Tests |
 |---|---|
@@ -486,10 +495,8 @@ Vor Übergabe die vollständige Suite:
 
 | Priorität | Risiko | Auswirkung | Empfohlene Maßnahme |
 |---|---|---|---|
-| hoch | Registry/Preflight behaupten LLM-Nutzung für Orchestrator, Buchung und ELO, die nicht stattfindet | unnötige Modellvoraussetzungen und irreführende Bedienung/Doku | getrennte Felder für Risikoklasse und `invokes_model` oder reale Aufrufer als Source of Truth verwenden |
-| hoch | Unterschiedlicher Inhalt mit gleichem Dateinamen überschreibt in `data/inbox` die ältere Datei | alter Upload/Case kann auf veränderten Rohbeleg zeigen | immutable Ablage unter `upload_id` oder Content-Hash; Originalname nur als Metadatum |
-| hoch vor Produktion | SQLite + globale Audit-Hashkette + synchrone Läufe | Locks/Races und geringe Parallelität | Worker-Queue, transaktionale DB, serialisierter Audit-Writer |
-| hoch vor Produktion | Mock-Login und unvollständiges Vier-Augen-Prinzip | Identität und Funktionstrennung nicht belastbar | OIDC/Entra, serverseitige Claims, `approver != submitter` in Policy |
+| hoch vor Produktion | SQLite + synchrone Läufe | geringe Parallelität; die Hashkette ist innerhalb SQLite serialisiert, aber nicht extern verankert | Worker-Queue, transaktionale Produktions-DB, externer Audit-Writer/WORM-Anker |
+| hoch vor Produktion | Mock-Login | Identität und Claims sind nicht belastbar; die Vier-Augen-Regel selbst wird serverseitig erzwungen | OIDC/Entra und serverseitig verifizierte Claims |
 | mittel | Cases werden über internes Checkpoint-Schema aufgelistet | O(n)-Zugriff und Kopplung an LangGraph-SQLite-Schema | eigene Fallprojektion/Event-Consumer mit stabiler Query-API |
 | mittel | keine Versionierung von State, Checkpoints und Audit-Schema | Deployments können wartende Cases unlesbar machen | Schema-/Contract-Versionen und Migrations-/Drain-Strategie |
 | mittel | direkte synchrone HTTP-Aufrufe ohne Retry/Outbox | unklare Recovery nach Teilfehlern | Adapter, Idempotency-Key, Retry-Klassen, Outbox |

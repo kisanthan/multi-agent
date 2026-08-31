@@ -19,8 +19,16 @@ details; this document adds nothing architectural -- for that, see
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cp .env.example .env
-.venv/bin/python -m data.generate        # synthetic master data + PDFs
 ```
+
+Synthetic PDFs, their manifest and a pristine SQLite database are already
+versioned under `data/demo/`. On the first UI/CLI/mock access they are copied
+atomically to the ignored runtime paths under `data/`. Existing runtime data
+is never overwritten automatically.
+
+Reset the writable runtime explicitly with `python -m data.generate`. After
+an intentional change to the fixture definitions, maintainers update the
+repository bundle with `python -m data.generate --seed-bundle`.
 
 `.env` is where every runtime switch lives: amount tolerance, model
 provisioning, which PDF parser, and the two mock target-system URLs. Changes

@@ -25,6 +25,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+import config
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
@@ -134,8 +135,6 @@ def compile_graph(
     """
     from langgraph.checkpoint.sqlite import SqliteSaver
 
-    from config import CHECKPOINT_PATH
-
-    path = Path(checkpoint_path or CHECKPOINT_PATH)
+    path = Path(checkpoint_path or config.CHECKPOINT_PATH)
     con = sqlite3.connect(path, check_same_thread=False)
     return build_graph().compile(checkpointer=SqliteSaver(con)), con

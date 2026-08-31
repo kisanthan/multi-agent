@@ -73,9 +73,12 @@ require external anchoring (e.g., periodically publishing the head hash,
 WORM storage). For a demonstration artifact, the chaining is sufficient and
 the proof is delivered.
 
-### L6 -- No concurrency / no multi-user operation
-SQLite in WAL mode, designed for one case at a time. Parallel runs against
-the same DB are not safeguarded.
+### L6 -- Limited concurrency / no production multi-user operation
+SQLite in WAL mode remains designed for a small demonstration workload.
+Audit appends acquire the SQLite writer lock before reading the current
+chain head, so concurrent writers cannot silently fork the hash chain.
+That does not turn SQLite, the synchronous UI, or the mocks into a
+production multi-user platform.
 
 ### L7 -- Model versions and prices
 All model IDs (`claude-opus-4-8`, `claude-haiku-4-5`, `qwen3:8b`,
@@ -107,25 +110,24 @@ The flip side is more fundamental and instructive for the thesis: **a
 hash-chained table cannot be schema-migrated.** Existing entries were
 hashed without the new fields; including them in the hash material would
 break the chain for every legacy entry. In the prototype this is
-consequence-free -- all data is synthetic, and `python -m data.generate`
-rebuilds it from scratch. A production system would instead need a
+consequence-free -- all data is synthetic, and the versioned seed bundle
+can rebuild the writable runtime from scratch. A production system would instead need a
 versioned chain: the old chain is closed off and its head hash anchored as
 the genesis of the new chain, with a version marker per entry. The
 prototype does not implement this.
 
-### L10 -- Four-eyes principle only partially enforced
-`governance/policy.py` checks membership in `SG-CHG-Freigabe`, but not
-whether the approver and the submitter are the same person. The UI visibly
-flags it when both are identical; it is not technically prevented.
-Enforcing it would be an extension of the policy (with its own tests) and
-is deliberately not part of the UI rework.
+### L10 -- Prototype identity instead of production authentication
+The four-eyes principle is enforced in `governance/policy.py`: approval
+requires group membership and `approver != submitter`, including resumes
+that bypass the UI. The remaining limitation is identity assurance. A user
+is selected in the prototype sidebar; there is no OIDC/Entra login and no
+server-verified token carrying the claims.
 
 ## Environment-related notes (this machine)
 
 - Runs on Python 3.14; all dependencies have native wheels. `uv` could not
   be installed due to broken Homebrew permissions -- venv + a pinned
   `requirements.txt` satisfy reproducibility just as well.
-- The Faker import is unusually slow on this (heavily filled) filesystem
-  (~40s). That is why only `data/generate.py` imports Faker; the demo and
-  tests use the paths from `config.py` and stay fast. Test data is
-  generated once via `python -m data.generate`.
+- Only explicit `data.generate` regeneration commands import Faker. Normal
+  demos and tests copy the small versioned seed bundle and therefore do not
+  pay generation cost or depend on Faker at startup.

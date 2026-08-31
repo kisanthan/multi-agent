@@ -17,14 +17,16 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from config import DB_PATH
+import config
+from data.bootstrap import ensure_configured_runtime
 from governance.audit import CaseReference, Decision, log_entry
 
 app = FastAPI(title="ELO-Mock (DMS)", version="1.0")
 
 
 def _con() -> sqlite3.Connection:
-    return sqlite3.connect(DB_PATH)
+    ensure_configured_runtime()
+    return sqlite3.connect(config.DB_PATH)
 
 
 class Filing(BaseModel):

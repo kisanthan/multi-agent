@@ -105,6 +105,16 @@ def test_approver_may_approve(con):
     assert check_approval(con, actor=APPROVER, agent_id="kostenstelle").allowed
 
 
+def test_approver_may_not_approve_own_document(con):
+    e = check_approval(
+        con, actor=APPROVER, submitter=APPROVER, agent_id="kostenstelle"
+    )
+
+    assert e.outcome is Outcome.DENIED
+    assert e.rule == "four_eyes"
+    assert "verschiedene Personen" in e.reason
+
+
 def test_submitter_may_not_approve(con):
     """Four-eyes principle: whoever submits does not also approve."""
     e = check_approval(con, actor=SUBMITTER, agent_id="kostenstelle")

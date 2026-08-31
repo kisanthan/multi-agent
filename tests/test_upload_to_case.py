@@ -37,12 +37,12 @@ def _test_data():
 
 @pytest.fixture
 def production():
-    """Read connection to the real database.
+    """Read connection to the test session's isolated runtime database.
 
     The graph nodes open their own connection to `DB_PATH` and write their
     audit entries there -- the `con` fixture's in-memory database does not
-    see them. This connection is therefore needed for statements about the
-    trail of a real run.
+    see them. This connection is therefore needed for assertions about the
+    integration run's trail.
     """
     import sqlite3
 
@@ -67,6 +67,7 @@ def app(monkeypatch, tmp_path):
     elo = TestClient(elo_mock.app)
 
     def fake_post(url, **kwargs):
+        kwargs.pop("timeout", None)
         if url.endswith("/booking"):
             return navision.post("/booking", **kwargs)
         if url.endswith("/archive"):

@@ -104,7 +104,7 @@ def _upload_section(person) -> None:
                     else i18n.t("upload.accept_many", count=len(acceptable)))
     clicked = st.button(
         button_label if acceptable else i18n.t("upload.accept"),
-        type="primary", disabled=not acceptable, use_container_width=True,
+        type="primary", disabled=not acceptable, width="stretch",
     )
 
     if clicked:
@@ -155,7 +155,7 @@ def _document_list(upn: str, app) -> None:
                     st.caption(file_size(document.stat().st_size))
             start_clicked = button_col.button(
                 i18n.t("upload.start"), key=f"start_{document.name}",
-                use_container_width=True)
+                width="stretch")
 
             if start_clicked:
                 con = connection()

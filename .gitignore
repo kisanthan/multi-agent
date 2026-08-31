@@ -3,6 +3,7 @@
 .env
 .env.*
 !.env.example
+.streamlit/secrets.toml
 
 # --- Python -----------------------------------------------------------------
 __pycache__/
@@ -34,26 +35,29 @@ htmlcov/
 
 # --- Editors and tooling ----------------------------------------------------
 .claude/
+.agents/
 .idea/
 .vscode/
 *.swp
 *~
 
-# --- Generated artifacts ----------------------------------------------------
-# Reproducible via `python -m data.generate` (fixed seed), and therefore do
-# not belong in version control.
+# --- Runtime artifacts ------------------------------------------------------
+# Writable copies used by the app. The immutable, versioned originals live
+# under data/demo/ and are deliberately not ignored.
 data/masterdata.db
 data/masterdata.db-wal
 data/masterdata.db-shm
 data/manifest.json
-data/inbox/*.pdf
+data/inbox/
 data/checkpoints.sqlite
 data/checkpoints.sqlite-wal
 data/checkpoints.sqlite-shm
+data/*.db-journal
+data/*.sqlite-journal
 
-# Runtime state, written by the UI (ui/pages/models.py): per-agent model
-# overrides. Machine-local operator configuration, not source.
-data/model_overrides.json
+# Legacy generated names from before the English path migration.
+data/stammdaten.db*
+data/eingang/
 
 # --- OS ---------------------------------------------------------------------
 .DS_Store

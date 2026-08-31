@@ -27,9 +27,6 @@ CHECKPOINT_PATH = DATA_DIR / "checkpoints.sqlite"
 INTAKE_DIR = DATA_DIR / "inbox"
 MANIFEST_PATH = DATA_DIR / "manifest.json"
 ENV_PATH = PROJECT_ROOT / ".env"
-# Per-agent model overrides set live from the UI (ui/pages/models.py) --
-# takes precedence over MODEL_MODE below. See llm/model_overrides.py.
-MODEL_OVERRIDES_PATH = DATA_DIR / "model_overrides.json"
 
 
 class UnknownSettingError(Exception):

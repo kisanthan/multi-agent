@@ -78,7 +78,9 @@ def book(con: sqlite3.Connection, *, number: str, amount_eur: float, actor: str,
             con.commit()
             return BookingResult(False, True, decision.reason, number)
     else:
-        permission = check_approval(con, actor=approved_by, agent_id=AGENT_ID)
+        permission = check_approval(
+            con, actor=approved_by, agent_id=AGENT_ID, submitter=actor
+        )
         if not permission.allowed:
             log_entry(con, actor=approved_by, agent=AGENT_ID, action="freigabe_verweigert",
                       decision=Decision.DENIED, reason=permission.reason,

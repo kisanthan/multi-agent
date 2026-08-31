@@ -11,9 +11,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from agent_registry import REGISTRY, ModelClass
 from config import ModelMode, ProfileId, Provider, settings
-from llm.client import LLMUnreachable, choose_model, choose_profile, list_models
+from llm.client import LLMUnreachable, choose_profile, list_models
 
 
 @dataclass
@@ -31,14 +30,13 @@ class Readiness:
 def required_models() -> list[str]:
     """Which models does the current configuration need?
 
-    Derived from the registry: only agents with model_class != NO_MODEL
-    call a model at all.
+    Derived from the three effective runtime profiles. ``Settings.profile``
+    owns the legacy ``MODEL_MODE`` fallback, so readiness has one source of
+    truth regardless of how the configuration was created.
     """
     ids = set()
-    for agent_id, cfg in REGISTRY.items():
-        if cfg.model_class is ModelClass.NO_MODEL:
-            continue
-        choice = choose_model(agent_id)
+    for profile_id in ProfileId:
+        choice = choose_profile(profile_id)
         if choice.provider == "ollama":
             ids.add(choice.model_id)
     return sorted(ids)

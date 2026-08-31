@@ -115,6 +115,15 @@ def log_entry(con: sqlite3.Connection, *, actor: str, action: str,
     boundary, so that the booking and the audit entry become valid together
     or roll back together.
     """
+    # Reading the current chain head and appending the successor must be a
+    # single-writer operation. Otherwise two concurrent connections could
+    # read the same predecessor and create a fork. Existing write
+    # transactions already hold SQLite's writer lock; audit-only calls
+    # acquire it before reading the head. The caller still owns commit or
+    # rollback, preserving atomicity with the business operation.
+    if not con.in_transaction:
+        con.execute("BEGIN IMMEDIATE")
+
     payload = payload or {}
     ts = datetime.now(timezone.utc).isoformat()
     p_hash = _payload_hash(payload)

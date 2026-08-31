@@ -58,13 +58,11 @@ def render() -> None:
             marker = "🔒 " if cfg.oversight is OversightMode.HUMAN_IN_THE_LOOP else ""
             level = (i18n.t("architecture.level", level=cfg.autonomy_level.value)
                      if cfg.autonomy_level else i18n.t("architecture.no_level"))
-            st.markdown(
-                f'<div class="field-row">{marker}'
-                f'<b>{i18n.step_title(step.node)}</b> — '
-                f'{i18n.agent_text(step.agent_id, "name")} · {level} · '
-                f'{i18n.enum_label("oversight", cfg.oversight.value)} · '
-                f'{i18n.enum_label("model_class", cfg.model_class.value)}</div>',
-                unsafe_allow_html=True,
+            style.value_row(
+                f"{marker}{i18n.step_title(step.node)}",
+                " · ".join((i18n.agent_text(step.agent_id, "name"), level,
+                            i18n.enum_label("oversight", cfg.oversight.value),
+                            i18n.enum_label("model_class", cfg.model_class.value))),
             )
         st.divider()
 
@@ -90,7 +88,7 @@ def render() -> None:
             column["processes"]: ", ".join(cfg.processes),
             column["write"]: i18n.t("word.yes" if cfg.can_write else "word.no"),
         } for agent_id, cfg in REGISTRY.items()],
-        use_container_width=True, hide_index=True,
+        width="stretch", hide_index=True,
     )
 
     st.markdown(f"### {i18n.t('architecture.hitl_points')}")
@@ -100,15 +98,12 @@ def render() -> None:
                        f"{i18n.agent_text(agent_id, 'description')}")
 
     st.markdown(f"### {i18n.t('architecture.permissions')}")
-    st.markdown(
-        f'<div class="field-row"><b>{i18n.t("architecture.feed")}:</b> '
-        f'{i18n.t("architecture.feed.text", group=ad.READER_GROUP)}</div>'
-        f'<div class="field-row"><b>{i18n.t("architecture.approve")}:</b> '
-        f'{i18n.t("architecture.approve.text", group=ad.APPROVAL_GROUP)}</div>'
-        f'<div class="field-row"><b>{i18n.t("architecture.configure")}:</b> '
-        f'{i18n.t("architecture.configure.text", group=ad.CONFIGURATION_GROUP)}</div>'
-        f'<div class="field-row"><b>{i18n.t("architecture.configuration_revision")}:</b> '
-        f'<code>{settings.configuration_revision}</code></div>',
-        unsafe_allow_html=True,
-    )
+    style.value_row(i18n.t("architecture.feed"),
+                    i18n.t("architecture.feed.text", group=ad.READER_GROUP))
+    style.value_row(i18n.t("architecture.approve"),
+                    i18n.t("architecture.approve.text", group=ad.APPROVAL_GROUP))
+    style.value_row(i18n.t("architecture.configure"),
+                    i18n.t("architecture.configure.text", group=ad.CONFIGURATION_GROUP))
+    style.value_row(i18n.t("architecture.configuration_revision"),
+                    settings.configuration_revision)
     st.caption(i18n.t("architecture.footer"))

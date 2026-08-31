@@ -236,7 +236,10 @@ def test_sidebar_names_the_accounts_capabilities():
         pytest.skip("Erwartete Testkonten fehlen in den Stammdaten.")
 
     _account_selector(at).set_value(extern[0]).run()
-    text = " ".join(m.body for m in at.sidebar.markdown)
+    text = " ".join(
+        [m.body for m in at.sidebar.markdown]
+        + [c.value for c in at.sidebar.caption]
+    )
     assert "Nur lesen" in text
     assert "SG-CHG" not in text
     # The sign-in name sits in full below it, instead of being truncated in
@@ -244,7 +247,10 @@ def test_sidebar_names_the_accounts_capabilities():
     assert "e.extern@partner-consulting.de" in text
 
     _account_selector(at).set_value(keller[0]).run()
-    text = " ".join(m.body for m in at.sidebar.markdown)
+    text = " ".join(
+        [m.body for m in at.sidebar.markdown]
+        + [c.value for c in at.sidebar.caption]
+    )
     # The badge stays terse ("Hochladen"); the document kinds are spelled
     # out in the sentence below it.
     assert "Hochladen" in text
@@ -342,18 +348,18 @@ def test_settings_page_is_editable_for_configuration_admin():
     assert not at.exception
     assert any(t.value == "Agentenkonfiguration" for t in at.title)
     assert at.button, "Ein Konfigurations-Admin muss speichern und testen können"
-    assert len([s for s in at.selectbox if s.label == "Anbieter"]) == 3
+    # Only the active profile is rendered. Hidden configuration panels no
+    # longer create duplicate widgets or run work on every rerun.
+    assert len([s for s in at.selectbox if s.label == "Anbieter"]) == 1
     assert len([b for b in at.button
-                if b.label == "Verbindung prüfen & Modelle laden"]) == 3
-    assert len([i for i in at.text_input if i.label == "Ollama-Adresse"]) == 3
+                if b.label == "Verbindung prüfen und Modelle laden"]) == 1
+    assert len([i for i in at.text_input if i.label == "Ollama-Adresse"]) == 1
     descriptions = " ".join(
         item.value for collection in (at.markdown, at.caption, at.info)
         for item in collection
     )
     assert "ausschließlich die Belegart" in descriptions
     assert "Orchestrator" in descriptions and "kein eigenes KI-Modell" in descriptions
-    assert "Rechnungs- oder Bestellnummer und Betrag" in descriptions
-    assert "Lieferant, Rechnungspositionen" in descriptions
 
 
 def test_settings_page_is_read_only_without_configuration_right():
@@ -373,12 +379,13 @@ def test_agent_configuration_loads_provider_models_into_selectors():
         "from ui.shared.context import connection\n"
         "con = connection(); ensure_configuration_seed(con); con.close()\n"
         "from ui.pages import settings\n"
-        "settings.list_models = lambda provider: ['model-a', 'model-b']\n",
+        "from ui.settings import providers\n"
+        "providers.list_models = lambda provider: ['model-a', 'model-b']\n",
     )
     at = _page(source)
     test_button = next(
         button for button in at.button
-        if button.label == "Verbindung prüfen & Modelle laden"
+        if button.label == "Verbindung prüfen und Modelle laden"
     )
     test_button.click().run()
 

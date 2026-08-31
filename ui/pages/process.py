@@ -88,9 +88,5 @@ def _flow_overview(config: ProcessConfig) -> None:
                 note = i18n.t("process.flow.writes")
             else:
                 note = i18n.t("process.flow.reads")
-            st.markdown(
-                f'<div class="field-row"><b>{i18n.step_title(step.node)}</b>'
-                f' — {note}</div>',
-                unsafe_allow_html=True,
-            )
+            style.value_row(i18n.step_title(step.node), note)
         st.caption(i18n.t("process.flow.footer"))

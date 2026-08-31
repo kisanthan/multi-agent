@@ -11,7 +11,6 @@ from pydantic import BaseModel
 from agent_registry import ModelClass, get_config
 from config import (AuthMethod, ModelMode, ModelProfile, ProfileId, Provider,
                     settings)
-from llm.model_overrides import load_overrides
 
 
 class LLMUnreachable(Exception):
@@ -85,11 +84,6 @@ def choose_model(agent_id: str) -> ModelChoice:
             f"{cfg.name} ruft kein Sprachmodell auf (Modellklasse KEINE)."
         )
 
-    override = load_overrides().get(agent_id)
-    if override is not None:
-        # A live per-agent override (ui/pages/models.py) always wins over
-        # the mode-based default below -- that is the point of it.
-        return ModelChoice(override.provider, override.model_id, cls.value)
     if mode is ModelMode.LOCAL:
         model = settings.ollama_model_vision if cls is ModelClass.VISION else settings.ollama_model_small
         return ModelChoice("ollama", model, cls.value)

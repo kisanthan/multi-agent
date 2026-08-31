@@ -8,6 +8,8 @@ itself.
 
 from __future__ import annotations
 
+import html
+
 import streamlit as st
 
 from graph.cases import Status
@@ -15,15 +17,13 @@ from ui.shared import i18n, theme
 from ui.shared.formatting import field
 from ui.cases.steps import Step, StepStatus
 
-# Foreground/background per status. The colors never carry the meaning
-# alone -- every badge also contains the text (accessibility).
-STATUS_COLORS = {
-    Status.RUNNING: ("#0b5cad", "#e3f0fb"),
-    Status.WAITING_FOR_APPROVAL: ("#8a5a00", "#fdf3e0"),
-    Status.COMPLETED: ("#1a6b3c", "#e6f4ec"),
-    Status.REJECTED: ("#5a5a5a", "#eeeeee"),
-    Status.DENIED: ("#a3231f", "#fbeaea"),
-    Status.FAILED: ("#a3231f", "#fbeaea"),
+STATUS_BADGE_COLORS = {
+    Status.RUNNING: "blue",
+    Status.WAITING_FOR_APPROVAL: "orange",
+    Status.COMPLETED: "green",
+    Status.REJECTED: "gray",
+    Status.DENIED: "red",
+    Status.FAILED: "red",
 }
 
 SYMBOLS = {
@@ -260,42 +260,12 @@ _SURFACE_THEME = """
   .st-key-upload_documents [data-testid="stFileUploaderDropzone"]::before {
       filter:var(--app-upload-icon-filter);
   }
-  .card, .status-card {
-      background-color:var(--app-surface) !important;
-      border-color:var(--app-border) !important;
-  }
-  .badge-running {
-      color:var(--app-badge-running-text) !important;
-      background:var(--app-badge-running-background) !important;
-  }
-  .badge-waiting_for_approval {
-      color:var(--app-badge-waiting-text) !important;
-      background:var(--app-badge-waiting-background) !important;
-  }
-  .badge-completed, .rights-full {
-      color:var(--app-badge-completed-text) !important;
-      background:var(--app-badge-completed-background) !important;
-  }
-  .badge-rejected, .rights-readonly {
-      color:var(--app-badge-neutral-text) !important;
-      background:var(--app-badge-neutral-background) !important;
-  }
-  .badge-denied, .badge-failed {
-      color:var(--app-badge-danger-text) !important;
-      background:var(--app-badge-danger-background) !important;
-  }
-  .rights-partial {
-      color:var(--app-badge-running-text) !important;
-      background:var(--app-badge-running-background) !important;
-  }
 """
 
 _CSS = """
 <style>
   __THEME__
   __SURFACE_THEME__
-  .badge {display:inline-block; padding:2px 10px; border-radius:11px;
-          font-size:0.78rem; font-weight:600; white-space:nowrap;}
   .stepper {display:flex; flex-wrap:wrap; gap:6px; margin:14px 0 6px 0;}
   .step {flex:1 1 130px; min-width:130px; border-top:3px solid var(--app-border);
          padding:8px 10px 10px 0;}
@@ -307,11 +277,6 @@ _CSS = """
   .step.failed {border-top-color:var(--app-danger);} .step.failed .sym {color:var(--app-danger);}
   .step.open {opacity:0.55;}
   .step.skipped {opacity:0.5; border-top-style:dashed;}
-  .field-row {font-size:0.88rem; margin:2px 0;}
-  .field-row b {font-weight:600;}
-  .card {border:1px solid var(--app-border); border-radius:9px;
-         background:var(--app-surface); padding:14px 16px; margin-bottom:10px;}
-
   /* The upload is the main point of the start page and must look like it.
      Streamlit's dropzone is by default a narrow row with a button; here it
      becomes a large, centered drop area.
@@ -365,35 +330,6 @@ _CSS = """
   [data-testid="stIconMaterial"] {
       display:none;
   }
-  .section-title {font-size:0.78rem; font-weight:700; letter-spacing:0.09em;
-                  text-transform:uppercase; opacity:0.6; margin:6px 0 2px 0;}
-
-  /* The sign-in area as a set-off card: who is currently signed in and what
-     that account may do governs every button in the app -- it must not
-     disappear as a pale line. */
-  /* Status card as ONE single, raw-rendered HTML block (a single
-     st.markdown() call) instead of a Streamlit container with multiple
-     children. Reason: Streamlit measures the height of multi-element
-     containers via JS/ResizeObserver and fixes it -- also with
-     `!important`, via a class that could not be reliably overridden via
-     CSS. A multi-line sentence in small type was sized too tightly there
-     and overflowed the card's edge. A single <div>, natively sized by the
-     browser, does not have this problem at all: it is always exactly as
-     tall as its content. */
-  .status-card {
-      border:1px solid var(--app-border); border-radius:12px;
-      padding:11px 13px; margin:2px 0 10px 0;
-      background:var(--app-surface);
-  }
-  .account-upn {font-size:0.74rem; opacity:0.65; margin-bottom:8px;
-                word-break:break-all;}
-  .rights {display:inline-flex; align-items:center; gap:6px;
-           padding:4px 11px; border-radius:11px;
-           font-size:0.79rem; font-weight:600;}
-  .rights .dot {width:7px; height:7px; border-radius:50%;
-                background:currentColor; flex:none;}
-  .rights-sentence {font-size:0.76rem; opacity:0.75; line-height:1.4;
-                    margin:7px 0 0 0;}
 </style>
 """
 
@@ -416,47 +352,26 @@ def css(dropzone_hint: str | None = None) -> None:
                 unsafe_allow_html=True)
 
 
-def badge(status: Status) -> str:
-    """Status chip as HTML (for embedding in markdown blocks)."""
-    color, background = STATUS_COLORS[status]
-    return (f'<span class="badge badge-{status.value}" '
-            f'style="color:{color}; background:{background};">'
-            f'{i18n.status_label(status)}</span>')
+def badge_color(status: Status) -> str:
+    """Native Streamlit badge color for a case status."""
+    return STATUS_BADGE_COLORS[status]
 
 
 def dataframe(data, **kwargs):
-    """Interactive dataframe with readable cells in the session theme.
-
-    Streamlit draws dataframes on a canvas, so page-level CSS can theme the
-    frame but not the cell pixels. A pandas Styler supplies those colors to
-    the canvas while keeping sorting, searching, copying, and resizing.
-    """
-    if not theme.is_dark():
-        return st.dataframe(data, **kwargs)
-
-    import pandas as pd
-
-    frame = data if isinstance(data, pd.DataFrame) else pd.DataFrame(data)
-    column_order = kwargs.pop("column_order", None)
-    if column_order:
-        frame = frame.reindex(columns=column_order)
-    styled = frame.style.set_properties(**{
-        "background-color": "#171d27",
-        "color": "#f1f5f9",
-        "border-color": "#3b4658",
-    })
-    return st.dataframe(styled, **kwargs)
+    """Render a dataframe; colors come from Streamlit's light/dark theme."""
+    return st.dataframe(data, **kwargs)
 
 
 def stepper(steps: list[Step]) -> None:
     """Draws the process bar."""
     parts = ['<div class="stepper">']
     for s in steps:
-        hint = f'<span class="hint">{s.hint}</span>' if s.hint else ""
+        hint = (f'<span class="hint">{html.escape(str(s.hint))}</span>'
+                if s.hint else "")
         parts.append(
             f'<div class="step {s.status.value}">'
             f'<span class="sym">{SYMBOLS[s.status]}</span>'
-            f'<span class="title">{s.title}</span>{hint}</div>'
+            f'<span class="title">{html.escape(str(s.title))}</span>{hint}</div>'
         )
     parts.append("</div>")
     st.markdown("".join(parts), unsafe_allow_html=True)
@@ -468,73 +383,29 @@ def fields(data: dict, keys) -> None:
         if k not in data or data[k] in (None, "", []):
             continue
         lbl, value = field(k, data[k])
-        st.markdown(f'<div class="field-row"><b>{lbl}:</b> {value}</div>',
-                    unsafe_allow_html=True)
+        value_row(lbl, value)
+
+
+def value_row(label: str, value) -> None:
+    """Render a label/value pair without injecting dynamic HTML."""
+    with st.container(horizontal=True, vertical_alignment="center", gap="small"):
+        st.markdown(f"**{label}:**")
+        st.write(value)
 
 
 def section_title(text: str) -> None:
     """Small heading to structure a page."""
-    st.markdown(f'<div class="section-title">{text}</div>', unsafe_allow_html=True)
-
-
-def _rights_colors(person) -> tuple[str, str]:
-    """Foreground/background of the rights badge.
-
-    Green means can act, gray means can only watch -- the same logic as for
-    case statuses. The text always sits next to it; color alone never
-    carries the meaning.
-    """
-    if person.can_upload and person.can_confirm:
-        return "#1a6b3c", "#e6f4ec"
-    if person.can_upload or person.can_confirm:
-        return "#0b5cad", "#e3f0fb"
-    return "#5a5a5a", "#e8e8e8"
-
-
-def _rights_tone(person) -> str:
-    if person.can_upload and person.can_confirm:
-        return "full"
-    if person.can_upload or person.can_confirm:
-        return "partial"
-    return "readonly"
-
-
-def rights_badge(person) -> str:
-    """Status badge for an account's rights, usable standalone."""
-    color, background = _rights_colors(person)
-    tone = _rights_tone(person)
-    return (f'<span class="rights rights-{tone}" '
-            f'style="color:{color}; background:{background};">'
-            f'<span class="dot"></span>{person.rights_short}</span>')
-
-
-def status_card_html(person, *, upn: str | None = None) -> str:
-    """Builds the sign-in card as a single HTML block.
-
-    Kept as a pure function separate from Streamlit, so the cohesion of
-    frame, badge, and sentence can be tested without a running app.
-    """
-    color, background = _rights_colors(person)
-    tone = _rights_tone(person)
-    upn_row = (f'<div class="account-upn">{upn}</div>' if upn else "")
-    return (
-        f'<div class="status-card">'
-        f'{upn_row}'
-        f'<span class="rights rights-{tone}" '
-        f'style="color:{color}; background:{background};">'
-        f'<span class="dot"></span>{person.rights_short}</span>'
-        f'<div class="rights-sentence">{person.capabilities}</div>'
-        f'</div>'
-    )
+    st.caption(text)
 
 
 def status_card(person, *, upn: str | None = None) -> None:
-    """The sign-in card: account, rights badge, and the full sentence.
-
-    Deliberately ONE single `st.markdown()` call instead of several
-    elements in a Streamlit container -- only that way is it guaranteed
-    that the frame fits exactly around the actual content, even when the
-    sentence wraps to two lines. A Streamlit container measures its own
-    height via JS and fixes it; with multi-line text that missed the mark.
-    """
-    st.markdown(status_card_html(person, upn=upn), unsafe_allow_html=True)
+    """Render account identity and rights with native Streamlit elements."""
+    with st.container(border=True):
+        if upn:
+            st.caption(upn)
+        st.badge(person.rights_short, color=(
+            "green" if person.can_upload and person.can_confirm
+            else "blue" if person.can_upload or person.can_confirm
+            else "gray"
+        ))
+        st.caption(person.capabilities)

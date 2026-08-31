@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import functools
 import importlib
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -30,10 +29,11 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import process_registry  # noqa: E402
-from config import DB_PATH  # noqa: E402
-from governance.ad import ensure_configuration_seed  # noqa: E402
-from ui.shared import i18n, style, theme, user  # noqa: E402
+import config  # noqa: E402
+from data.bootstrap import ensure_configured_runtime  # noqa: E402
+from ui.shared import i18n, style, theme  # noqa: E402
 from ui.shared.context import SESSION_USER, register_pages  # noqa: E402
+from ui.shared.identity import SqliteIdentityProvider  # noqa: E402
 
 st.set_page_config(page_title=i18n.t("app.page_title"),
                    page_icon="📄", layout="wide")
@@ -50,49 +50,38 @@ def _login() -> None:
     group: the group name helps no one who cannot manage it anyway.
 
     """
-    con = sqlite3.connect(DB_PATH)
-    try:
-        ensure_configuration_seed(con)
-        accounts = con.execute(
-            "SELECT upn, display_name FROM ad_users ORDER BY display_name"
-        ).fetchall()
+    identity = SqliteIdentityProvider(config.DB_PATH)
+    accounts = identity.accounts()
 
-        # `with st.sidebar:` instead of individual `st.sidebar.xxx()` calls:
-        # the status card is drawn via a plain `st.markdown()` (see
-        # `style.status_card`), and without this block that would find its
-        # way into the main area instead of the sidebar.
-        with st.sidebar:
-            style.css()
+    with st.sidebar:
+        style.css()
 
-            if not accounts:
-                st.error(i18n.t("app.no_accounts"))
-                st.stop()
+        if not accounts:
+            st.error(i18n.t("app.no_accounts"))
+            st.stop()
 
-            # Display name only: the sign-in name does not fit the narrow
-            # sidebar and was truncated there. It appears below it instead
-            # -- unless two accounts share a name, then it must go into the
-            # selection.
-            names = [name for _, name in accounts]
-            unique = len(set(names)) == len(names)
-            labels = {(name if unique else f"{name} ({upn})"): upn
-                      for upn, name in accounts}
+        # Display name only: the sign-in name does not fit the narrow
+        # sidebar and was truncated there. It appears below it instead
+        # -- unless two accounts share a name, then it must go into the
+        # selection.
+        names = [account.display_name for account in accounts]
+        unique = len(set(names)) == len(names)
+        labels = {
+            (account.display_name if unique
+             else f"{account.display_name} ({account.upn})"): account.upn
+            for account in accounts
+        }
 
-            choice = st.selectbox(i18n.t("app.signed_in_as"), list(labels))
-            upn = labels[choice]
-            st.session_state[SESSION_USER] = upn
-            person = user.load(con, upn)
+        choice = st.selectbox(i18n.t("app.signed_in_as"), list(labels))
+        upn = labels[choice]
+        st.session_state[SESSION_USER] = upn
+        person = identity.user(upn)
 
-            # One card, one call: a badge for the quick glance, the full
-            # sentence below it -- including the document kinds this
-            # account may submit. Visible, not in a tooltip: what is only
-            # found by hovering is not found.
-            #
-            # The sign-in name is only shown here if it is not already in
-            # the selection itself (non-unique display names force it
-            # there) -- otherwise it would appear twice.
-            style.status_card(person, upn=upn if unique else None)
-    finally:
-        con.close()
+        # One card, one call: a badge for the quick glance, the full
+        # sentence below it -- including the document kinds this account
+        # may submit. The sign-in name is shown only when it is not already
+        # in the selector (duplicate display names force it there).
+        style.status_card(person, upn=upn if unique else None)
 
 
 def _build_pages() -> dict:
@@ -148,6 +137,12 @@ def _build_pages() -> dict:
 
 
 def main() -> None:
+    try:
+        ensure_configured_runtime()
+    except FileNotFoundError as error:
+        st.error(i18n.t("app.demo_seed_missing", error=error))
+        st.stop()
+
     sync_native = getattr(theme, "sync_native", None)
     if sync_native is None:
         # Streamlit can retain an imported helper module while hot-reloading

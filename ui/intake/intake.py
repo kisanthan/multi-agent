@@ -11,7 +11,9 @@ it and when; the user deliberately starts processing afterwards.
 from __future__ import annotations
 
 import hashlib
+import os
 import sqlite3
+import tempfile
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -121,12 +123,26 @@ def store(con: sqlite3.Connection, *, filename: str, data: bytes,
     up outside the intake folder.
     """
     safe_name = Path(filename).name
-    target = INTAKE_DIR / safe_name
-    INTAKE_DIR.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(data)
+    upload_id = f"UP-{uuid.uuid4().hex[:12].upper()}"
+    upload_dir = INTAKE_DIR / upload_id
+    target = upload_dir / safe_name
+    upload_dir.mkdir(parents=True, exist_ok=False)
+
+    # Write atomically inside the upload's immutable directory. The original
+    # filename remains display metadata; it is never the storage identity.
+    fd, temp_name = tempfile.mkstemp(prefix=".upload-", dir=upload_dir)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, target)
+    finally:
+        if os.path.exists(temp_name):
+            os.unlink(temp_name)
 
     upload = Upload(
-        upload_id=f"UP-{uuid.uuid4().hex[:12].upper()}",
+        upload_id=upload_id,
         filename=safe_name,
         path=str(target),
         file_type=Path(safe_name).suffix.lower().lstrip("."),

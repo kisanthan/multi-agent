@@ -6,6 +6,10 @@ change. Without this proof, "tamper-evident" would just be a claim.
 
 from __future__ import annotations
 
+import sqlite3
+import threading
+from pathlib import Path
+
 import pytest
 
 from governance.audit import (
@@ -198,3 +202,43 @@ def test_payload_hash_is_order_independent(con):
     b = log_entry(con, actor="a@b.c", action="x", decision=Decision.INFO,
                  reason="-", payload={"zwei": 2, "eins": 1})
     assert a.payload_hash == b.payload_hash
+
+
+def test_concurrent_append_waits_for_the_current_chain_writer(tmp_path):
+    """Two writers must never derive successors from the same chain head."""
+    database = tmp_path / "audit.sqlite"
+    schema = Path(__file__).parent.parent / "data" / "schema.sql"
+    first_connection = sqlite3.connect(database, timeout=2)
+    first_connection.executescript(schema.read_text(encoding="utf-8"))
+
+    first = log_entry(
+        first_connection, actor="first", action="x",
+        decision=Decision.INFO, reason="first writer",
+    )
+    attempting_lock = threading.Event()
+    result = {}
+
+    def append_second() -> None:
+        con = sqlite3.connect(database, timeout=2)
+        con.set_trace_callback(
+            lambda statement: attempting_lock.set()
+            if statement == "BEGIN IMMEDIATE" else None
+        )
+        try:
+            result["entry"] = log_entry(
+                con, actor="second", action="x",
+                decision=Decision.INFO, reason="second writer",
+            )
+            con.commit()
+        finally:
+            con.close()
+
+    writer = threading.Thread(target=append_second)
+    writer.start()
+    assert attempting_lock.wait(timeout=2)
+    first_connection.commit()
+    writer.join(timeout=3)
+    first_connection.close()
+
+    assert not writer.is_alive()
+    assert result["entry"].prev_hash == first.hash

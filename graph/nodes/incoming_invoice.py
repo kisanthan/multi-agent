@@ -141,7 +141,10 @@ def node_cost_center_approval(state: Case) -> dict:
     # graph/nodes/payment_confirmation.py::node_exception_case.
     con = connection()
     try:
-        permission = check_approval(con, actor=response.approver, agent_id="kostenstelle")
+        permission = check_approval(
+            con, actor=response.approver, agent_id="kostenstelle",
+            submitter=state.get("actor"),
+        )
         if not permission.allowed:
             log_entry(con, actor=response.approver, agent="kostenstelle",
                      action="freigabe_verweigert",

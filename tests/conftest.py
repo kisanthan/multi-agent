@@ -2,12 +2,49 @@ from __future__ import annotations
 
 import sqlite3
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
 
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+
+_RUNTIME_DIR: tempfile.TemporaryDirectory[str] | None = None
+
+
+def pytest_configure(config) -> None:
+    """Install one isolated runtime dataset before test modules are imported.
+
+    The application deliberately opens short-lived connections from many
+    modules. Redirecting the central paths before collection keeps those
+    integration tests realistic without ever touching ``data/masterdata.db``
+    or the developer's checkpoint and upload files. The same versioned seed
+    bundle used by a fresh demo installation is the source.
+    """
+    global _RUNTIME_DIR
+
+    import config as app_config
+
+    _RUNTIME_DIR = tempfile.TemporaryDirectory(
+        prefix="multi-agent-tests-", ignore_cleanup_errors=True
+    )
+    runtime = Path(_RUNTIME_DIR.name)
+    app_config.DB_PATH = runtime / "masterdata.db"
+    app_config.CHECKPOINT_PATH = runtime / "checkpoints.sqlite"
+    app_config.INTAKE_DIR = runtime / "inbox"
+    app_config.MANIFEST_PATH = runtime / "manifest.json"
+
+    from data.bootstrap import ensure_configured_runtime
+
+    ensure_configured_runtime()
+
+
+def pytest_unconfigure(config) -> None:
+    global _RUNTIME_DIR
+    if _RUNTIME_DIR is not None:
+        _RUNTIME_DIR.cleanup()
+        _RUNTIME_DIR = None
 
 
 @pytest.fixture

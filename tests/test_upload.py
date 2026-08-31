@@ -6,6 +6,8 @@ later in the reader with a message no one understands.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from governance.audit import read_all, verify_chain
@@ -58,7 +60,10 @@ def test_oversized_file_is_rejected(con, monkeypatch):
 def test_store_writes_file_and_entry(con):
     upload = intake.store(con, filename="beleg.pdf", data=PDF, actor=ACTOR)
 
-    assert (intake.INTAKE_DIR / "beleg.pdf").read_bytes() == PDF
+    stored = Path(upload.path)
+    assert stored.read_bytes() == PDF
+    assert stored.parent.name == upload.upload_id
+    assert stored.name == "beleg.pdf"
     assert upload.uploaded_by == ACTOR
     assert upload.size_bytes == len(PDF)
     assert intake.load(con, upload.upload_id) == upload
@@ -69,7 +74,21 @@ def test_store_normalizes_path_components_in_the_name(con):
     upload = intake.store(con, filename="../../geheim.pdf", data=PDF, actor=ACTOR)
 
     assert upload.filename == "geheim.pdf"
-    assert (intake.INTAKE_DIR / "geheim.pdf").is_file()
+    stored = Path(upload.path)
+    assert stored.is_file()
+    assert stored.parent.name == upload.upload_id
+
+
+def test_same_filename_never_overwrites_an_older_upload(con):
+    first_data = PDF + b"\nfirst"
+    second_data = PDF + b"\nsecond"
+
+    first = intake.store(con, filename="beleg.pdf", data=first_data, actor=ACTOR)
+    second = intake.store(con, filename="beleg.pdf", data=second_data, actor=ACTOR)
+
+    assert first.path != second.path
+    assert Path(first.path).read_bytes() == first_data
+    assert Path(second.path).read_bytes() == second_data
 
 
 def test_identical_content_counts_as_a_duplicate(con):

@@ -10,7 +10,7 @@ import sqlite3
 
 import streamlit as st
 
-from config import DB_PATH
+import config
 
 SESSION_USER = "signed_in_user"
 
@@ -33,7 +33,7 @@ def connection() -> sqlite3.Connection:
     Deliberately not cached: Streamlit reruns happen on varying threads, and
     a SQLite connection shared across threads is not allowed.
     """
-    return sqlite3.connect(DB_PATH)
+    return sqlite3.connect(config.DB_PATH)
 
 
 def current_user() -> str:

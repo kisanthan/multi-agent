@@ -152,17 +152,18 @@ def test_provider_failure_stops_payment_without_fallback(monkeypatch):
 
 
 def test_configuration_audit_payload_excludes_secret(monkeypatch):
-    from ui.pages import settings as settings_page
+    from ui.settings import service
 
     captured = {}
     fake_con = SimpleNamespace(commit=lambda: None, close=lambda: None)
-    monkeypatch.setattr(settings_page, "save_settings", lambda updates: settings)
-    monkeypatch.setattr(settings_page, "connection", lambda: fake_con)
-    monkeypatch.setattr(settings_page, "_public_snapshot", lambda: {"profile": {}})
-    monkeypatch.setattr(settings_page, "log_entry",
+    monkeypatch.setattr(service, "save_settings", lambda updates: settings)
+    monkeypatch.setattr(service, "connection", lambda: fake_con)
+    monkeypatch.setattr(service, "public_snapshot", lambda: {"profile": {}})
+    monkeypatch.setattr(service, "log_entry",
                         lambda con, **kwargs: captured.update(kwargs))
-    settings_page._save({"openai_api_key": "top-secret",
-                         "llm_router_model": "model-x"}, "admin@example.com")
+    service.save_configuration({"openai_api_key": "top-secret",
+                                "llm_router_model": "model-x"},
+                               "admin@example.com")
     assert "top-secret" not in repr(captured)
     assert captured["payload"]["geaenderte_felder"] == ["llm_router_model"]
 

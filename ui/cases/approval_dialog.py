@@ -117,7 +117,7 @@ def open_decision(app, thread_id: str, request: dict, values: dict, *,
         decision_form(app, thread_id, request, values, upn=upn)
 
         st.divider()
-        if st.button(i18n.t("dialog.later"), use_container_width=True,
+        if st.button(i18n.t("dialog.later"), width="stretch",
                      key=f"later_{thread_id}"):
             # The case stays in the checkpoint and in the list. That it can
             # be set aside without being lost is the point of the

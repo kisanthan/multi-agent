@@ -13,7 +13,6 @@ from unittest.mock import patch
 import pytest
 
 import process_registry
-from ui.shared import style
 from ui.shared.user import User, load
 
 ALL_RIGHTS = User("a@b.c", "Alle Rechte", True, True)
@@ -107,49 +106,6 @@ def test_hints_name_no_security_group():
                      person.own_document_hint, person.label_pending):
             assert "SG-CHG" not in text
             assert "Least Privilege" not in text
-
-
-def test_status_card_is_a_single_coherent_block():
-    """Badge and sentence must sit inside the same HTML element.
-
-    Two separate Streamlit elements had previously caused the card to cut
-    off the sentence, because Streamlit measures a multi-element
-    container's block height via JS, and that measurement was too tight
-    for multi-line text. A single HTML block does not have this problem at
-    all.
-    """
-    markup = style.status_card_html(UPLOAD_ONLY, upn="a@b.c")
-
-    # A card opens and closes exactly once.
-    assert markup.count('class="status-card"') == 1
-    assert markup.startswith('<div class="status-card">')
-    assert markup.rstrip().endswith("</div>")
-    # Badge and sentence both sit inside this one card.
-    assert UPLOAD_ONLY.rights_short in markup
-    assert UPLOAD_ONLY.capabilities in markup
-
-
-def test_status_card_shows_the_sign_in_name_only_if_given():
-    without = style.status_card_html(UPLOAD_ONLY)
-    with_upn = style.status_card_html(UPLOAD_ONLY, upn="a@b.c")
-
-    assert "account-upn" not in without
-    assert "a@b.c" in with_upn
-
-
-def test_badge_distinguishes_active_from_view_only():
-    """The color follows the capability -- the text always sits next to it."""
-    full = style.rights_badge(ALL_RIGHTS)
-    partial = style.rights_badge(UPLOAD_ONLY)
-    none_ = style.rights_badge(NO_RIGHTS)
-
-    assert "#1a6b3c" in full
-    assert "#0b5cad" in partial
-    assert "#5a5a5a" in none_
-    # Color alone never carries the meaning.
-    for markup, person in ((full, ALL_RIGHTS), (partial, UPLOAD_ONLY),
-                           (none_, NO_RIGHTS)):
-        assert person.rights_short in markup
 
 
 def test_unknown_account_has_no_rights_instead_of_an_error(con):

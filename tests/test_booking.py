@@ -65,6 +65,22 @@ def test_approved_by_unknown_user_is_denied_not_booked(con, monkeypatch):
     assert verify_chain(con).valid
 
 
+def test_authorized_user_cannot_directly_approve_own_submission(con, monkeypatch):
+    _open_invoice(con)
+    _forbid_navision_call(monkeypatch)
+
+    result = booking.book(
+        con, number="RE-TEST-0001", amount_eur=500.0,
+        actor="pruefer@chg-meridian.com", document="test.pdf",
+        approved_by="pruefer@chg-meridian.com",
+    )
+
+    assert result.booked is False
+    entries = [e for e in read_all(con) if e.action == "freigabe_verweigert"]
+    assert any("verschiedene Personen" in e.reason for e in entries)
+    assert verify_chain(con).valid
+
+
 def test_approved_by_authorized_user_still_proceeds_to_booking(con, monkeypatch):
     """Sanity check: the re-verification must not break the legitimate path."""
     _open_invoice(con)

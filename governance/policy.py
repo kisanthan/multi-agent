@@ -120,13 +120,27 @@ def check_write_action(
     )
 
 
-def check_approval(con: sqlite3.Connection, *, actor: str, agent_id: str) -> Ruling:
-    """Checks whether a human may decide a HITL point (four-eyes principle)."""
+def check_approval(con: sqlite3.Connection, *, actor: str, agent_id: str,
+                   submitter: str | None = None) -> Ruling:
+    """Check approval rights and enforce separation of duties.
+
+    ``submitter`` is optional for administrative permission checks where no
+    concrete case exists. At a HITL point the caller must pass it, so a
+    member of the approval group still cannot approve their own document.
+    """
     cfg = get_config(agent_id)
     result = ad.check_approval_permission(con, actor)
-    context = {"agent": agent_id, "actor": actor, "oversight": cfg.oversight.value}
+    context = {"agent": agent_id, "actor": actor, "submitter": submitter,
+               "oversight": cfg.oversight.value}
     if not result.allowed:
         return Ruling(Outcome.DENIED, "approval_rbac", result.reason, context)
+    if submitter and actor.casefold() == submitter.casefold():
+        return Ruling(
+            Outcome.DENIED,
+            "four_eyes",
+            "Einreichung und Freigabe müssen durch verschiedene Personen erfolgen.",
+            context,
+        )
     return Ruling(Outcome.ALLOWED, "approval_rbac", result.reason, context)
 
 

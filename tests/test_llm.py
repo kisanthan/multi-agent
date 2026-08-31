@@ -20,9 +20,16 @@ from config import ModelMode, settings
 from governance.audit import read_all, verify_chain
 from llm.client import AnthropicClient, LLMUnreachable, ModelChoice, OllamaClient, choose_model
 from llm.extraction import MAX_ATTEMPTS, extract
-from llm.model_overrides import clear_override, load_overrides, save_override
 
 ACTOR = "einspeiser@chg-meridian.com"
+
+
+@pytest.fixture
+def legacy_profiles(monkeypatch):
+    """Exercise MODEL_MODE without inheriting explicit profiles from .env."""
+    for profile in ("router", "payment", "invoice"):
+        monkeypatch.setattr(settings, f"llm_{profile}_provider", None)
+        monkeypatch.setattr(settings, f"llm_{profile}_model", "")
 
 
 class Payment(BaseModel):
@@ -54,13 +61,13 @@ def model_responds(*responses, model: str = "qwen3:8b", provider: str = "ollama"
 
 # ------------------------------------------------- Model assignment (part 2)
 
-def test_local_mode_uses_ollama_everywhere():
+def test_local_mode_uses_ollama_everywhere(legacy_profiles):
     with patch.object(settings, "model_mode", ModelMode.LOCAL):
         for agent in ("klassifikation", "extraktion_zahlung", "extraktion_rechnung"):
             assert choose_model(agent).provider == "ollama"
 
 
-def test_hybrid_mode_splits_by_risk_class():
+def test_hybrid_mode_splits_by_risk_class(legacy_profiles):
     """The core claim of teil2_ki_modelle.png, followed through in code."""
     with patch.object(settings, "model_mode", ModelMode.HYBRID):
         # All actual model calls use the legacy frontier route; the remaining
@@ -69,13 +76,13 @@ def test_hybrid_mode_splits_by_risk_class():
         assert choose_model("extraktion_zahlung").provider == "anthropic"
 
 
-def test_cloud_mode_uses_anthropic_everywhere():
+def test_cloud_mode_uses_anthropic_everywhere(legacy_profiles):
     with patch.object(settings, "model_mode", ModelMode.CLOUD):
         assert choose_model("klassifikation").provider == "anthropic"
         assert choose_model("extraktion_rechnung").provider == "anthropic"
 
 
-def test_frontier_agent_gets_frontier_model():
+def test_frontier_agent_gets_frontier_model(legacy_profiles):
     with patch.object(settings, "model_mode", ModelMode.HYBRID):
         assert choose_model("extraktion_zahlung").model_id == settings.cloud_model_frontier
 
@@ -88,59 +95,6 @@ def test_deterministic_components_get_no_model(agent_id):
     model."""
     with pytest.raises(ValueError, match="kein Sprachmodell"):
         choose_model(agent_id)
-
-
-# ------------------------------------------------- Per-agent model overrides
-
-@pytest.fixture(autouse=True)
-def _overrides_file(tmp_path, monkeypatch):
-    """Every override test gets its own scratch file -- never the real one."""
-    monkeypatch.setattr("llm.model_overrides.MODEL_OVERRIDES_PATH",
-                        tmp_path / "model_overrides.json")
-
-
-def test_no_override_falls_back_to_default():
-    with patch.object(settings, "model_mode", ModelMode.LOCAL):
-        assert choose_model("klassifikation").provider == "ollama"
-
-
-def test_override_wins_over_mode():
-    save_override("klassifikation", "ollama", "qwen3:8b")
-    with patch.object(settings, "model_mode", ModelMode.CLOUD):
-        choice = choose_model("klassifikation")
-    assert choice.provider == "ollama"
-    assert choice.model_id == "qwen3:8b"
-
-
-def test_clear_override_restores_default():
-    save_override("klassifikation", "anthropic", "claude-haiku-4-5")
-    clear_override("klassifikation")
-    with patch.object(settings, "model_mode", ModelMode.LOCAL):
-        assert choose_model("klassifikation").provider == "ollama"
-
-
-def test_save_override_rejects_unknown_agent():
-    with pytest.raises(KeyError):
-        save_override("nicht-vorhanden", "ollama", "qwen3:8b")
-
-
-def test_save_override_rejects_model_less_agent():
-    with pytest.raises(ValueError, match="kein Sprachmodell"):
-        save_override("policy", "ollama", "qwen3:8b")
-
-
-def test_save_override_rejects_unsupported_provider():
-    with pytest.raises(ValueError, match="Anbieter"):
-        save_override("klassifikation", "unsupported", "model-x")
-
-
-def test_save_override_rejects_empty_model_id():
-    with pytest.raises(ValueError, match="Modell-ID"):
-        save_override("klassifikation", "ollama", "  ")
-
-
-def test_load_overrides_empty_when_file_missing():
-    assert load_overrides() == {}
 
 
 # --------------------------------------------------- Provider clients (transport)

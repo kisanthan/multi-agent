@@ -36,14 +36,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 
 @pytest.fixture(scope="module", autouse=True)
 def test_data():
-    """Requires the synthetic data to exist (generation happens outside).
-
-    Deliberately NOT generated here: the Faker import is very expensive on
-    this machine (full disk). The data is generated once via `python -m
-    data.generate`; the scenario tests run against it. The graph runs
-    against the real DB (not in-memory), because several connections and
-    the mock services access it.
-    """
+    """Use the session-isolated seed copy installed by ``tests/conftest.py``."""
     if not MANIFEST_PATH.is_file() or not any(INTAKE_DIR.glob("*.pdf")):
         pytest.skip("Testdaten fehlen -- zuerst `python -m data.generate` ausfuehren.")
     yield
@@ -58,9 +51,8 @@ def thread():
 def app(monkeypatch, tmp_path):
     """Compiled graph with a mocked LLM and in-process mocks.
 
-    The checkpoint sits in tmp_path and not on the production path: the
-    running UI keeps `data/checkpoints.sqlite` open, and a test must
-    neither delete its cases nor fail on a file lock.
+    The checkpoint sits in tmp_path as well: no test reads or changes a
+    developer's running UI state.
     """
     # --- Bring target systems into the process via ASGI ---
     # FastAPI's TestClient talks to the ASGI app synchronously (httpx's
@@ -78,6 +70,9 @@ def app(monkeypatch, tmp_path):
     # The agents call known endpoint paths -- map them directly onto the
     # in-process mocks instead of starting a real server.
     def fake_post(url, **kwargs):
+        # A real HTTP timeout has no meaning for an in-process ASGI call;
+        # Starlette deprecates forwarding it to TestClient.
+        kwargs.pop("timeout", None)
         if url.endswith("/booking"):
             return navision_client.post("/booking", **kwargs)
         if url.endswith("/archive"):

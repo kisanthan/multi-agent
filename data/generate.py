@@ -5,7 +5,9 @@ here is generated. The seed is fixed so runs are reproducible -- a
 requirement of the thesis, but also practical: the end-to-end scenarios
 check against concrete document numbers that must stay stable.
 
-Usage:  python -m data.generate
+Usage:
+    python -m data.generate
+    python -m data.generate --seed-bundle
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 
-from config import DATA_DIR, DB_PATH, INTAKE_DIR, MANIFEST_PATH
+import config
 
 SEED = 20260717
 CUTOFF_DATE = date(2026, 7, 17)
@@ -182,7 +184,7 @@ def _row(c: canvas.Canvas, y: float, label: str, value: str, bold: bool = False)
 def payment_confirmation(path: Path, *, number: str, amount: float,
                          supplier_name: str, bank: str, date_: date) -> None:
     """Process A: payment confirmation with an invoice/order number."""
-    c = canvas.Canvas(str(path), pagesize=A4)
+    c = canvas.Canvas(str(path), pagesize=A4, invariant=1)
     y = _header(c, "Zahlungsbestaetigung", bank)
     y = _row(c, y, "Buchungsdatum:", date_.strftime("%d.%m.%Y"))
     y = _row(c, y, "Auftraggeber:", "CHG-MERIDIAN AG")
@@ -208,7 +210,7 @@ def incoming_invoice(path: Path, *, number: str, amount: float, supplier: tuple,
     the assignment is then not unique and goes to a human.
     """
     _, name, vat_id, address = supplier
-    c = canvas.Canvas(str(path), pagesize=A4)
+    c = canvas.Canvas(str(path), pagesize=A4, invariant=1)
     y = _header(c, "Rechnung", f"{name} | {address}")
     y = _row(c, y, "Rechnungsnummer:", number, bold=True)
     y = _row(c, y, "Rechnungsdatum:", date_.strftime("%d.%m.%Y"))
@@ -246,10 +248,11 @@ def incoming_invoice(path: Path, *, number: str, amount: float, supplier: tuple,
     c.save()
 
 
-def generate_documents(invoices: list[dict], rng: random.Random) -> list[Document]:
+def generate_documents(invoices: list[dict], rng: random.Random,
+                       intake_dir: Path) -> list[Document]:
     """Generates the intake PDFs: happy path plus deliberate incidents."""
-    INTAKE_DIR.mkdir(parents=True, exist_ok=True)
-    for old in INTAKE_DIR.glob("*.pdf"):
+    intake_dir.mkdir(parents=True, exist_ok=True)
+    for old in intake_dir.glob("*.pdf"):
         old.unlink()
 
     supplier_by_id = {l[0]: l for l in SUPPLIERS}
@@ -269,7 +272,7 @@ def generate_documents(invoices: list[dict], rng: random.Random) -> list[Documen
         sup = supplier_by_id[r["supplier_id"]]
         name = f"A_payment_ok_{idx + 1:02d}.pdf"
         payment_confirmation(
-            INTAKE_DIR / name,
+            intake_dir / name,
             number=r["number"], amount=r["amount_eur"], supplier_name=sup[1],
             bank=rng.choice(banks), date_=CUTOFF_DATE - timedelta(days=rng.randint(0, 5)),
         )
@@ -286,7 +289,7 @@ def generate_documents(invoices: list[dict], rng: random.Random) -> list[Documen
     name = "A_payment_unknown_number.pdf"
     unknown = "RE-2026-9999"
     payment_confirmation(
-        INTAKE_DIR / name, number=unknown, amount=3_480.00,
+        intake_dir / name, number=unknown, amount=3_480.00,
         supplier_name="Dell Technologies GmbH", bank=banks[0], date_=CUTOFF_DATE,
     )
     docs.append(Document(
@@ -304,7 +307,7 @@ def generate_documents(invoices: list[dict], rng: random.Random) -> list[Documen
     for k in (1, 2):
         name = f"A_payment_duplicate_{k}.pdf"
         payment_confirmation(
-            INTAKE_DIR / name, number=duplicate["number"], amount=duplicate["amount_eur"],
+            intake_dir / name, number=duplicate["number"], amount=duplicate["amount_eur"],
             supplier_name=sup[1], bank=banks[1], date_=CUTOFF_DATE,
         )
         docs.append(Document(
@@ -322,7 +325,7 @@ def generate_documents(invoices: list[dict], rng: random.Random) -> list[Documen
     name = "A_payment_implausible_amount.pdf"
     wrong_amount = round(mismatched["amount_eur"] * 3.7, 2)
     payment_confirmation(
-        INTAKE_DIR / name, number=mismatched["number"], amount=wrong_amount,
+        intake_dir / name, number=mismatched["number"], amount=wrong_amount,
         supplier_name=sup[1], bank=banks[2], date_=CUTOFF_DATE,
     )
     docs.append(Document(
@@ -337,7 +340,7 @@ def generate_documents(invoices: list[dict], rng: random.Random) -> list[Documen
     sup = supplier_by_id[ok["supplier_id"]]
     name = "A_payment_unauthorized.pdf"
     payment_confirmation(
-        INTAKE_DIR / name, number=ok["number"], amount=ok["amount_eur"],
+        intake_dir / name, number=ok["number"], amount=ok["amount_eur"],
         supplier_name=sup[1], bank=banks[0], date_=CUTOFF_DATE,
     )
     docs.append(Document(
@@ -367,7 +370,7 @@ def generate_documents(invoices: list[dict], rng: random.Random) -> list[Documen
         total = round(sum(p[1] for p in line_items), 2)
         name = f"B_invoice_ok_{idx:02d}.pdf"
         incoming_invoice(
-            INTAKE_DIR / name, number=number, amount=total, supplier=sup,
+            intake_dir / name, number=number, amount=total, supplier=sup,
             line_items=line_items, date_=CUTOFF_DATE - timedelta(days=rng.randint(1, 10)),
             cost_center_reference=reference,
         )
@@ -392,7 +395,7 @@ def generate_documents(invoices: list[dict], rng: random.Random) -> list[Documen
     total = round(sum(p[1] for p in line_items), 2)
     name = "B_invoice_without_reference.pdf"
     incoming_invoice(
-        INTAKE_DIR / name, number=number, amount=total, supplier=sup,
+        intake_dir / name, number=number, amount=total, supplier=sup,
         line_items=line_items, date_=CUTOFF_DATE - timedelta(days=3),
         cost_center_reference=None,
     )
@@ -408,35 +411,60 @@ def generate_documents(invoices: list[dict], rng: random.Random) -> list[Documen
     return docs
 
 
-def main() -> None:
+def main(*, db_path: Path | None = None, intake_dir: Path | None = None,
+         manifest_path: Path | None = None) -> None:
+    db_path = db_path or config.DB_PATH
+    intake_dir = intake_dir or config.INTAKE_DIR
+    manifest_path = manifest_path or config.MANIFEST_PATH
     rng = random.Random(SEED)
     Faker.seed(SEED)
 
-    DB_PATH.unlink(missing_ok=True)
-    con = sqlite3.connect(DB_PATH)
-    con.executescript((DATA_DIR / "schema.sql").read_text(encoding="utf-8"))
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    db_path.unlink(missing_ok=True)
+    con = sqlite3.connect(db_path)
+    con.executescript((config.DATA_DIR / "schema.sql").read_text(encoding="utf-8"))
 
     invoices = generate_master_data(con, rng)
     con.commit()
 
-    docs = generate_documents(invoices, rng)
-    MANIFEST_PATH.write_text(
+    docs = generate_documents(invoices, rng, intake_dir)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
         json.dumps([asdict(d) for d in docs], indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
     con.close()
 
-    print(f"Datenbank:   {DB_PATH}")
+    print(f"Datenbank:   {db_path}")
     print(f"  Rechnungen:    {len(invoices)} (Status offen)")
     print(f"  Kostenstellen: {len(COST_CENTERS)}")
     print(f"  Lieferanten:   {len(SUPPLIERS)}")
     print(f"  AD-Nutzer:     {len(AD_USERS)}")
-    print(f"Dokumente:   {INTAKE_DIR} ({len(docs)} PDFs)")
+    print(f"Dokumente:   {intake_dir} ({len(docs)} PDFs)")
     for d in docs:
         marker = f"  [{d.incident}]" if d.incident else ""
         print(f"  {d.filename:38s} Prozess {d.process}  {d.scenario}{marker}")
-    print(f"Manifest:    {MANIFEST_PATH}")
+    print(f"Manifest:    {manifest_path}")
+
+
+def generate_seed_bundle() -> None:
+    """Regenerate the small, versioned demo bundle for maintainers."""
+    from data.bootstrap import DEFAULT_BUNDLE
+
+    main(
+        db_path=DEFAULT_BUNDLE.database,
+        intake_dir=DEFAULT_BUNDLE.pdfs,
+        manifest_path=DEFAULT_BUNDLE.manifest,
+    )
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Synthetische Demo-Daten erzeugen")
+    parser.add_argument(
+        "--seed-bundle", action="store_true",
+        help="versionierte Seeds unter data/demo statt Laufzeitdaten erzeugen",
+    )
+    arguments = parser.parse_args()
+    generate_seed_bundle() if arguments.seed_bundle else main()

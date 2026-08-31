@@ -123,7 +123,8 @@ def _visible_text(at: AppTest) -> str:
             parts.append(str(getattr(element, "value", getattr(element, "body", ""))))
 
     for name in ("button", "selectbox", "multiselect", "text_input",
-                 "date_input", "metric", "file_uploader", "toggle"):
+                 "date_input", "metric", "file_uploader", "toggle",
+                 "segmented_control", "number_input"):
         for element in getattr(at, name, []):
             parts.append(str(getattr(element, "label", "")))
 
@@ -179,6 +180,25 @@ def test_audit_page_without_jargon_in_the_surroundings(upn, language):
     at = _page(upn, "audit.render()", "from ui.pages import audit\n", language)
     assert not at.exception
     _check_free_of_jargon(at, "Protokoll", language)
+
+
+@pytest.mark.parametrize(
+    ("language", "title", "provider"),
+    (("de", "Agentenkonfiguration", "Anbieter"),
+     ("en", "Agent configuration", "Provider")),
+)
+def test_settings_page_is_translated(language, title, provider):
+    at = _page(
+        "s.hofmann@chg-meridian.com",
+        "settings.render()",
+        "from ui.pages import settings\n",
+        language,
+    )
+
+    assert not at.exception
+    text = _visible_text(at)
+    assert title in text
+    assert provider in text
 
 
 @pytest.mark.parametrize("language", LANGUAGES)

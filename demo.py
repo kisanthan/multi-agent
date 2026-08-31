@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 
 from config import DB_PATH, INTAKE_DIR, MANIFEST_PATH, settings
 from contracts import InterruptKind
+from data.bootstrap import ensure_configured_runtime
 from governance.audit import read_all, verify_chain
 from graph.effects import read_effect
 
@@ -188,6 +189,12 @@ def main() -> None:
                    choices=["freigegeben", "verworfen"])
     p.add_argument("--interaktiv", action="store_true", help="Freigaben abfragen")
     args = p.parse_args()
+
+    if not args.check:
+        try:
+            ensure_configured_runtime()
+        except FileNotFoundError as error:
+            sys.exit(str(error))
 
     if args.liste:
         return list_documents()

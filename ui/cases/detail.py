@@ -61,7 +61,7 @@ def render(app, thread_id: str, *, upn: str, with_title: bool = True) -> None:
     _document_preview(values.get("path"))
 
     if st.button(i18n.t("detail.audit_button"), key=f"audit_{thread_id}",
-                 use_container_width=False,
+                 width="content",
                  help=i18n.t("detail.audit_button.help")):
         show_audit_for(thread_id)
 
@@ -78,10 +78,9 @@ def _header(values: dict, status: Status, process: str | None, thread_id: str, *
 
     if with_title:
         st.subheader(values.get("filename") or thread_id)
-    st.markdown(
-        f"{style.badge(status)} &nbsp; <span style='opacity:0.75'>{process_text}</span>",
-        unsafe_allow_html=True,
-    )
+    with st.container(horizontal=True, vertical_alignment="center"):
+        st.badge(i18n.status_label(status), color=style.badge_color(status))
+        st.caption(process_text)
 
     # Which fields matter for the business is known by the process.
     business_fields = list(config.detail_fields) if config else ["number"]
@@ -109,7 +108,7 @@ def _waiting_card(app, thread_id: str, request: dict, values: dict, *,
     if approval_dialog.should_open(thread_id):
         approval_dialog.open_decision(app, thread_id, request, values, upn=upn)
     elif st.button(i18n.t("detail.reopen"), type="primary",
-                   key=f"reopen_{thread_id}", use_container_width=True):
+                   key=f"reopen_{thread_id}", width="stretch"):
         approval_dialog.reset(thread_id)
         st.rerun()
 
@@ -134,7 +133,9 @@ def decision_form(app, thread_id: str, request: dict, values: dict, *,
     con = connection()
     try:
         person = user.load(con, upn)
-        decision = check_approval(con, actor=upn, agent_id=agent_id)
+        decision = check_approval(
+            con, actor=upn, agent_id=agent_id, submitter=values.get("actor")
+        )
     finally:
         con.close()
 
@@ -157,13 +158,11 @@ def decision_form(app, thread_id: str, request: dict, values: dict, *,
     # the same reason it is not reworded (see ui/shared/i18n.py).
     shown = ("finding", "escalation") if _is_oversight_stop(request) else (
         "reason", "finding", "escalation")
-    rows = "".join(
-        f"<div class='field-row'><b>{field(s, request[s])[0]}:</b> "
-        f"{field(s, request[s])[1]}</div>"
-        for s in shown if request.get(s)
-    )
+    rows = [field(s, request[s]) for s in shown if request.get(s)]
     if rows:
-        st.markdown(f'<div class="card">{rows}</div>', unsafe_allow_html=True)
+        with st.container(border=True):
+            for label, value in rows:
+                style.value_row(label, value)
 
     if request.get("line_items"):
         st.markdown(f"**{i18n.t('detail.line_items')}:** "
@@ -172,25 +171,22 @@ def decision_form(app, thread_id: str, request: dict, values: dict, *,
     view = process_views.for_interrupt(kind)
     extra_response = view.approval_inputs(request, thread_id=thread_id) if view else {}
 
-    if not decision.allowed:
+    if decision.rule == "four_eyes":
+        st.warning(person.own_document_hint)
+    elif not decision.allowed:
         # No error bar: for this person, this is not an error, simply not
         # their task.
         st.info(person.confirm_hint)
-    elif values.get("actor") == upn:
-        # Hint only. What is technically enforced so far is group
-        # membership (governance/policy.py) -- forbidding the same person
-        # would be a governance change (docs/limitations.md L10).
-        st.warning(person.own_document_hint)
 
     left, right = st.columns(2)
     with left:
         confirm = st.button(i18n.t("detail.confirm"), key=f"confirm_{thread_id}",
                             type="primary", disabled=not decision.allowed,
-                            use_container_width=True)
+                            width="stretch")
     with right:
         reject = st.button(i18n.t("detail.reject"), key=f"reject_{thread_id}",
                            disabled=not decision.allowed,
-                           use_container_width=True)
+                           width="stretch")
 
     if reject and not st.session_state.get(f"reject_confirmed_{thread_id}"):
         st.session_state[f"reject_confirmed_{thread_id}"] = True
@@ -258,11 +254,12 @@ def _document_preview(path: str | None) -> None:
     """Shows the original PDF -- an approver does not decide without the document."""
     if not path or not Path(path).is_file():
         return
-    with st.expander(i18n.t("detail.view_document")):
-        data = base64.b64encode(Path(path).read_bytes()).decode("ascii")
-        st.markdown(
-            f'<iframe src="data:application/pdf;base64,{data}" '
-            'width="100%" height="620" style="border:1px solid var(--app-border); '
-            'border-radius:6px;"></iframe>',
-            unsafe_allow_html=True,
-        )
+    preview = st.expander(i18n.t("detail.view_document"), on_change="rerun")
+    if preview.open:
+        with preview:
+            data = base64.b64encode(Path(path).read_bytes()).decode("ascii")
+            st.markdown(
+                f'<iframe src="data:application/pdf;base64,{data}" '
+                'width="100%" height="620" title="PDF"></iframe>',
+                unsafe_allow_html=True,
+            )

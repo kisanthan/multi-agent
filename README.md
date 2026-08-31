@@ -47,8 +47,12 @@ Details and rationale for the stack validation: [docs/architecture.md](docs/arch
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cp .env.example .env
-.venv/bin/python -m data.generate        # generate synthetic data + PDFs
 ```
+
+The repository already contains an immutable synthetic demo bundle under
+`data/demo/`. The UI, CLI and target-system mocks automatically install
+missing writable copies in `data/masterdata.db`, `data/manifest.json` and
+`data/inbox/`; no data-generation step is required for a first run.
 
 **On Windows (PowerShell),** the venv layout and copy command differ; every
 other command in this README is otherwise identical -- replace `.venv/bin/`
@@ -58,8 +62,11 @@ with `.venv\Scripts\` and `python3` with `python` throughout:
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
 Copy-Item .env.example .env
-.venv\Scripts\python.exe -m data.generate
 ```
+
+To reset only the writable demo runtime to a fresh deterministic state, run
+`.venv/bin/python -m data.generate`. Maintainers regenerate the versioned
+bundle intentionally with `.venv/bin/python -m data.generate --seed-bundle`.
 
 ### Model provisioning
 
@@ -181,7 +188,9 @@ The user signed in via the sidebar is also the submitter. That makes both
 governance claims visible in the interaction flow, not just in the test: a
 user without `SG-CHG-DocIngest` cannot upload and is turned away at the
 reader when starting an existing document (scenario 5); without
-`SG-CHG-Freigabe`, the approval buttons stay locked. Only the consequence of
+`SG-CHG-Freigabe`, the approval buttons stay locked. Even a member of that
+group cannot approve their own submission; this is enforced again when the
+workflow consumes the resume payload, not only in the UI. Only the consequence of
 that appears on screen -- "Sie haben nur Leserechte", "Ihr Konto ist nicht
 zum Hochladen von Belegen berechtigt" -- never the name of the group.
 
@@ -222,7 +231,9 @@ files.
 ```
 
 The tests run **without** a running Ollama: the language model is mocked,
-the FastAPI mocks run via ASGI in-process. What is tested is the
+the FastAPI mocks run via ASGI in-process. A temporary runtime database and
+temporary inbox are generated for the test session, so local demo data under
+`data/` is not modified. What is tested is the
 architecture, not model quality. Particularly relevant for the thesis:
 
 - `tests/test_layer_boundaries.py` -- the governance layer imports no LLM

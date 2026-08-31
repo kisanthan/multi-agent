@@ -161,7 +161,10 @@ def node_exception_case(state: Case) -> dict:
     # approve a booking simply by being named in the resume payload.
     con = connection()
     try:
-        permission = check_approval(con, actor=response.approver, agent_id="buchung")
+        permission = check_approval(
+            con, actor=response.approver, agent_id="buchung",
+            submitter=state.get("actor"),
+        )
         if not permission.allowed:
             log_entry(con, actor=response.approver, agent="buchung",
                      action="freigabe_verweigert",

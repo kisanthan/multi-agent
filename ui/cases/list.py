@@ -85,11 +85,12 @@ def as_cards(rows: list[CaseOverview], *, key: str,
                     parts.insert(0, _document_kind(z.process))
                 st.caption(" · ".join(parts))
             with middle:
-                st.markdown(style.badge(z.status), unsafe_allow_html=True)
+                st.badge(i18n.status_label(z.status),
+                         color=style.badge_color(z.status))
                 st.caption(i18n.t("list.started", time=timestamp(z.started_at)))
             with right:
                 if st.button(i18n.t("list.open"), key=f"open_{key}_{z.thread_id}",
-                             use_container_width=True):
+                             width="stretch"):
                     open_case(z.thread_id)
 
 
@@ -128,7 +129,7 @@ def as_table(rows: list[CaseOverview], *, key: str,
             head["received"]: date_only(z.started_at),
             head["outcome"]: z.outcome or "—",
         } for z in visible],
-        column_order=columns, use_container_width=True, hide_index=True,
+        column_order=columns, width="stretch", hide_index=True,
     )
 
     if len(rows) > limit:

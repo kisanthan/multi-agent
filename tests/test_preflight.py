@@ -30,6 +30,9 @@ def pinned_model_names(monkeypatch):
     """
     monkeypatch.setattr(settings, "ollama_model_small", "test-klein:1b")
     monkeypatch.setattr(settings, "ollama_model_vision", "test-vision:1b")
+    for profile in ("router", "payment", "invoice"):
+        monkeypatch.setattr(settings, f"llm_{profile}_provider", None)
+        monkeypatch.setattr(settings, f"llm_{profile}_model", "")
 
 
 # ------------------------------------------------------------ required_models()

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from agents.shared import classification
 from agents.shared.schemas import Classification, DocumentType
-from config import DB_PATH
+import config
 from contracts import ApprovalTrigger, CaseOutcome
 from governance.audit import CaseReference
 from graph.state import Case
@@ -22,7 +22,7 @@ from tools.reader import AccessDenied, read_document
 
 
 def connection() -> sqlite3.Connection:
-    return sqlite3.connect(DB_PATH)
+    return sqlite3.connect(config.DB_PATH)
 
 
 def case_reference(state: Case) -> CaseReference:
