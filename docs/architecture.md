@@ -216,8 +216,10 @@ Prozess B endet mit der Archivierung. Er schreibt nie nach Navision.
 - Modell nicht erreichbar: keine Wiederholung, Audit-Eintrag und Eskalation
   in den Freigabepfad.
 - Modellschema verletzt: genau ein Korrekturversuch, danach Eskalation.
-- Zielsystem nicht erreichbar/Antwort ungleich Erfolg: Vorgang endet als
-  `abgelehnt` beziehungsweise `archivierung_fehlgeschlagen`.
+- Navision nicht erreichbar: Vorgang endet als
+  `buchungssystem_nicht_erreichbar`; eine fachliche Navision-Ablehnung endet
+  weiterhin als `abgelehnt`. Ein ELO-Fehler endet als
+  `archivierung_fehlgeschlagen`.
 - Mensch lehnt ab oder ist nicht berechtigt: Ende mit `verworfen`.
 - Ein wartender Vorgang ist durch den Checkpoint, nicht durch den Browser,
   definiert. Ein anderer Tab kann ihn fortsetzen.

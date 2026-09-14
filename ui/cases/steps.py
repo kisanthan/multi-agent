@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 import process_registry
+from contracts import CaseOutcome
 from graph.cases import Status
 from process_registry import SHARED_STEPS, ProcessStep
 from ui.shared import i18n
@@ -56,7 +57,8 @@ def _raw_steps(process: str | None) -> tuple[ProcessStep, ...]:
 
 
 def _step_status(node: str, counts: dict[str, int], *, waiting_at: str | None,
-                 status: Status | None, final_node: str) -> tuple[StepStatus, str]:
+                 status: Status | None, final_node: str,
+                 outcome: str | None) -> tuple[StepStatus, str]:
     """Rule per node. Deliberately one rule per line instead of a heuristic.
 
     Two cases do not behave the way mere presence in the log would suggest,
@@ -88,6 +90,8 @@ def _step_status(node: str, counts: dict[str, int], *, waiting_at: str | None,
         if done:
             return StepStatus.DONE, ""
         if status is Status.FAILED and ran:
+            if outcome == CaseOutcome.BOOKING_UNAVAILABLE.value:
+                return StepStatus.FAILED, i18n.t("step.hint.target_unreachable")
             return StepStatus.FAILED, i18n.t("step.hint.target_rejected")
         return StepStatus.OPEN, ""
 
@@ -108,6 +112,7 @@ def steps_for(
     *,
     waiting_on: str | None = None,
     status: Status | None = None,
+    outcome: str | None = None,
 ) -> list[Step]:
     """State of every process step.
 
@@ -126,6 +131,7 @@ def steps_for(
     return [
         Step(s.node, i18n.step_title(s.node), s.agent_id,
              *_step_status(s.node, counts, waiting_at=waiting_at,
-                           status=status, final_node=final_node))
+                           status=status, final_node=final_node,
+                           outcome=outcome))
         for s in raw_steps
     ]

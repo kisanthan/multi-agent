@@ -727,7 +727,7 @@ def test_unreachable_navision_is_audited_from_the_caller_side(app, thread, monke
                         "number": "RE-2026-4200"}),
         thread,
     )
-    assert state["outcome"] == "abgelehnt"
+    assert state["outcome"] == "buchungssystem_nicht_erreichbar"
 
     con = sqlite3.connect(DB_PATH)
     new_entries = [e for e in read_all(con) if e.id not in before_ids]

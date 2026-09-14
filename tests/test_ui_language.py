@@ -162,6 +162,18 @@ def test_all_cases_without_jargon(upn, language):
 
 
 @pytest.mark.parametrize("language", LANGUAGES)
+def test_notifications_without_jargon(upn, language):
+    at = _page(
+        upn,
+        "notifications.render([])",
+        "from ui.pages import notifications\n",
+        language,
+    )
+    assert not at.exception
+    _check_free_of_jargon(at, "Benachrichtigungen", language)
+
+
+@pytest.mark.parametrize("language", LANGUAGES)
 def test_process_pages_without_jargon(upn, language):
     import process_registry
 

@@ -31,60 +31,85 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import process_registry  # noqa: E402
 import config  # noqa: E402
 from data.bootstrap import ensure_configured_runtime  # noqa: E402
+from graph.approval_queue import ApprovalTask, available_for  # noqa: E402
 from ui.shared import i18n, style, theme  # noqa: E402
-from ui.shared.context import SESSION_USER, register_pages  # noqa: E402
+from ui.shared.context import (  # noqa: E402
+    SESSION_USER,
+    connection,
+    current_user,
+    graph,
+    register_pages,
+)
 from ui.shared.identity import SqliteIdentityProvider  # noqa: E402
+from ui.cases import live_ai_panel  # noqa: E402
 
 st.set_page_config(page_title=i18n.t("app.page_title"),
                    page_icon="📄", layout="wide")
 
 
 def _login() -> None:
-    """Sidebar: account selection and what this account may do.
+    """Top bar: compact account tab with details in a floating panel.
 
     In the prototype, a selection instead of a real sign-in -- but the
     rights behind it are the real group memberships from the directory
     service.
 
-    The *capability* is shown as a sentence, not membership in a security
-    group: the group name helps no one who cannot manage it anyway.
+    The tab itself stays deliberately terse: display name and effective
+    rights are enough for orientation. The sign-in name, account selector,
+    and the plain-language capability description live in a popover. Its
+    help text also exposes the description on hover.
 
     """
     identity = SqliteIdentityProvider(config.DB_PATH)
     accounts = identity.accounts()
 
-    with st.sidebar:
-        style.css()
+    style.css()
 
-        if not accounts:
-            st.error(i18n.t("app.no_accounts"))
-            st.stop()
+    if not accounts:
+        st.error(i18n.t("app.no_accounts"))
+        st.stop()
 
-        # Display name only: the sign-in name does not fit the narrow
-        # sidebar and was truncated there. It appears below it instead
-        # -- unless two accounts share a name, then it must go into the
-        # selection.
-        names = [account.display_name for account in accounts]
-        unique = len(set(names)) == len(names)
-        labels = {
-            (account.display_name if unique
-             else f"{account.display_name} ({account.upn})"): account.upn
-            for account in accounts
-        }
+    names = [account.display_name for account in accounts]
+    unique = len(set(names)) == len(names)
+    labels = {
+        (account.display_name if unique
+         else f"{account.display_name} ({account.upn})"): account.upn
+        for account in accounts
+    }
 
-        choice = st.selectbox(i18n.t("app.signed_in_as"), list(labels))
-        upn = labels[choice]
-        st.session_state[SESSION_USER] = upn
-        person = identity.user(upn)
+    current_upn = st.session_state.get(SESSION_USER)
+    if current_upn not in labels.values():
+        current_upn = accounts[0].upn
+    st.session_state[SESSION_USER] = current_upn
 
-        # One card, one call: a badge for the quick glance, the full
-        # sentence below it -- including the document kinds this account
-        # may submit. The sign-in name is shown only when it is not already
-        # in the selector (duplicate display names force it there).
-        style.status_card(person, upn=upn if unique else None)
+    selector_key = "account_selector"
+    current_label = next(
+        label for label, account_upn in labels.items()
+        if account_upn == current_upn
+    )
+    if st.session_state.get(selector_key) != current_label:
+        st.session_state[selector_key] = current_label
+
+    def select_account() -> None:
+        selected_label = st.session_state[selector_key]
+        st.session_state[SESSION_USER] = labels[selected_label]
+
+    upn = current_upn
+    person = identity.user(upn)
+
+    with style.account_topbar():
+        with style.account_tab(person):
+            st.caption(i18n.t("app.signed_in_as"))
+            st.selectbox(
+                i18n.t("app.switch_account"),
+                list(labels),
+                key=selector_key,
+                on_change=select_account,
+            )
+            style.account_details(person, upn=upn)
 
 
-def _build_pages() -> dict:
+def _build_pages(notification_tasks: list[ApprovalTask] | None = None) -> dict:
     """Builds the page objects.
 
     The process pages arise from `process_registry` -- an additional
@@ -97,8 +122,10 @@ def _build_pages() -> dict:
     language: a URL is an address, and an address that moves when someone
     switches language cannot be shared.
     """
-    from ui.pages import (architecture, audit, case, history, preferences,
-                          process, settings, upload)
+    from ui.pages import (architecture, audit, case, history, notifications,
+                          preferences, process, settings, upload)
+
+    notification_tasks = notification_tasks or []
 
     pages = {
         # 'Upload' is already the section -- the page is therefore not
@@ -112,6 +139,14 @@ def _build_pages() -> dict:
                           icon="📥", default=True),
         "history": st.Page(history.render, title=i18n.t("page.history"),
                            icon="🗂️", url_path="cases"),
+        "notifications": st.Page(
+            functools.partial(notifications.render, notification_tasks),
+            title=i18n.t(
+                "page.notifications.count", count=len(notification_tasks)
+            ),
+            icon=":material/notifications:",
+            url_path="notifications",
+        ),
         "audit": st.Page(audit.render, title=i18n.t("page.audit"), icon="🔐",
                          url_path="record"),
         "architecture": st.Page(architecture.render,
@@ -150,11 +185,28 @@ def main() -> None:
         sync_native = importlib.reload(theme).sync_native
     sync_native()
     _login()
+    live_ai_panel.mount()
 
-    pages = _build_pages()
+    app, _ = graph()
+    con = connection()
+    try:
+        notification_tasks = available_for(
+            app,
+            config.CHECKPOINT_PATH,
+            con,
+            actor=current_user(),
+        )
+    finally:
+        con.close()
+
+    from ui.pages import notifications
+    notifications.announce_new(current_user(), notification_tasks)
+
+    pages = _build_pages(notification_tasks)
     register_pages(pages)
 
     st.navigation({
+        i18n.t("nav.tasks"): [pages["notifications"]],
         i18n.t("nav.upload"): [pages["upload"], pages["history"]],
         i18n.t("nav.case_types"): [pages[k.route]
                                    for k in process_registry.all_processes()],

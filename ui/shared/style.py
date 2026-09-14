@@ -118,7 +118,26 @@ _SURFACE_THEME = """
   }
   [data-testid="stHeader"] {
       background-color:var(--app-header) !important;
-      border-bottom:1px solid var(--app-border);
+  }
+  .st-key-account_topbar {
+      position:fixed;
+      top:0.42rem;
+      right:3.75rem;
+      width:auto !important;
+      z-index:999999;
+  }
+  .st-key-account_topbar [data-testid="stPopover"] > button {
+      max-width:min(21rem, calc(100vw - 8rem));
+      min-height:2.25rem;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+  }
+  @media (max-width:640px) {
+      .st-key-account_topbar {right:3.25rem;}
+      .st-key-account_topbar [data-testid="stPopover"] > button {
+          max-width:calc(100vw - 7rem);
+      }
   }
   [data-testid="stToolbar"], [data-testid="stDecoration"] {
       color:var(--app-text) !important;
@@ -398,14 +417,40 @@ def section_title(text: str) -> None:
     st.caption(text)
 
 
-def status_card(person, *, upn: str | None = None) -> None:
-    """Render account identity and rights with native Streamlit elements."""
-    with st.container(border=True):
-        if upn:
-            st.caption(upn)
-        st.badge(person.rights_short, color=(
-            "green" if person.can_upload and person.can_confirm
-            else "blue" if person.can_upload or person.can_confirm
-            else "gray"
-        ))
-        st.caption(person.capabilities)
+def _account_badge_color(person) -> str:
+    if person.can_upload and person.can_confirm:
+        return "green"
+    if person.can_upload or person.can_confirm:
+        return "blue"
+    return "gray"
+
+
+def account_topbar():
+    """Return the fixed, right-aligned account area in the app header."""
+    return st.container(
+        key="account_topbar",
+        horizontal=True,
+        horizontal_alignment="right",
+        vertical_alignment="center",
+        width="content",
+        gap=None,
+    )
+
+
+def account_tab(person):
+    """Return the compact account tab and its floating details container."""
+    return st.popover(
+        f"{person.display_name} · {person.rights_short}",
+        type="secondary",
+        help=person.capabilities,
+        icon=":material/info:",
+        width="content",
+        key="account_tab",
+    )
+
+
+def account_details(person, *, upn: str) -> None:
+    """Render the account details inside the floating account tab."""
+    st.caption(upn)
+    st.badge(person.rights_short, color=_account_badge_color(person))
+    st.caption(person.capabilities)

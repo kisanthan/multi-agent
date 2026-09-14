@@ -56,6 +56,14 @@ def test_target_system_rejection_is_failed():
     assert determine_status(values, waiting=False) is Status.FAILED
 
 
+def test_unreachable_booking_system_is_failed():
+    values = {
+        "completed": True,
+        "outcome": "buchungssystem_nicht_erreichbar",
+    }
+    assert determine_status(values, waiting=False) is Status.FAILED
+
+
 def test_unknown_outcome_does_not_count_as_success():
     """Default deny in the display too: nothing unexpected turns green."""
     values = {"completed": True, "outcome": "voellig_neuer_wert"}

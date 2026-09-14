@@ -91,7 +91,8 @@ def test_navigation_has_unique_routes():
     """Streamlit rejects duplicate `url_path` -- and every process needs one."""
     routes = [k.route for k in process_registry.all_processes()]
     # The upload page is the default page and sits at '/' without its own path.
-    fixed = ["cases", "record", "architecture", "settings", "preferences", "case"]
+    fixed = ["cases", "notifications", "record", "architecture", "settings",
+             "preferences", "case"]
 
     assert len(set(routes)) == len(routes)
     assert not set(routes) & set(fixed)
@@ -99,15 +100,32 @@ def test_navigation_has_unique_routes():
 
 def _account_selector(at: AppTest):
     """The sign-in selector, found by its label rather than by position."""
-    return next(s for s in at.sidebar.selectbox
-                if s.label == i18n.t("app.signed_in_as"))
+    return next(s for s in at.selectbox
+                if s.label == i18n.t("app.switch_account"))
 
 
-def test_sidebar_offers_ad_users_for_sign_in():
-    selection = _account_selector(_app())
+def _account_tab(at: AppTest):
+    """The compact account tab shown permanently in the top bar."""
+    return next(element for element in at.main
+                if element.type == "popover")
 
-    assert selection.label == "Angemeldet als"
+
+def test_topbar_offers_ad_users_for_sign_in():
+    at = _app()
+    selection = _account_selector(at)
+
+    assert selection.label == "Konto wechseln"
     assert selection.options, "Ohne AD-Nutzer wäre keine Anmeldung möglich"
+    tab = _account_tab(at).proto.popover
+    assert tab.label.startswith(f"{selection.value} · ")
+    assert tab.icon == ":material/info:"
+    assert tab.help
+    assert not any(s.label == "Konto wechseln" for s in at.sidebar.selectbox)
+    stylesheet = " ".join(m.body for m in at.markdown)
+    assert ".st-key-account_topbar" in stylesheet
+    assert "position:fixed" in stylesheet
+    assert "right:3.75rem" in stylesheet
+    assert "border-bottom:1px solid var(--app-border)" not in stylesheet
 
 
 def test_preferences_offer_every_language_not_the_agent_configuration():
@@ -222,45 +240,45 @@ def test_every_navigation_page_renders_with_the_dark_theme(upn, call, preamble):
     assert "--app-background: #0e1117" in stylesheet
 
 
-def test_sidebar_names_the_accounts_capabilities():
-    """The sidebar states what this account can do -- not which security
-    group it is in."""
+def test_topbar_names_the_accounts_capabilities():
+    """The compact tab names the account and explains its rights on hover."""
     at = _app()
     options = _account_selector(at).options
 
-    # The selection carries display names -- the sign-in name did not fit
-    # the narrow sidebar and sits below it.
+    # The account selection lives inside the floating details container.
     extern = [o for o in options if o.startswith("Erik Extern")]
     keller = [o for o in options if o.startswith("Martina Keller")]
     if not (extern and keller):
         pytest.skip("Erwartete Testkonten fehlen in den Stammdaten.")
 
     _account_selector(at).set_value(extern[0]).run()
+    tab = _account_tab(at).proto.popover
     text = " ".join(
-        [m.body for m in at.sidebar.markdown]
-        + [c.value for c in at.sidebar.caption]
+        [m.body for m in at.main.markdown]
+        + [c.value for c in at.main.caption]
     )
-    assert "Nur lesen" in text
+    assert tab.label == "Erik Extern · Nur lesen"
+    assert "Vorgänge ansehen" in tab.help
+    assert "keine Belege hochladen" in tab.help
     assert "SG-CHG" not in text
-    # The sign-in name sits in full below it, instead of being truncated in
-    # the selection.
+    # The full sign-in name is available inside the floating details panel.
     assert "e.extern@partner-consulting.de" in text
 
     _account_selector(at).set_value(keller[0]).run()
+    tab = _account_tab(at).proto.popover
     text = " ".join(
-        [m.body for m in at.sidebar.markdown]
-        + [c.value for c in at.sidebar.caption]
+        [m.body for m in at.main.markdown]
+        + [c.value for c in at.main.caption]
     )
-    # The badge stays terse ("Hochladen"); the document kinds are spelled
-    # out in the sentence below it.
-    assert "Hochladen" in text
+    assert tab.label == "Martina Keller · Hochladen"
+    assert "Zahlungsbestätigungen oder Eingangsrechnungen hochladen" in tab.help
     assert "Zahlungsbestätigungen oder Eingangsrechnungen hochladen" in text
 
 
 # ------------------------------------------------------------ Individual pages
 
-def test_upload_page_offers_dropzone_and_short_history(upn):
-    """The upload is the main point, the history here only an excerpt."""
+def test_upload_page_offers_dropzone_without_case_history(upn):
+    """Case history belongs only on the dedicated history page."""
     if not MANIFEST_PATH.is_file():
         pytest.skip("Testbelege fehlen -- zuerst `python -m data.generate`.")
     at = _page(_frame(upn, "upload.render()",
@@ -272,7 +290,7 @@ def test_upload_page_offers_dropzone_and_short_history(upn):
     # would say the same thing twice.
     assert str(at.file_uploader[0].label_visibility).strip().lower().endswith(
         "collapsed")
-    assert "Zuletzt hochgeladen" in _text(at)
+    assert "Zuletzt hochgeladen" not in _text(at)
 
 
 def test_upload_page_blocks_uploading_without_permission():
@@ -360,6 +378,18 @@ def test_settings_page_is_editable_for_configuration_admin():
     )
     assert "ausschließlich die Belegart" in descriptions
     assert "Orchestrator" in descriptions and "kein eigenes KI-Modell" in descriptions
+
+
+def test_notifications_page_renders(upn):
+    at = _page(_frame(
+        upn,
+        "notifications.render([])",
+        "from ui.pages import notifications\n",
+    ))
+
+    assert not at.exception
+    assert any(t.value == "Benachrichtigungen" for t in at.title)
+    assert any("kein Vorgang" in i.value for i in at.info)
 
 
 def test_settings_page_is_read_only_without_configuration_right():

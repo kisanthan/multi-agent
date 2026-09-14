@@ -37,6 +37,7 @@ class BookingResult:
     reason: str
     number: str | None = None
     error: str | None = None
+    outcome: CaseOutcome | None = None
 
 
 def book(con: sqlite3.Connection, *, number: str, amount_eur: float, actor: str,
@@ -106,27 +107,51 @@ def book(con: sqlite3.Connection, *, number: str, amount_eur: float, actor: str,
     # it. An unreachable ERP is different: its handler never runs, so it
     # never gets the chance to log anything about it -- that gap is only
     # visible from this side of the call.
+    endpoint = f"{settings.navision_url.rstrip('/')}/booking"
     try:
         response = httpx.post(
-            f"{settings.navision_url}/booking",
+            endpoint,
             json={"number": number, "amount_eur": amount_eur, "actor": actor,
                   "document": document, "case_id": reference.case_id},
             timeout=30.0,
         )
     except httpx.HTTPError as e:
-        reason = f"Navision nicht erreichbar: {e}"
+        reason = (
+            f"Die Freigabe wurde erteilt, aber Navision ist unter "
+            f"{settings.navision_url} nicht erreichbar. Die Zahlung wurde "
+            "nicht verbucht; die Rechnung bleibt offen."
+        )
+        technical_error = f"Verbindungsaufbau zu {endpoint} fehlgeschlagen: {e}"
         log_entry(con, actor=actor, agent=AGENT_ID, action="zahlung_verbuchen",
                  decision=Decision.DENIED, reason=reason,
                  payload={"number": number, "amount_eur": amount_eur},
-                 reference=reference, outcome=CaseOutcome.BOOKING_REFUSED.value)
+                 reference=reference,
+                 outcome=CaseOutcome.BOOKING_UNAVAILABLE.value)
         con.commit()
-        return BookingResult(False, False, reason, number, error=str(e))
+        return BookingResult(
+            False,
+            False,
+            reason,
+            number,
+            error=technical_error,
+            outcome=CaseOutcome.BOOKING_UNAVAILABLE,
+        )
 
     if response.status_code != 200:
         detail = response.json().get("detail", response.text)
-        return BookingResult(False, False, f"Navision hat abgelehnt: {detail}",
-                             number, error=detail)
+        return BookingResult(
+            False,
+            False,
+            f"Navision hat abgelehnt: {detail}",
+            number,
+            error=detail,
+            outcome=CaseOutcome.BOOKING_REFUSED,
+        )
 
     return BookingResult(
-        True, False, f"Zahlung zu {number} verbucht, Status offen -> bezahlt.", number
+        True,
+        False,
+        f"Zahlung zu {number} verbucht, Status offen -> bezahlt.",
+        number,
+        outcome=CaseOutcome.BOOKED,
     )

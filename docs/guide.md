@@ -66,6 +66,21 @@ run takes one to three minutes with a local model; approvals from a second
 browser tab work independently, because the case state lives in the
 LangGraph checkpoint, not in the tab.
 
+The **Benachrichtigungen / Notifications** entry in the sidebar carries the
+number of approval tasks for the signed-in person. Its page lists only cases
+that are currently waiting and that this person may actually decide. The same
+permission and four-eyes policy as the decision form is applied, so a person's
+own uploads do not appear in their queue. A toast announces newly added tasks.
+
+During a new payment-confirmation or incoming-invoice run, the sidebar opens
+as a live AI overview and remains visible while processing is active. It names
+the PDF and the currently active provider/model, marks document routing and
+field extraction as they finish, and displays the structured values returned
+by the extraction model in a compact two-column table. The completed overview
+survives the automatic move to the case page and can then be closed manually.
+PDF content itself remains in the case detail preview, so the sidebar stays
+compact.
+
 The language control under **System → Einstellungen** switches the
 interface between **Deutsch** and **English**; it
 takes effect immediately, including the navigation itself. What was

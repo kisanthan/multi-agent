@@ -15,10 +15,11 @@ from pathlib import Path
 import streamlit as st
 
 from config import settings
+from ui.cases import live_ai_panel
 from ui.shared import i18n
 
 
-def _stream_run(app, thread: dict, payload, title: str) -> bool:
+def _stream_run(app, thread: dict, payload, title: str, *, show_ai: bool = False) -> bool:
     """Runs the graph and shows every node as soon as it finishes.
 
     Returns whether the run ended without an exception. An error is
@@ -27,14 +28,20 @@ def _stream_run(app, thread: dict, payload, title: str) -> bool:
     unfindable.
     """
     shown = 0
+    if show_ai and isinstance(payload, dict):
+        live_ai_panel.begin(payload)
     with st.status(title, expanded=True) as box:
         try:
             for state in app.stream(payload, thread, stream_mode="values"):
+                if show_ai and isinstance(state, dict):
+                    live_ai_panel.update(state)
                 log = state.get("log", []) if isinstance(state, dict) else []
                 for entry in log[shown:]:
                     st.write(f"**{entry['node']}** — {entry['text']}")
                 shown = max(shown, len(log))
         except Exception as e:  # noqa: BLE001 - the user should see the reason
+            if show_ai:
+                live_ai_panel.fail(e)
             box.update(label=i18n.t("run.aborted", error=e), state="error")
             st.exception(e)
             return False
@@ -56,7 +63,7 @@ def start(app, *, path: Path | str, actor: str, upload_id: str | None = None) ->
         "configuration_revision": settings.configuration_revision,
         "model_profiles": settings.profile_snapshot(),
         "log": [],
-    }, i18n.t("run.running", filename=filename))
+    }, i18n.t("run.running", filename=filename), show_ai=True)
 
     return thread_id
 

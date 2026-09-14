@@ -47,16 +47,12 @@ def open_case(thread_id: str) -> None:
     Via query parameter instead of session state: that way a case is
     linkable and survives a page reload.
     """
-    st.query_params.clear()
-    st.query_params["id"] = thread_id
-    st.switch_page(get_page("case"))
+    st.switch_page(get_page("case"), query_params={"id": thread_id})
 
 
 def show_audit_for(thread_id: str) -> None:
     """Jumps into the audit trail, pre-filtered to this case."""
-    st.query_params.clear()
-    st.query_params["case"] = thread_id
-    st.switch_page(get_page("audit"))
+    st.switch_page(get_page("audit"), query_params={"case": thread_id})
 
 
 # --- Page registry ----------------------------------------------------------

@@ -1,9 +1,7 @@
-"""Page 'Upload': submitting documents -- the application's main action.
+"""Page 'Upload': submitting and starting documents.
 
-Layout deliberately split in two: the upload area on top carries the page
-visually, clearly separated below it are the most recently submitted
-cases. The full list with filters lives on the history page, so the upload
-does not get buried in a table here.
+The page stays focused on intake. Case history and filtering live exclusively
+on the separate history page.
 
 An upload is not yet a case: processing takes minutes and the user starts
 it deliberately.
@@ -17,15 +15,11 @@ import streamlit as st
 
 import process_registry
 from config import INTAKE_DIR, MANIFEST_PATH
-from graph.cases import overview
 from ui.shared import i18n, user, style
 from ui.shared.formatting import enumerate_list, file_size
 from ui.shared.context import current_user, graph, open_case, connection
 from ui.intake import intake
-from ui.cases import list as case_list
 from ui.cases.run import start
-
-RECENT_COUNT = 5
 
 # The widget key is also the CSS class Streamlit attaches to the container
 # (`st-key-upload_documents`), and that is what styles the drop area -- see
@@ -192,17 +186,3 @@ def render() -> None:
         _upload_section(person)
 
     _document_list(upn, app)
-
-    st.divider()
-    st.markdown(f"### {i18n.t('upload.recent')}")
-    from config import CHECKPOINT_PATH
-    rows = overview(app, CHECKPOINT_PATH)
-
-    if not rows:
-        st.info(i18n.t("upload.no_cases"))
-        return
-
-    case_list.as_cards(rows[:RECENT_COUNT], key="upload")
-    if len(rows) > RECENT_COUNT:
-        st.caption(i18n.t("upload.recent_count",
-                          shown=RECENT_COUNT, total=len(rows)))

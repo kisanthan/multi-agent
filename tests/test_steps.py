@@ -64,6 +64,19 @@ def test_process_a_target_system_rejects():
     assert _by_node(steps)["buchung"] is StepStatus.FAILED
 
 
+def test_process_a_unreachable_target_has_precise_hint():
+    steps = steps_for(
+        "A", _log("reader", "klassifikation", "extraktion_zahlung", "abgleich",
+                  "buchung", "klaerfall", "buchung"),
+        status=Status.FAILED,
+        outcome="buchungssystem_nicht_erreichbar",
+    )
+
+    booking_step = next(step for step in steps if step.node == "buchung")
+    assert booking_step.status is StepStatus.FAILED
+    assert booking_step.hint == "Zielsystem nicht erreichbar"
+
+
 def test_rejected_case_does_not_book():
     steps = steps_for(
         "A", _log("reader", "klassifikation", "extraktion_zahlung", "abgleich", "buchung", "klaerfall"),

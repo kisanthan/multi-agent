@@ -13,7 +13,12 @@ from pathlib import Path
 import streamlit as st
 
 import process_registry
-from contracts import ApprovalDecision, ApprovalResponse, ApprovalTrigger
+from contracts import (
+    ApprovalDecision,
+    ApprovalResponse,
+    ApprovalTrigger,
+    CaseOutcome,
+)
 from governance.audit import verify_chain
 from governance.policy import check_approval
 from graph.cases import Status, process_of, determine_status
@@ -40,15 +45,19 @@ def render(app, thread_id: str, *, upn: str, with_title: bool = True) -> None:
     request = snapshot.interrupts[0].value if snapshot.interrupts else None
     status = determine_status(values, waiting=bool(request))
     process = process_of(values)
+    displayed_outcome = process_views.display_outcome(
+        values.get("outcome", ""), process, values.get("error")
+    )
 
     _header(values, status, process, thread_id, with_title=with_title)
     style.stepper(steps_for(process, values.get("log", []),
-                            waiting_on=(request or {}).get("kind"), status=status))
+                            waiting_on=(request or {}).get("kind"), status=status,
+                            outcome=displayed_outcome))
 
     if request:
         _waiting_card(app, thread_id, request, values, upn=upn)
     else:
-        _outcome(values, status, process)
+        _outcome(values, status, process, displayed_outcome)
 
     # The step name is translated, the recorded text is not: what a node
     # wrote down is evidence and stays in the wording it was written in
@@ -105,12 +114,22 @@ def _waiting_card(app, thread_id: str, request: dict, values: dict, *,
     st.markdown(f"#### {icon} {headline}")
     st.info(explanation)
 
-    if approval_dialog.should_open(thread_id):
+    submitter = values.get("actor")
+    own_submission = bool(
+        submitter and upn.casefold() == str(submitter).casefold()
+    )
+
+    # The uploader cannot approve their own document (four-eyes policy),
+    # so interrupting them with an approval dialog would suggest an action
+    # they cannot perform. Another eligible person still gets the dialog
+    # automatically. The uploader may open it manually to inspect why the
+    # case is waiting.
+    if not own_submission and approval_dialog.should_open(thread_id):
         approval_dialog.open_decision(app, thread_id, request, values, upn=upn)
     elif st.button(i18n.t("detail.reopen"), type="primary",
                    key=f"reopen_{thread_id}", width="stretch"):
         approval_dialog.reset(thread_id)
-        st.rerun()
+        approval_dialog.open_decision(app, thread_id, request, values, upn=upn)
 
 
 def _is_oversight_stop(request: dict) -> bool:
@@ -207,13 +226,14 @@ def decision_form(app, thread_id: str, request: dict, values: dict, *,
     return False
 
 
-def _outcome(values: dict, status: Status, process: str | None) -> None:
+def _outcome(values: dict, status: Status, process: str | None,
+             displayed_outcome: str) -> None:
     """Completion card: what actually happened in the end?"""
     if not values.get("completed"):
         st.info(i18n.t("detail.in_progress"))
         return
 
-    text = process_views.result_text(values.get("outcome", ""), process)
+    text = process_views.result_text(displayed_outcome, process)
 
     st.markdown(f"#### {i18n.t('detail.result')}")
     if status is Status.COMPLETED:
@@ -224,7 +244,18 @@ def _outcome(values: dict, status: Status, process: str | None) -> None:
         st.error(text)
 
     if values.get("error"):
-        st.caption(i18n.t("detail.feedback", error=values["error"]))
+        feedback_key = (
+            "detail.technical_details"
+            if displayed_outcome == CaseOutcome.BOOKING_UNAVAILABLE.value
+            else "detail.feedback"
+        )
+        st.caption(i18n.t(feedback_key, error=values["error"]))
+
+    if displayed_outcome == CaseOutcome.BOOKING_UNAVAILABLE.value:
+        st.info(
+            i18n.t("detail.booking_unavailable.next_step"),
+            icon=":material/refresh:",
+        )
 
     con = connection()
     try:

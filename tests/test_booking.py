@@ -12,7 +12,10 @@ the only way to exercise that branch at all.
 
 from __future__ import annotations
 
+import httpx
+
 from agents.payment_confirmation import booking
+from contracts import CaseOutcome
 from governance.audit import read_all, verify_chain
 
 
@@ -106,3 +109,29 @@ def test_approved_by_authorized_user_still_proceeds_to_booking(con, monkeypatch)
     assert calls, "Navision should have been called for an authorized approver"
     assert result.booked is True
     assert verify_chain(con).valid
+
+
+def test_unreachable_navision_is_reported_as_technical_failure(con, monkeypatch):
+    _open_invoice(con)
+
+    def unreachable(*args, **kwargs):
+        raise httpx.ConnectError("[WinError 10061] Verbindung verweigert")
+
+    monkeypatch.setattr(
+        "agents.payment_confirmation.booking.httpx.post", unreachable
+    )
+
+    result = booking.book(
+        con,
+        number="RE-TEST-0001",
+        amount_eur=500.0,
+        actor="einspeiser@chg-meridian.com",
+        document="test.pdf",
+        approved_by="pruefer@chg-meridian.com",
+    )
+
+    assert result.booked is False
+    assert result.outcome is CaseOutcome.BOOKING_UNAVAILABLE
+    assert "nicht erreichbar" in result.reason
+    assert "nicht verbucht" in result.reason
+    assert "http://localhost:8001/booking" in result.error

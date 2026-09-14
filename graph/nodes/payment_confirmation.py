@@ -120,7 +120,10 @@ def node_booking(state: Case) -> dict:
 
     return {
         "completed": True,
-        "outcome": (CaseOutcome.BOOKED if e.booked else CaseOutcome.BOOKING_REFUSED).value,
+        "outcome": (
+            e.outcome
+            or (CaseOutcome.BOOKED if e.booked else CaseOutcome.BOOKING_REFUSED)
+        ).value,
         "error": e.error,
         "log": note(state, "buchung", e.reason),
     }

@@ -144,7 +144,8 @@ currently has:
 
 | Area | Page | Route | Content |
 |---|---|---|---|
-| **Upload** | Neuer Beleg | `/` | drop documents via drag-and-drop (multi-select, intake check) and start processing; below it, the most recently submitted cases |
+| **Aufgaben** | Benachrichtigungen | `/notifications` | personal queue of waiting cases the signed-in user may approve; navigation count and toast for new tasks |
+| **Upload** | Neuer Beleg | `/` | drop documents via drag-and-drop (multi-select, intake check) and start processing |
 | | Alle Vorgänge | `/cases` | all cases of both processes with search, filter, and date range |
 | **Vorgangsarten** | Zahlungsbestätigung | `/payment-confirmation` | metrics, open and completed cases — process A only |
 | | Eingangsrechnung | `/incoming-invoice` | the same for process B |
@@ -195,7 +196,12 @@ that appears on screen -- "Sie haben nur Leserechte", "Ihr Konto ist nicht
 zum Hochladen von Belegen berechtigt" -- never the name of the group.
 
 A run takes one to three minutes with a local model and blocks the starting
-browser tab meanwhile; progress is shown node by node. Approvals from a
+browser tab meanwhile; progress is shown node by node. While the router and
+the process-specific extraction model are running, the sidebar opens and stays
+visible with the PDF name, the active provider/model, and the completed AI
+steps. Once extraction finishes, its structured fields appear in a compact
+two-column table. The final overview remains
+available after navigation until it is closed. Approvals from a
 second tab are unaffected by this, because the state lives in the
 checkpoint (see [docs/limitations.md](docs/limitations.md), L8).
 

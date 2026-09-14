@@ -12,6 +12,11 @@ from ui.shared import i18n
 RESULT_TEXTS = {
     "verbucht": "Die Zahlung ist verbucht. Die Rechnung gilt als bezahlt.",
     "abgelehnt": "Die Buchhaltung hat die Buchung abgelehnt.",
+    "buchungssystem_nicht_erreichbar": (
+        "Die Freigabe wurde erteilt, aber das Buchungssystem Navision war "
+        "nicht erreichbar. Die Zahlung wurde nicht verbucht; die Rechnung "
+        "bleibt offen."
+    ),
 }
 
 

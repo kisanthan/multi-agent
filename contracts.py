@@ -115,6 +115,7 @@ class CaseOutcome(str, Enum):
     REJECTED = "verworfen"                    # either approval point, human said no
     ACCESS_DENIED = "zugriff_verweigert"       # reader, AD check denied (scenario 5)
     BOOKING_REFUSED = "abgelehnt"              # process A, Navision refused the booking
+    BOOKING_UNAVAILABLE = "buchungssystem_nicht_erreichbar"  # process A, Navision transport failure
     ARCHIVING_FAILED = "archivierung_fehlgeschlagen"  # process B, ELO refused
     MODEL_UNAVAILABLE = "modell_nicht_erreichbar"      # provider/auth/transport failure
 

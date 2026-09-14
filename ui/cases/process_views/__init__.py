@@ -65,6 +65,34 @@ def for_interrupt(kind: str | None) -> ProcessView | None:
     return VIEWS.get(config.key) if config else None
 
 
+def display_outcome(outcome: str, process: str | None, error: str | None) -> str:
+    """Normalize legacy transport failures for an accurate presentation.
+
+    New checkpoints store a dedicated outcome for an unreachable booking
+    system. Older checkpoints only stored ``abgelehnt`` plus the transport
+    exception. Recognize those old records so their detail page becomes
+    accurate without rewriting audit or checkpoint history.
+    """
+    if process != "A" or outcome != "abgelehnt" or not error:
+        return outcome
+
+    normalized_error = error.casefold()
+    transport_markers = (
+        "winerror 10061",
+        "connection refused",
+        "verbindung verweigert",
+        "connecterror",
+        "connecttimeout",
+        "readtimeout",
+        "timed out",
+        "getaddrinfo failed",
+        "name or service not known",
+    )
+    if any(marker in normalized_error for marker in transport_markers):
+        return "buchungssystem_nicht_erreichbar"
+    return outcome
+
+
 def result_text(outcome: str, process: str | None) -> str:
     """Human-readable outcome text.
 
