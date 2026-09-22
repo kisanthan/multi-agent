@@ -32,11 +32,13 @@ def _provider_label(provider: Provider) -> str:
 
 def _profile_editor(profile_id: ProfileId, actor_upn: str) -> None:
     profile = settings.profile(profile_id)
-    provider_options = list(Provider)
+    # Standard document processing is local-only. The separately controlled
+    # masked layout exception is configured outside these model profiles.
+    provider_options = [Provider.OLLAMA]
     provider = st.selectbox(
         i18n.t("settings.provider"),
         provider_options,
-        index=provider_options.index(profile.provider),
+        index=0,
         format_func=_provider_label,
         key=f"provider_{profile_id.value}",
     )

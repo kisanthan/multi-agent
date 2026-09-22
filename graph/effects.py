@@ -35,34 +35,17 @@ class Effect:
 
 
 def read_effect(con: sqlite3.Connection, state: dict) -> Effect:
-    """Reads the target-system state for a case.
-
-    Deliberately tolerant: a number that is not in the master data
-    (scenario 'unknown number') is a regular business case and must not
-    raise an error here -- it simply returns no Navision status.
-    """
-    number = state.get("number")
-    navision_status = navision_paid_at = None
-    if number:
-        row = con.execute(
-            "SELECT status, paid_at FROM invoices WHERE number = ?", (number,)
-        ).fetchone()
-        if row:
-            navision_status, navision_paid_at = row
-
-    archive_id = state.get("archive_id")
-    filed_at = None
-    if archive_id:
-        row = con.execute(
-            "SELECT filed_at FROM archive WHERE archive_id = ?", (archive_id,)
-        ).fetchone()
-        if row:
-            filed_at = row[0]
-
-    return Effect(
-        navision_number=number if navision_status else None,
-        navision_status=navision_status,
-        navision_paid_at=navision_paid_at,
-        elo_archive_id=archive_id,
-        elo_filed_at=filed_at,
-    )
+    """Only a receipt belonging to this case proves its own target effect."""
+    import json
+    if not state.get("case_id") or not state.get("command_id"):
+        return Effect()
+    exists = con.execute("SELECT 1 FROM sqlite_master WHERE name='execution_commands'").fetchone()
+    if not exists:
+        return Effect()
+    row = con.execute("SELECT receipt FROM execution_commands WHERE command_id=? AND case_id=? AND status='succeeded'",
+                      (state["command_id"], state["case_id"])).fetchone()
+    if not row:
+        return Effect()
+    receipt = json.loads(row[0])
+    return Effect(navision_number=receipt.get("number"), navision_status=receipt.get("after"),
+                  navision_paid_at=receipt.get("paid_at"), elo_archive_id=receipt.get("archive_id"), elo_filed_at=receipt.get("filed_at"))

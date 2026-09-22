@@ -62,3 +62,10 @@ data/eingang/
 # --- OS ---------------------------------------------------------------------
 .DS_Store
 Thumbs.db
+
+# Local authentication, backup and release state (never distribute)
+.runtime_secrets/
+data/backups/
+release/
+
+data/layout-deployment.json

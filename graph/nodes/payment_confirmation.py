@@ -22,6 +22,7 @@ from contracts import (
 )
 from governance.audit import Decision, log_entry
 from governance.policy import check_approval
+from governance import control
 from graph.nodes.shared import case_reference, connection, note
 from graph.state import Case
 
@@ -70,13 +71,17 @@ def node_reconciliation(state: Case) -> dict:
     """Reconciliation agent (level 1). Deterministic -- see agents/payment_confirmation/reconciliation.py."""
     con = connection()
     try:
+        control.authorize_read(con, state["case_id"], "A", "abgleich", state["actor"])
         e = reconciliation.reconcile(con, number=state.get("number"),
                                      amount_eur=state.get("amount_eur"),
                                      actor=state["actor"], reference=case_reference(state))
+        proposal = control.candidate(con, state["case_id"], "buchung",
+                                     control.payment_payload(con, state["case_id"], e.number, state.get("amount_eur")), True)
     finally:
         con.close()
 
     return {
+        "approval_id": proposal["approval_id"], "candidate_version": proposal["version"],
         "finding": e.finding.value,
         "number": e.number,
         "expected_amount_eur": e.expected_amount_eur,
@@ -100,7 +105,8 @@ def node_booking(state: Case) -> dict:
         e = booking.book(
             con, number=state["number"], amount_eur=state["amount_eur"],
             actor=state["actor"], document=state["filename"],
-            approved_by=state.get("approved_by"),
+            approved_by=state.get("approved_by"), approval_id=state.get("approval_id"),
+            candidate_version=state.get("candidate_version"), command_id=state.get("command_id"),
             reference=case_reference(state),
         )
     finally:
@@ -111,7 +117,7 @@ def node_booking(state: Case) -> dict:
             "exception_case": True,
             "exception_reason": e.reason,
             # Not an escalation: the booking agent is human-in-the-loop by
-            # mode and stops on the happy path too (thesis §7.4, table 11).
+            # mode and stops on the happy path too (thesis §7.4, table 22).
             "approval_trigger": ApprovalTrigger.OVERSIGHT_MODE.value,
             "log": note(
                 state, "buchung",
@@ -119,7 +125,8 @@ def node_booking(state: Case) -> dict:
         }
 
     return {
-        "completed": True,
+        "completed": e.outcome is not CaseOutcome.EFFECT_UNCERTAIN,
+        "command_id": e.command_id,
         "outcome": (
             e.outcome
             or (CaseOutcome.BOOKED if e.booked else CaseOutcome.BOOKING_REFUSED)
@@ -131,140 +138,73 @@ def node_booking(state: Case) -> dict:
 
 def route_booking(state: Case) -> str:
     """After the booking attempt: either done, or approval needed."""
-    if state.get("completed"):
+    if state.get("completed") or state.get("outcome") == CaseOutcome.EFFECT_UNCERTAIN.value:
         return "ende"
     return "hitl"
 
 
 def node_exception_case(state: Case) -> dict:
-    """HITL point of process A: exception case or booking approval.
-
-    Covers both cases because they ask the same question of the same
-    human: 'Book this case anyway?' The reason is in the payload.
-    """
-    response = ApprovalResponse.from_resume(interrupt(ApprovalRequest(
-        kind=InterruptKind.EXCEPTION_CASE,
-        trigger=ApprovalTrigger(state.get("approval_trigger")
-                                or ApprovalTrigger.ESCALATION.value),
-        filename=state.get("filename"),
-        reason=state.get("exception_reason"),
-        finding=state.get("finding"),
-        number=state.get("number"),
-        amount_eur=state.get("amount_eur"),
-        expected_amount_eur=state.get("expected_amount_eur"),
-        escalation=state.get("escalation"),
-    ).as_payload()))
-
-    # Four-eyes principle, enforced here and not just in the UI: a resume
-    # payload is untrusted input -- it can come from a second browser tab,
-    # `demo.py --pruefer`, or a hand-built Command(resume=...). The UI
-    # already grays out the approval buttons for a non-member
-    # (ui/cases/detail.py), but that is a convenience, not the enforcement
-    # point; without this check, an unauthorized or unknown UPN could
-    # approve a booking simply by being named in the resume payload.
+    """A decision is bound to the displayed persistent candidate."""
+    from governance import control, identity
+    from governance.step_policy import PolicyDenied
     con = connection()
     try:
-        permission = check_approval(
-            con, actor=response.approver, agent_id="buchung",
-            submitter=state.get("actor"),
-        )
+        proposal = control.get_candidate(con, state["case_id"], "buchung", state.get("candidate_version"))
+    except PolicyDenied as error:
+        con.close()
+        return {"completed": True, "outcome": CaseOutcome.CONTROL_BLOCKED.value,
+                "error": str(error), "log": note(state, "klaerfall", str(error))}
+    con.close()
+    request = ApprovalRequest(
+        kind=InterruptKind.EXCEPTION_CASE,
+        trigger=ApprovalTrigger(state.get("approval_trigger") or ApprovalTrigger.ESCALATION.value),
+        filename=state.get("filename"), reason=state.get("exception_reason"),
+        finding=state.get("finding"), number=proposal["payload"]["number"],
+        amount_eur=(proposal["payload"]["amount_cents"] / 100 if proposal["payload"]["amount_cents"] is not None else None),
+        expected_amount_eur=state.get("expected_amount_eur"), escalation=state.get("escalation"),
+    ).as_payload()
+    request.update({k: proposal[k] for k in ("approval_id", "version", "payload_hash", "expires")})
+    raw = interrupt(request)
+    con = connection()
+    try:
+        person = identity.principal(con)
+        permission = check_approval(con, actor=person, agent_id="buchung", submitter=state.get("actor"))
         if not permission.allowed:
-            log_entry(con, actor=response.approver, agent="buchung",
-                     action="freigabe_verweigert",
-                     decision=Decision.DENIED,
-                     reason=permission.reason,
-                     payload={"number": state.get("number")},
-                     reference=case_reference(state), outcome=CaseOutcome.REJECTED.value)
-            con.commit()
+            raise PolicyDenied(permission.reason)
+        if raw.get("approver", person) != person or raw.get("approval_id") != proposal["approval_id"] or raw.get("version") != proposal["version"]:
+            raise PolicyDenied("Sitzung oder angezeigte Freigabe stimmt nicht überein.")
+        if raw.get("decision") != ApprovalDecision.APPROVED.value:
+            control.decide(con, proposal, approved=False, reason=raw.get("reason", "Verworfen"))
+            return {"completed": True, "outcome": CaseOutcome.REJECTED.value, "approved_by": person,
+                    "log": note(state, "klaerfall", "Vorgang verworfen.")}
+        number = raw.get("number") or proposal["payload"]["number"]
+        amount = raw.get("amount_eur", state.get("amount_eur"))
+        new_payload = control.payment_payload(con, state["case_id"], number, amount)
+        control.validate_payload(con, "buchung", new_payload)
+        if new_payload != proposal["payload"]:
+            replacement = control.candidate(con, state["case_id"], "buchung", new_payload, True)
+            return {"number": new_payload["number"], "amount_eur": amount,
+                    "expected_amount_eur": new_payload["expected_cents"] / 100,
+                    "candidate_version": replacement["version"], "approval_id": replacement["approval_id"],
+                    "approval_decision": "", "exception_case": True,
+                    "exception_reason": "Korrigierter Vorschlag erneut geprüft. Bitte den neuen Inhalt bestätigen.",
+                    "log": note(state, "klaerfall", "Neuer Vorschlag benötigt eine eigene Bestätigung.")}
+        person = control.decide(con, proposal, approved=True, reason=raw.get("reason", "Inhalt geprüft"))
+        return {"number": new_payload["number"], "amount_eur": amount, "approved_by": person,
+                "approval_id": proposal["approval_id"], "candidate_version": proposal["version"],
+                "approval_decision": ApprovalDecision.APPROVED.value, "exception_case": False,
+                "log": note(state, "klaerfall", "Geprüfter Inhalt freigegeben.")}
+    except (PolicyDenied, identity.AuthenticationError) as error:
+        log_entry(con, actor=raw.get("approver") or "unauthenticated", agent="buchung", action="freigabe_verweigert",
+                  decision=Decision.DENIED, reason=str(error), reference=case_reference(state), outcome="rejected")
+        con.commit()
+        return {"completed": True, "outcome": CaseOutcome.REJECTED.value, "error": str(error),
+                "log": note(state, "klaerfall", str(error))}
     finally:
         con.close()
-
-    if not permission.allowed:
-        return {
-            "completed": True,
-            "outcome": CaseOutcome.REJECTED.value,
-            "approved_by": response.approver,
-            "log": note(state, "klaerfall",
-                       f"Freigabe verweigert: {permission.reason}"),
-        }
-
-    if not response.approved:
-        con = connection()
-        try:
-            log_entry(con, actor=response.approver, agent="buchung",
-                     action="klaerfall_entschieden",
-                     decision=Decision.DENIED,
-                     reason=f"{response.approver} hat den Vorgang verworfen.",
-                     payload={"number": state.get("number")},
-                     reference=case_reference(state), outcome=CaseOutcome.REJECTED.value)
-            con.commit()
-        finally:
-            con.close()
-        return {
-            "completed": True,
-            "outcome": CaseOutcome.REJECTED.value,
-            "approved_by": response.approver,
-            "log": note(state, "klaerfall",
-                       f"{response.approver} hat abgelehnt."),
-        }
-
-    # The approver may correct the number (case 'unknown number').
-    number = response.number or state.get("number")
-    if state.get("amount_eur") is None or not number:
-        # Nothing to book: either classification failed entirely (R1 --
-        # node_classification's failure branch sets neither field), or the
-        # number/amount was never found and the approver did not correct
-        # it. "Confirm" cannot mean "book it" without both -- proceeding to
-        # node_booking would either crash on a missing amount_eur, or send
-        # a request Navision's own schema already rejects (a required
-        # `number: str` and `amount_eur: float = Field(gt=0)`, see
-        # mocks/navision.py). Ending the case the same way an outright
-        # rejection does is the only sound reading of an approval with no
-        # bookable data behind it -- and gives an honest audit reason
-        # instead of a round trip to a target system that was always going
-        # to refuse it.
-        con = connection()
-        try:
-            log_entry(con, actor=response.approver, agent="buchung",
-                     action="klaerfall_entschieden",
-                     decision=Decision.DENIED,
-                     reason=f"{response.approver} hat bestätigt, aber der Beleg "
-                            "lieferte keine verwertbaren Angaben -- keine Buchung "
-                            "möglich.",
-                     payload={"escalation": state.get("escalation"),
-                             "number": number, "amount_eur": state.get("amount_eur")},
-                     reference=case_reference(state), outcome=CaseOutcome.REJECTED.value)
-            con.commit()
-        finally:
-            con.close()
-        return {
-            "completed": True,
-            "outcome": CaseOutcome.REJECTED.value,
-            "approved_by": response.approver,
-            "log": note(state, "klaerfall",
-                       "Keine verwertbaren Angaben aus dem Beleg -- keine "
-                       "Buchung möglich."),
-        }
-
-    return {
-        "number": number,
-        "approved_by": response.approver,
-        "approval_decision": ApprovalDecision.APPROVED.value,
-        "exception_case": False,
-        "log": note(state, "klaerfall",
-                   f"{response.approver} hat bestätigt."),
-    }
 
 
 def route_exception_case(state: Case) -> str:
     if state.get("completed"):
         return "ende"
-    # Guard, not a live path today: a failed classification always sets
-    # document_type to 'unbekannt' (graph/nodes/shared.py::node_classification),
-    # never 'eingangsrechnung' -- so this branch is not currently reachable.
-    # It stays as a safety net: if classification ever preserves a
-    # provisional type on failure, an incoming invoice must still be routed
-    # back to its own process instead of wrongly booked as a payment.
-    if state.get("document_type") == DocumentType.INCOMING_INVOICE.value:
-        return "kostenstelle"
-    return "buchung"
+    return "hitl" if state.get("exception_case") else "buchung"

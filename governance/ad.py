@@ -19,6 +19,29 @@ APPROVAL_GROUP = "SG-CHG-Freigabe"
 # Dedicated right for changing provider credentials and global agent profiles.
 CONFIGURATION_GROUP = "SG-CHG-Konfiguration"
 
+# Additional identities exposed by the local demo portal.  They deliberately
+# cover the two combinations requested for the walkthrough: one person may
+# submit and approve, while the other may only submit.  The four-eyes check is
+# independent of these group memberships and still prevents self-approval.
+ADDITIONAL_DEMO_USERS = (
+    (
+        "l.schneider@chg-meridian.com",
+        "Laura Schneider",
+        "pruefer",
+        frozenset({READER_GROUP, APPROVAL_GROUP}),
+    ),
+    (
+        "j.becker@chg-meridian.com",
+        "Jonas Becker",
+        "einspeiser",
+        frozenset({READER_GROUP}),
+    ),
+)
+
+
+def additional_demo_upns() -> tuple[str, ...]:
+    return tuple(user[0] for user in ADDITIONAL_DEMO_USERS)
+
 
 class Role(str, Enum):
     SUBMITTER = "einspeiser"
@@ -127,16 +150,39 @@ def check_configuration_permission(con: sqlite3.Connection, upn: str) -> AccessR
 
 def ensure_configuration_seed(con: sqlite3.Connection) -> None:
     """Non-destructive migration for databases generated before this feature."""
-    con.execute(
+    created = con.execute(
         "INSERT OR IGNORE INTO ad_groups (name, description) VALUES (?,?)",
         (CONFIGURATION_GROUP, "Darf Agenten- und Anbieter-Einstellungen ändern"),
     )
     exists = con.execute(
         "SELECT 1 FROM ad_users WHERE upn = 's.hofmann@chg-meridian.com'"
     ).fetchone()
-    if exists:
+    if exists and created.rowcount == 1:
         con.execute(
             "INSERT OR IGNORE INTO ad_memberships (upn, group_name) VALUES (?,?)",
             ("s.hofmann@chg-meridian.com", CONFIGURATION_GROUP),
         )
+    con.commit()
+
+
+def ensure_additional_demo_users(con: sqlite3.Connection) -> None:
+    """Add the extended demo identities without replacing existing data."""
+    for group, description in (
+        (READER_GROUP, "Darf Dokumente in das Reader-Tool einspeisen"),
+        (APPROVAL_GROUP, "Darf Klaerfaelle und Kostenstellen-Zuordnungen freigeben"),
+    ):
+        con.execute(
+            "INSERT OR IGNORE INTO ad_groups(name,description) VALUES(?,?)",
+            (group, description),
+        )
+    for upn, display_name, role, groups in ADDITIONAL_DEMO_USERS:
+        con.execute(
+            "INSERT OR IGNORE INTO ad_users(upn,display_name,role) VALUES(?,?,?)",
+            (upn, display_name, role),
+        )
+        for group in groups:
+            con.execute(
+                "INSERT OR IGNORE INTO ad_memberships(upn,group_name) VALUES(?,?)",
+                (upn, group),
+            )
     con.commit()

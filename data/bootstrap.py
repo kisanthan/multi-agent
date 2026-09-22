@@ -93,9 +93,16 @@ def ensure_configured_runtime(*, force: bool = False) -> list[str]:
     """Install seeds at the paths currently selected in ``config``."""
     import config
 
-    return ensure_runtime(
+    changed = ensure_runtime(
         database=config.DB_PATH,
         manifest=config.MANIFEST_PATH,
         inbox=config.INTAKE_DIR,
         force=force,
     )
+    from data.migrations import connect
+    with connect(config.DB_PATH) as con:
+        from governance.ad import ensure_configuration_seed
+        from governance.identity import ensure_portal_identities
+        ensure_configuration_seed(con)
+        ensure_portal_identities(con)
+    return changed

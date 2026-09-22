@@ -145,6 +145,8 @@ class OllamaClient(LLMClient):
 
 class AnthropicClient(LLMClient):
     def ask_json(self, *, system: str, prompt: str, schema: type[BaseModel]) -> str:
+        from governance.inference_policy import deny_unscoped_cloud
+        deny_unscoped_cloud()
         try:
             import anthropic
         except ImportError as e:
@@ -208,6 +210,8 @@ class GoogleClient(LLMClient):
         return genai.Client(api_key=settings.google_api_key)
 
     def ask_json(self, *, system: str, prompt: str, schema: type[BaseModel]) -> str:
+        from governance.inference_policy import deny_unscoped_cloud
+        deny_unscoped_cloud()
         try:
             from google.genai import types
             response = self._client().models.generate_content(
@@ -229,6 +233,8 @@ class GoogleClient(LLMClient):
 
 class OpenAIClient(LLMClient):
     def ask_json(self, *, system: str, prompt: str, schema: type[BaseModel]) -> str:
+        from governance.inference_policy import deny_unscoped_cloud
+        deny_unscoped_cloud()
         try:
             import openai
         except ImportError as e:
@@ -276,6 +282,8 @@ def client_for(
     snapshot: Mapping[str, Mapping[str, str]] | None = None,
 ) -> tuple[LLMClient, ModelChoice]:
     choice = choose_profile(profile_id, snapshot) if profile_id else choose_model(agent_id)
+    from governance.inference_policy import authorize_local
+    authorize_local(agent_id, choice.provider, settings.ollama_base_url)
     return CLIENTS[choice.provider](choice.model_id), choice
 
 

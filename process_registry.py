@@ -23,6 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from agents.shared.schemas import DocumentType
+from contracts import InterruptKind
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,14 @@ SHARED_STEPS: tuple[ProcessStep, ...] = (
     ProcessStep("reader", "Beleg einlesen", "reader"),
     ProcessStep("klassifikation", "Belegart erkennen", "klassifikation"),
 )
+
+# Technical pause nodes reuse the visible business step they clarify.  They
+# therefore belong to the executable graph, but not as additional boxes in
+# the demo stepper.
+CLARIFICATION_GRAPH_NODES = frozenset({
+    "klassifikation_klaerfall",
+    "rechnungsextraktion_klaerfall",
+})
 
 
 @dataclass(frozen=True)
@@ -127,8 +136,8 @@ PROCESSES: dict[str, ProcessConfig] = {
         document_kind="Eingangsrechnung",
         icon="🧾",
         description="Eine Eingangsrechnung wird eingelesen und anhand der "
-        "Kostenstelle auf dem Beleg zugeordnet. Anschließend wird sie "
-        "revisionssicher archiviert. Eine Zahlung wird hier nicht gebucht.",
+        "Kostenstelle auf dem Beleg zugeordnet. Anschließend werden Original "
+        "und Zuordnung prototypisch nachvollziehbar archiviert. Eine Zahlung wird hier nicht gebucht.",
         document_type=DocumentType.INCOMING_INVOICE,
         own_steps=(
             ProcessStep("extraktion_rechnung", "Rechnungsdaten auslesen",
@@ -142,7 +151,7 @@ PROCESSES: dict[str, ProcessConfig] = {
         detail_fields=("supplier", "amount_eur", "cost_center_reference",
                        "cost_center_id"),
         target_system="Archiv (ELO)",
-        process_end="Die Rechnung ist revisionssicher archiviert",
+        process_end="Original und Zuordnung sind prototypisch nachvollziehbar archiviert",
         completion_outcome="archiviert",
         interrupt_kind="kostenstellen_freigabe",
         approval_step_node="freigabe",
@@ -191,7 +200,11 @@ def wait_points() -> dict[str, str]:
     Used by the stepper to know which step is active while a case is
     waiting -- derived here so it can never drift from `own_steps` above.
     """
-    return {p.interrupt_kind: p.approval_step_node for p in PROCESSES.values()}
+    return {
+        InterruptKind.DOCUMENT_TYPE_REVIEW.value: "klassifikation",
+        InterruptKind.INVOICE_EXTRACTION_REVIEW.value: "extraktion_rechnung",
+        **{p.interrupt_kind: p.approval_step_node for p in PROCESSES.values()},
+    }
 
 
 def all_processes() -> list[ProcessConfig]:

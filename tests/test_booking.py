@@ -84,7 +84,7 @@ def test_authorized_user_cannot_directly_approve_own_submission(con, monkeypatch
     assert verify_chain(con).valid
 
 
-def test_approved_by_authorized_user_still_proceeds_to_booking(con, monkeypatch):
+def test_authorized_name_alone_does_not_authorize_booking(con, monkeypatch):
     """Sanity check: the re-verification must not break the legitimate path."""
     _open_invoice(con)
     calls = []
@@ -106,32 +106,16 @@ def test_approved_by_authorized_user_still_proceeds_to_booking(con, monkeypatch)
                           actor="einspeiser@chg-meridian.com", document="test.pdf",
                           approved_by="pruefer@chg-meridian.com")
 
-    assert calls, "Navision should have been called for an authorized approver"
-    assert result.booked is True
+    assert not calls
+    assert result.booked is False
     assert verify_chain(con).valid
 
 
-def test_unreachable_navision_is_reported_as_technical_failure(con, monkeypatch):
+def test_missing_approval_record_prevents_even_a_transport_attempt(con, monkeypatch):
     _open_invoice(con)
-
-    def unreachable(*args, **kwargs):
-        raise httpx.ConnectError("[WinError 10061] Verbindung verweigert")
-
-    monkeypatch.setattr(
-        "agents.payment_confirmation.booking.httpx.post", unreachable
-    )
-
-    result = booking.book(
-        con,
-        number="RE-TEST-0001",
-        amount_eur=500.0,
-        actor="einspeiser@chg-meridian.com",
-        document="test.pdf",
-        approved_by="pruefer@chg-meridian.com",
-    )
-
+    _forbid_navision_call(monkeypatch)
+    result = booking.book(con, number="RE-TEST-0001", amount_eur=500.0,
+                          actor="einspeiser@chg-meridian.com", document="test.pdf",
+                          approved_by="pruefer@chg-meridian.com")
     assert result.booked is False
-    assert result.outcome is CaseOutcome.BOOKING_UNAVAILABLE
-    assert "nicht erreichbar" in result.reason
-    assert "nicht verbucht" in result.reason
-    assert "http://localhost:8001/booking" in result.error
+    assert result.outcome is CaseOutcome.BOOKING_REFUSED

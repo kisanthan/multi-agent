@@ -1,133 +1,57 @@
-# Limitations of the prototype
+# Grenzen und offene Produktivanforderungen
 
-The prototype is a **demonstration and feasibility artifact** (Design
-Science Research per Hevner et al. 2004), not production-ready. These
-limitations belong in the case-study text (chapter 6) and in the thesis's
-limitations section.
+Stand: 21. September 2026
 
-## What the prototype demonstrates -- and what it does not
+Der Code belegt die Ausführbarkeit ausgewählter Architektur- und
+Kontrollentscheidungen. Er belegt weder die Wirksamkeit unter realer Last noch
+die regulatorische Konformität eines späteren Produktivsystems.
 
-**Demonstrated:** the *architecture* is feasible. Role-/risk-based agent
-configuration, human-in-the-loop at risk points, Least Privilege,
-tamper-evident audit trail, and deterministic governance outside the
-language model all work together in a running system.
-
-**Not demonstrated:** *extraction quality* on real data. All documents are
-synthetic, natively generated (not scanned), and structurally clean. Real
-incoming invoices are more heterogeneous (scans, foreign languages,
-inconsistent layouts, OCR errors). The prototype says nothing about the hit
-rate of classification/extraction under real-world conditions. This
-distinction is central and should be clearly stated in chapter 6.
-
-## Concrete limitations
-
-### L1 -- Synthetic data
-Generated with a fixed seed (`data/generate.py`). Incidents (unknown
-number, duplicate, implausible amount, ambiguous cost center, unauthorized
-submitter) are deliberately constructed, not empirically observed. The
-cost-center assignment rules are simplified keyword lists.
-
-### L2 -- Schema adherence of local models (risk R1)
-Local models do not reliably honor a supplied JSON schema; for Ollama this
-is an open, documented bug
-([ollama/ollama#15540](https://github.com/ollama/ollama/issues/15540), as
-of April 2026), affecting Gemma 4 26B and Qwen 3 9B, among others.
-
-The prototype treats this **not as a fixed problem, but as a caught one**:
-`llm/extraction.py` validates every model response against the Pydantic
-schema, retries exactly once with the concrete error on a violation, and
-then escalates into the HITL queue instead of guessing. A model failure
-thereby becomes an approval case, not a silent data error. This is itself
-an architectural argument of the thesis -- but it remains a compensation,
-not a guarantee of model quality.
-
-### L3 -- Mocked target systems
-Navision (Dynamics NAV) and ELO are FastAPI mocks. They plausibly replicate
-the interfaces (including precondition checks and rejection), but not the
-business logic, performance, or failure modes of the real systems. The
-AD/Entra connection is a SQLite table, not a real directory; there is no
-real authentication -- the "signed-in user" is a selection in the
-prototype.
-
-### L3b -- Cost-center reference as an operational assumption
-The cost-center agent is an exact referential lookup (Thesis §7.4): it
-assumes the document carries a machine-readable cost-center reference (in
-the prototype a code `KTR-…` that the extraction agent reads). Real
-incoming invoices do not always carry such a reference explicitly -- then
-the exception case (human assignment) correctly kicks in more often. The
-prototype demonstrates the deterministic path; the frequency of the
-exception case on real documents is empirically open.
-
-### L4 -- Governance scope
-The policy engine covers the rules named in the functional concept (RBAC,
-autonomy levels, amount thresholds, four-eyes principle). It is not a
-complete ABAC/Zero-Trust system; just-in-time privilege grants and Zero
-Standing Privilege are conceptually intended but not implemented.
-
-### L5 -- Audit-trail protection
-The hash chaining reliably detects subsequent tampering (`verify_chain()`),
-and DB triggers prevent UPDATE/DELETE through the application. An attacker
-with direct write access to the SQLite file could not *forge* the chain
-unnoticed, but could *rebuild* the entire table. Real tamper-proofing would
-require external anchoring (e.g., periodically publishing the head hash,
-WORM storage). For a demonstration artifact, the chaining is sufficient and
-the proof is delivered.
-
-### L6 -- Limited concurrency / no production multi-user operation
-SQLite in WAL mode remains designed for a small demonstration workload.
-Audit appends acquire the SQLite writer lock before reading the current
-chain head, so concurrent writers cannot silently fork the hash chain.
-That does not turn SQLite, the synchronous UI, or the mocks into a
-production multi-user platform.
-
-### L7 -- Model versions and prices
-All model IDs (`claude-opus-4-8`, `claude-haiku-4-5`, `qwen3:8b`,
-`qwen2.5vl:7b`) and prices should be read as of the retrieval date
-**2026-07-17** and change quarterly. The vision model was originally
-`llama3.2-vision:11b` per the functional concept, but failed to load under
-Ollama in this project's own testing ("unknown model architecture:
-mllama") and was replaced with the confirmed-working `qwen2.5vl:7b`.
-
-### L8 -- The UI runs cases in a blocking manner
-The Streamlit UI runs a case synchronously within the starting browser
-tab's request (`app.stream()` with live progress). With a local model this
-takes one to three minutes, during which this tab is occupied. A
-production system would have a job queue (workers) here. For the
-demonstration, the blocking variant is deliberately chosen: it needs no
-concurrency and makes every node visible the moment it runs. Approvals from
-a second session are unaffected, because the case state lives in the
-LangGraph checkpoint, not in the browser.
-
-### L9 -- Extending the audit trail forces a chain rebuild
-Since the UI rework, the trail carries the fields `case_id`, `source`, and
-`outcome` as their own columns; they feed into the hash so they are just as
-tamper-evident as the rest of the entry. That covers the evidence the
-thesis asks for by name in §8.1 (*Auftraggeber, Agent, Datenquelle,
-Werkzeugaufruf, Policy-Entscheidung, Ergebnis*) in dedicated fields rather
-than inside an opaque payload.
-
-The flip side is more fundamental and instructive for the thesis: **a
-hash-chained table cannot be schema-migrated.** Existing entries were
-hashed without the new fields; including them in the hash material would
-break the chain for every legacy entry. In the prototype this is
-consequence-free -- all data is synthetic, and the versioned seed bundle
-can rebuild the writable runtime from scratch. A production system would instead need a
-versioned chain: the old chain is closed off and its head hash anchored as
-the genesis of the new chain, with a version marker per entry. The
-prototype does not implement this.
-
-### L10 -- Prototype identity instead of production authentication
-The four-eyes principle is enforced in `governance/policy.py`: approval
-requires group membership and `approver != submitter`, including resumes
-that bypass the UI. The remaining limitation is identity assurance. A user
-is selected in the prototype sidebar; there is no OIDC/Entra login and no
-server-verified token carrying the claims.
-
-## Environment-related notes (this machine)
-
-- Runs on Python 3.14; all dependencies have native wheels. `uv` could not
-  be installed due to broken Homebrew permissions -- venv + a pinned
-  `requirements.txt` satisfy reproducibility just as well.
-- Only explicit `data.generate` regeneration commands import Faker. Normal
-  demos and tests copy the small versioned seed bundle and therefore do not
-  pay generation cost or depend on Faker at startup.
+1. **Identität:** Admin-Anmeldung, Sperre, Sitzung und Gruppenprüfung sind lokal
+   in SQLite umgesetzt. Der Demo-Modus stellt bewusst keine Authentifizierung
+   dar; er gibt nur synthetische Rollen für eine kontrollierte Vorführung aus.
+   Föderation, MFA, Conditional Access, verwaltete Agentenidentitäten,
+   Rezertifizierung und Joiner-Mover-Leaver-Prozesse fehlen.
+2. **Zielsysteme:** Navision und ELO sind lokale Mocks. Netzwerksegmentierung,
+   produktive API-Verträge, Herstellertransaktionen, Schlüsselrotation,
+   Backpressure und Disaster Recovery sind nicht geprüft.
+   Der ELO-Mock belegt Dokumenthash, versionierte Zuordnung und erhaltene
+   Historie, aber keine produktive Revisionssicherheit. Diese entsteht erst
+   durch ein entsprechend konfiguriertes und geprüftes Zielsystem.
+3. **Modelle:** Die Tests ersetzen Modellantworten deterministisch. Aussagen zu
+   Extraktionsgüte, Robustheit, Bias, Sprachabdeckung und realen Dokumenttypen
+   sind daher nicht ableitbar.
+4. **Cloud-Layoutanalyse:** Der Code enthält den technisch kontrollierten
+   Ausnahmeweg, aber absichtlich keinen aktiven externen Deploymentnachweis und
+   keine Anbieterzugangsdaten. Ohne geprüften internen Proxy, EU-Region,
+   Auftragsverarbeitung, Löschkonzept und No-Training-Nachweis bleibt der Weg
+   geschlossen.
+5. **Datenschutz:** Datenminimierung, lokaler Standardweg und Auditfelder sind
+   technische Bausteine. Rechtsgrundlage, Verzeichnis der
+   Verarbeitungstätigkeiten, Datenschutz-Folgenabschätzung, Betroffenenrechte,
+   Aufbewahrung und Löschung erfordern organisatorische Festlegungen.
+6. **Audit:** Hashketten und Trigger erschweren unbemerkte lokale Manipulation.
+   Ein von Administratoren unabhängiger WORM-Speicher, externe Zeitquelle,
+   Signatur, SIEM-Anbindung und Alarmierung fehlen.
+7. **Betrieb:** Stop/Fortsetzen und `in_doubt`-Wiederaufnahme sind vorhanden.
+   Hochverfügbarkeit, Mehrknoten-Konkurrenz, Queueing, SLOs, Monitoring,
+   Incident-Prozesse und regelmäßige Restore-Tests sind nicht umgesetzt.
+8. **Skalierung:** SQLite eignet sich für die Demonstration. Sperrverhalten,
+   Isolation und Durchsatz eines produktiven Mehrbenutzersystems sind damit
+   nicht bewertet.
+9. **Regulatorische Einordnung:** Der Prototyp implementiert Anschlussstellen
+   für menschliche Aufsicht, Nachvollziehbarkeit und Risikobegrenzung. Die
+   konkrete Einstufung nach EU AI Act, DSGVO, NIST AI RMF oder ISO/IEC 42001
+   hängt von Zweck, Daten, Betreiberorganisation und Einsatzkontext ab und
+   muss separat bewertet werden.
+10. **Legacy-Zustand:** Alte Checkpoints ohne kontrollierten Vorgang und
+    strukturierte Freigabe werden nicht ausgeführt. Sie müssen neu eingereicht
+    oder mit einem separat geprüften Migrationsverfahren übernommen werden.
+11. **Demonstrierter Agentenumfang:** Modellnutzend sind Klassifikation und
+    prozessspezifische Extraktion. Personal Agents, optionaler Planner und
+    freie Agent-zu-Agent-Kommunikation bleiben Bestandteile des Zielbilds und
+    werden nicht durch den Prototyp nachgewiesen.
+12. **Policy-Änderungen:** Die ausführbare StepPolicy ist geschlossen,
+    versioniert und standardmäßig verweigernd. Änderungen erfolgen im
+    Prototyp über einen geprüften Code- und Releasewechsel; ein eigener
+    Laufzeitworkflow mit Antrag, unabhängiger Freigabe und Aktivierung ist
+    nicht implementiert.

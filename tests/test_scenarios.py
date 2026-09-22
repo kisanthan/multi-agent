@@ -26,6 +26,7 @@ import pytest
 
 from agents.shared.schemas import DocumentType, Classification
 from config import INTAKE_DIR, MANIFEST_PATH
+from contracts import InterruptKind
 from governance.audit import verify_chain
 from llm.extraction import ExtractionResult
 
@@ -54,6 +55,21 @@ def app(monkeypatch, tmp_path):
     The checkpoint sits in tmp_path as well: no test reads or changes a
     developer's running UI state.
     """
+    # Every scenario starts from the same target-system baseline. Audit rows
+    # deliberately remain append-only; mutable case and mock effects do not
+    # leak from one scenario into another.
+    from config import DB_PATH
+    from data.migrations import connect
+    with connect(DB_PATH) as runtime:
+        for table in (
+            "scoped_grants", "execution_commands", "approvals", "case_candidates",
+            "layout_requests", "local_extraction_failures", "archive_assignments",
+            "archive", "controlled_cases",
+        ):
+            runtime.execute(f"DELETE FROM {table}")
+        runtime.execute("UPDATE invoices SET status='offen', paid_at=NULL")
+        runtime.commit()
+
     # --- Bring target systems into the process via ASGI ---
     # FastAPI's TestClient talks to the ASGI app synchronously (httpx's
     # ASGITransport is async-only and does not fit the agents' synchronous
@@ -84,7 +100,8 @@ def app(monkeypatch, tmp_path):
 
     from graph.workflow import compile_graph
     graph, cp_con = compile_graph(tmp_path / "checkpoints.sqlite")
-    yield graph
+    from tests.auth_helpers import SignedInGraph
+    yield SignedInGraph(graph)
     cp_con.close()
     navision_client.close()
     elo_client.close()
@@ -222,6 +239,8 @@ def test_scenario2_unknown_number_becomes_an_exception_case(app, thread, monkeyp
                         "number": "RE-2026-4201"}),
         thread,
     )
+    assert "__interrupt__" in state  # Changed content must be displayed again.
+    state = app.invoke(Command(resume={"decision": "freigegeben", "approver": "s.hofmann@chg-meridian.com"}), thread)
     assert state["outcome"] == "verbucht"
 
 
@@ -295,7 +314,7 @@ def test_scenario2_approval_by_unknown_user_is_denied(app, thread, monkeypatch):
     from governance.audit import read_all
     con = sqlite3.connect(DB_PATH)
     entries = [e for e in read_all(con) if e.action == "freigabe_verweigert"]
-    assert any("Zero Trust" in e.reason for e in entries)
+    assert any("Sitzung" in e.reason for e in entries)
     assert verify_chain(con).valid
     con.close()
 
@@ -428,13 +447,13 @@ def test_corrected_number_that_is_already_paid_is_refused_by_navision(app, threa
                         "number": "RE-2026-4212"}),
         thread,
     )
-    assert state["outcome"] == "abgelehnt"
+    assert state["outcome"] == "verworfen"
 
     from config import DB_PATH
     from governance.audit import read_all
     con = sqlite3.connect(DB_PATH)
-    entries = [e for e in read_all(con) if e.action == "zahlung_verbuchen"]
-    assert any("bereits bezahlt" in e.reason for e in entries[-3:])
+    entries = [e for e in read_all(con) if e.action == "freigabe_verweigert"]
+    assert any("nicht offen" in e.reason for e in entries[-3:])
     assert verify_chain(con).valid
     con.close()
 
@@ -513,7 +532,7 @@ def test_second_archiving_of_the_same_document_is_idempotent(app, thread, monkey
     from governance.audit import read_all
     con = sqlite3.connect(DB_PATH)
     entries = [e for e in read_all(con) if e.action == "dokument_archivieren"]
-    assert any("bereits abgelegt" in e.reason for e in entries[-3:])
+    assert any('"already_existed":true' in e.reason for e in entries[-3:])
     assert verify_chain(con).valid
     con.close()
 
@@ -555,18 +574,21 @@ def test_scenario4_missing_reference_lets_a_human_decide(app, thread, monkeypatc
                         "cost_center_id": "KST-5000"}),
         thread,
     )
+    assert "__interrupt__" in state  # Changed content must be displayed again.
+    state = app.invoke(Command(resume={"decision": "freigegeben", "approver": "s.hofmann@chg-meridian.com"}), thread)
     assert state["outcome"] == "archiviert"
     assert state["archive_id"].startswith("ELO-")
     assert state["cost_center_id"] == "KST-5000"  # human choice in the state
 
     from config import DB_PATH
 
-    from governance.audit import read_all
     con = sqlite3.connect(DB_PATH)
-    # The human choice is traceable in the audit trail.
-    approvals = [e for e in read_all(con)
-                if e.action == "kostenstelle_freigegeben"]
-    assert any("KST-5000" in e.reason for e in approvals)
+    # The human choice is retained in the authoritative, versioned proposal.
+    candidate_payloads = con.execute(
+        "SELECT payload FROM case_candidates WHERE case_id = ? ORDER BY version",
+        (state["case_id"],),
+    ).fetchall()
+    assert any('"cost_center_id":"KST-5000"' in row[0] for row in candidate_payloads)
     assert verify_chain(con).valid
     con.close()
 
@@ -624,30 +646,31 @@ def test_scenario5_unauthorized_submitter(app, thread):
     assert [s["node"] for s in state["log"]] == ["reader"]
 
 
-# ------------------------------ Beyond the five: total extraction failure
+# ---------------------------- Beyond the five: model-schema clarification
 
-def _mock_extraction_failure(monkeypatch, *,
-                             escalation: str = "Modell nicht erreichbar: Testfehler.") -> None:
-    """Replaces the extraction agent with a total failure (R1 escalation:
-    data=None), not merely a successful result with a null field -- exactly
-    what llm/extraction.py::extract returns once both schema-retry attempts
-    fail, or the model is unreachable."""
-    result = ExtractionResult(data=None, attempts=2, model="mock", provider="mock",
-                              escalation=escalation)
-    monkeypatch.setattr("agents.shared.classification.extract", lambda *a, **k: result)
+def _schema_failure(escalation: str = "Antwort verletzt das Ausgabeschema.") -> ExtractionResult:
+    return ExtractionResult(data=None, attempts=2, model="mock", provider="mock",
+                            escalation=escalation)
 
 
-def test_total_extraction_failure_approved_ends_cleanly_not_booked(app, thread, monkeypatch):
-    """A total classification failure (nothing extracted at all) must not
-    reach node_booking, even if the resulting exception case is approved --
-    there is nothing to book.
+def test_classification_schema_failure_is_manually_routed_then_booked(
+        app, thread, monkeypatch):
+    """A failed router becomes a neutral document-type clarification.
 
-    Regression test: this used to crash the graph with `KeyError:
-    'amount_eur'` in node_booking, because route_exception_case's only
-    guard checked document_type, not whether reconciliation's fields
-    (number, amount_eur) were ever actually extracted.
+    No process-specific candidate exists before the reviewer chooses A or B.
+    Afterwards the ordinary process and its independent booking approval run.
     """
-    _mock_extraction_failure(monkeypatch)
+    _reset_status("RE-2026-4200")
+    _set_amount("RE-2026-4200", 1_500.0)
+    monkeypatch.setattr("agents.shared.classification.route",
+                        lambda *a, **k: _schema_failure())
+    payment = ExtractionResult(
+        data=Classification(type=DocumentType.PAYMENT_CONFIRMATION,
+                            number="RE-2026-4200", amount_eur=1_500.0),
+        attempts=1, model="mock", provider="mock",
+    )
+    monkeypatch.setattr("agents.payment_confirmation.extraction.extract_payment",
+                        lambda *a, **k: payment)
 
     from langgraph.types import Command
     state = app.invoke(
@@ -655,27 +678,72 @@ def test_total_extraction_failure_approved_ends_cleanly_not_booked(app, thread, 
          "log": []},
         thread,
     )
-
-    assert "__interrupt__" in state
     request = state["__interrupt__"][0].value
-    assert request["kind"] == "klaerfall"
-
-    # Approved anyway -- there is still nothing to book.
-    state = app.invoke(
-        Command(resume={"decision": "freigegeben",
-                        "approver": "s.hofmann@chg-meridian.com"}),
-        thread,
-    )
-    assert state["outcome"] == "verworfen"
-    assert state["completed"] is True
+    assert request["kind"] == InterruptKind.DOCUMENT_TYPE_REVIEW.value
 
     from config import DB_PATH
-    from governance.audit import read_all
     con = sqlite3.connect(DB_PATH)
-    entries = [e for e in read_all(con) if e.action == "klaerfall_entschieden"]
-    assert any("keine Buchung" in e.reason for e in entries)
-    assert verify_chain(con).valid
+    assert con.execute("SELECT COUNT(*) FROM case_candidates").fetchone()[0] == 0
     con.close()
+
+    state = app.invoke(
+        Command(resume={"decision": "freigegeben",
+                        "approver": "s.hofmann@chg-meridian.com",
+                        "document_type": DocumentType.PAYMENT_CONFIRMATION.value}),
+        thread,
+    )
+    assert state["__interrupt__"][0].value["kind"] == InterruptKind.EXCEPTION_CASE.value
+
+    state = app.invoke(
+        Command(resume={"decision": "freigegeben",
+                        "approver": "s.hofmann@chg-meridian.com",
+                        "number": "RE-2026-4200"}),
+        thread,
+    )
+    assert state["outcome"] == "verbucht"
+
+
+def test_invoice_schema_failure_requires_field_review_before_archiving(
+        app, thread, monkeypatch):
+    """An invalid invoice extraction cannot create an ELO candidate first."""
+    routed = ExtractionResult(
+        data=Classification(type=DocumentType.INCOMING_INVOICE),
+        attempts=1, model="mock", provider="mock",
+    )
+    monkeypatch.setattr("agents.shared.classification.route", lambda *a, **k: routed)
+    monkeypatch.setattr("agents.incoming_invoice.extraction.extract_invoice",
+                        lambda *a, **k: _schema_failure())
+
+    from langgraph.types import Command
+    state = app.invoke(
+        {"path": _pdf("B_invoice_ok_02.pdf"), "actor": "m.keller@chg-meridian.com",
+         "log": []},
+        thread,
+    )
+    request = state["__interrupt__"][0].value
+    assert request["kind"] == InterruptKind.INVOICE_EXTRACTION_REVIEW.value
+
+    from config import DB_PATH
+    con = sqlite3.connect(DB_PATH)
+    assert con.execute("SELECT COUNT(*) FROM case_candidates").fetchone()[0] == 0
+    assert con.execute("SELECT COUNT(*) FROM archive").fetchone()[0] == 0
+    con.close()
+
+    state = app.invoke(
+        Command(resume={
+            "decision": "freigegeben",
+            "approver": "s.hofmann@chg-meridian.com",
+            "number": "ER-2026-7102",
+            "amount_eur": 37_940.0,
+            "supplier": "Microsoft Deutschland GmbH",
+            "line_items": ["Microsoft 365 E5", "Azure Cloud Hosting"],
+            "cost_center_reference": "KTR-ITINFRA",
+        }),
+        thread,
+    )
+    assert "__interrupt__" not in state
+    assert state["outcome"] == "archiviert"
+    assert state["cost_center_id"] == "KST-1000"
 
 
 def test_unreachable_navision_is_audited_from_the_caller_side(app, thread, monkeypatch):
@@ -727,14 +795,11 @@ def test_unreachable_navision_is_audited_from_the_caller_side(app, thread, monke
                         "number": "RE-2026-4200"}),
         thread,
     )
-    assert state["outcome"] == "buchungssystem_nicht_erreichbar"
+    assert state["outcome"] == "wirkung_ungeklaert"
 
     con = sqlite3.connect(DB_PATH)
     new_entries = [e for e in read_all(con) if e.id not in before_ids]
-    assert any(e.action == "zahlung_verbuchen" and e.decision.value == "verweigert"
-              and "nicht erreichbar" in e.reason for e in new_entries), (
-        f"no matching new audit entry among {[(e.action, e.decision.value) for e in new_entries]}"
-    )
+    assert any(e.action == "wirkung_ungeklaert" and e.outcome == "in_doubt" for e in new_entries)
     assert verify_chain(con).valid
     con.close()
 
@@ -771,14 +836,11 @@ def test_unreachable_elo_is_audited_from_the_caller_side(app, thread, monkeypatc
         thread,
     )
     assert "__interrupt__" not in state
-    assert state["outcome"] == "archivierung_fehlgeschlagen"
+    assert state["outcome"] == "wirkung_ungeklaert"
 
     con = sqlite3.connect(DB_PATH)
     new_entries = [e for e in read_all(con) if e.id not in before_ids]
-    assert any(e.action == "dokument_archivieren" and e.decision.value == "verweigert"
-              and "nicht erreichbar" in e.reason for e in new_entries), (
-        f"no matching new audit entry among {[(e.action, e.decision.value) for e in new_entries]}"
-    )
+    assert any(e.action == "wirkung_ungeklaert" and e.outcome == "in_doubt" for e in new_entries)
     assert verify_chain(con).valid
     con.close()
 
@@ -820,7 +882,7 @@ def test_number_still_missing_after_approval_ends_cleanly_not_booked(app, thread
     from config import DB_PATH
     from governance.audit import read_all
     con = sqlite3.connect(DB_PATH)
-    entries = [e for e in read_all(con) if e.action == "klaerfall_entschieden"]
-    assert any("keine Buchung" in e.reason for e in entries)
+    entries = [e for e in read_all(con) if e.action == "freigabe_verweigert"]
+    assert any("Posten unbekannt" in e.reason for e in entries)
     assert verify_chain(con).valid
     con.close()

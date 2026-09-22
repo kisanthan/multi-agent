@@ -47,66 +47,110 @@ st.set_page_config(page_title=i18n.t("app.page_title"),
                    page_icon="📄", layout="wide")
 
 
-def _login() -> None:
-    """Top bar: compact account tab with details in a floating panel.
+def _replace_session_identity(*, upn: str, token: str) -> None:
+    """Start a clean UI session for a newly selected identity.
 
-    In the prototype, a selection instead of a real sign-in -- but the
-    rights behind it are the real group memberships from the directory
-    service.
-
-    The tab itself stays deliberately terse: display name and effective
-    rights are enough for orientation. The sign-in name, account selector,
-    and the plain-language capability description live in a popover. Its
-    help text also exposes the description on hover.
-
+    Streamlit keeps widget values and custom-component state across reruns.
+    None of that state may cross the identity boundary: in particular, the
+    fixed AI drawer can otherwise continue to show the previous person's
+    document.  Re-seed only the new authenticated identity; preferences are
+    restored by their normal initialization on the following script run.
     """
-    identity = SqliteIdentityProvider(config.DB_PATH)
-    accounts = identity.accounts()
+    st.session_state.clear()
+    st.session_state["auth_token"] = token
+    st.session_state[SESSION_USER] = upn
 
+
+def _demo_access() -> None:
+    """Enter without a password while retaining distinct demo identities."""
+    from governance import identity
+
+    demo_portal_upns = getattr(identity, "demo_portal_upns", None)
+    if demo_portal_upns is None:
+        # Streamlit may retain an older imported module while hot-reloading
+        # this entry point after identity.py gained new helpers.
+        demo_portal_upns = importlib.reload(identity).demo_portal_upns
+    provider = SqliteIdentityProvider(config.DB_PATH)
     style.css()
-
-    if not accounts:
-        st.error(i18n.t("app.no_accounts"))
-        st.stop()
-
-    names = [account.display_name for account in accounts]
-    unique = len(set(names)) == len(names)
-    labels = {
-        (account.display_name if unique
-         else f"{account.display_name} ({account.upn})"): account.upn
-        for account in accounts
-    }
-
-    current_upn = st.session_state.get(SESSION_USER)
-    if current_upn not in labels.values():
-        current_upn = accounts[0].upn
-    st.session_state[SESSION_USER] = current_upn
-
-    selector_key = "account_selector"
-    current_label = next(
-        label for label, account_upn in labels.items()
-        if account_upn == current_upn
+    roles = demo_portal_upns()
+    accounts = {upn: provider.user(upn) for upn in roles}
+    current = st.session_state.get(SESSION_USER)
+    selected = st.sidebar.selectbox(
+        "Demo-Rolle",
+        roles,
+        index=roles.index(current) if current in roles else 0,
+        format_func=lambda upn: f"{accounts[upn].display_name} · {accounts[upn].rights_short}",
+        help="Die Rolle simuliert eine Identität. Berechtigungen und Vier-Augen-Prinzip bleiben aktiv.",
     )
-    if st.session_state.get(selector_key) != current_label:
-        st.session_state[selector_key] = current_label
-
-    def select_account() -> None:
-        selected_label = st.session_state[selector_key]
-        st.session_state[SESSION_USER] = labels[selected_label]
-
-    upn = current_upn
-    person = identity.user(upn)
-
+    con = connection()
+    try:
+        token = st.session_state.get("auth_token")
+        try:
+            principal = identity.principal(con, token) if token else None
+        except identity.AuthenticationError:
+            principal = None
+        if principal != selected:
+            if token and principal is not None:
+                identity.logout(con, token)
+            token = identity.issue_demo_session(con, selected)
+        if current is not None and current != selected:
+            _replace_session_identity(upn=selected, token=token)
+            st.rerun()
+        st.session_state["auth_token"] = token
+        st.session_state[SESSION_USER] = selected
+    finally:
+        con.close()
     with style.account_topbar():
-        with style.account_tab(person):
-            st.caption(i18n.t("app.signed_in_as"))
-            st.selectbox(
-                i18n.t("app.switch_account"),
-                list(labels),
-                key=selector_key,
-                on_change=select_account,
-            )
-            style.account_details(person, upn=upn)
+        with style.account_tab(accounts[selected]):
+            style.account_details(accounts[selected], upn=selected)
+            st.caption("Demo-Modus · simulierte Identität")
+
+
+def _login() -> None:
+    """Authenticate a local synthetic account; account selection is not sign-in."""
+    if config.settings.portal_mode is config.PortalMode.DEMO:
+        _demo_access()
+        return
+    from governance import identity
+    provider = SqliteIdentityProvider(config.DB_PATH)
+    style.css()
+    token = st.session_state.get("auth_token")
+    con = connection()
+    try:
+        try:
+            upn = identity.principal(con, token) if token else None
+        except identity.AuthenticationError:
+            upn = None
+            st.session_state.pop("auth_token", None)
+        if upn:
+            st.session_state[SESSION_USER] = upn
+            person = provider.user(upn)
+            with style.account_topbar():
+                with style.account_tab(person):
+                    style.account_details(person, upn=upn)
+                    if st.button("Abmelden", key="logout"):
+                        identity.logout(con, token)
+                        st.session_state.clear()
+                        st.rerun()
+            return
+        st.title("Anmelden")
+        st.caption(f"Admin-Modus · vorkonfiguriertes Konto: {config.settings.portal_admin_email}")
+        with st.form("login"):
+            upn = st.text_input("Benutzerkonto")
+            password = st.text_input("Passwort", type="password")
+            submitted = st.form_submit_button("Anmelden")
+        if submitted:
+            try:
+                normalized_upn = upn.strip()
+                token = identity.login(con, normalized_upn, password)
+                _replace_session_identity(upn=normalized_upn, token=token)
+                st.rerun()
+            except identity.AuthenticationError as error:
+                st.error(str(error))
+        st.info("Das Startpasswort des Administratorkontos steht in README.md. Weitere Konten werden über die Einrichtungsanleitung angelegt.")
+        st.stop()
+    finally:
+        con.close()
 
 
 def _build_pages(notification_tasks: list[ApprovalTask] | None = None) -> dict:
@@ -205,15 +249,17 @@ def main() -> None:
     pages = _build_pages(notification_tasks)
     register_pages(pages)
 
-    st.navigation({
-        i18n.t("nav.tasks"): [pages["notifications"]],
-        i18n.t("nav.upload"): [pages["upload"], pages["history"]],
-        i18n.t("nav.case_types"): [pages[k.route]
-                                   for k in process_registry.all_processes()],
-        i18n.t("nav.evidence"): [pages["audit"], pages["architecture"]],
-        i18n.t("nav.system"): [pages["preferences"], pages["settings"]],
-        "": [pages["case"]],
-    }).run()
+    from governance.identity import session
+    with session(st.session_state["auth_token"]):
+        st.navigation({
+            i18n.t("nav.tasks"): [pages["notifications"]],
+            i18n.t("nav.upload"): [pages["upload"], pages["history"]],
+            i18n.t("nav.case_types"): [pages[k.route]
+                                       for k in process_registry.all_processes()],
+            i18n.t("nav.evidence"): [pages["audit"], pages["architecture"]],
+            i18n.t("nav.system"): [pages["preferences"], pages["settings"]],
+            "": [pages["case"]],
+        }).run()
 
 
 main()

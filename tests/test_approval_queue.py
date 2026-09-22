@@ -49,6 +49,16 @@ def test_queue_contains_only_cases_this_person_may_approve(con):
         "unknown": {"kind": "not-a-process"},
     })
 
+    import time
+    for item in cases:
+        con.execute("INSERT INTO controlled_cases VALUES(?,?,?,?,?,0,?)",
+                    (item.thread_id,item.actor,"hash",item.filename,"A",time.time()))
+        aid = "approval-" + item.thread_id
+        con.execute("INSERT INTO approvals(approval_id,case_id,step,version,payload_hash,policy_version,submitter,expires,status) "
+                    "VALUES(?,?,?,1,?,?,?,?,'requested')",
+                    (aid,item.thread_id,"buchung","hash","v2",item.actor,time.time()+1000))
+        app.requests[item.thread_id]["approval_id"] = aid
+    con.commit()
     tasks = available_from_cases(app, con, actor=APPROVER, cases=cases)
 
     assert [task.case.thread_id for task in tasks] == ["other"]

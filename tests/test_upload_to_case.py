@@ -86,7 +86,8 @@ def app(monkeypatch, tmp_path):
 
     from graph.workflow import compile_graph
     graph, cp_con = compile_graph(tmp_path / "checkpoints.sqlite")
-    yield graph, tmp_path / "checkpoints.sqlite"
+    from tests.auth_helpers import SignedInGraph
+    yield SignedInGraph(graph), tmp_path / "checkpoints.sqlite"
     cp_con.close()
     navision.close()
     elo.close()
@@ -171,7 +172,9 @@ def test_audit_is_filterable_by_case(con, app, tmp_path, monkeypatch,
     assert entries, "Der Lauf muss im Trail auffindbar sein"
     assert {e.case_id for e in entries} == {case_id}
     # Every entry names the document it relates to.
-    assert all(e.source == "A_payment_ok_01.pdf" for e in entries)
+    import hashlib
+    expected_hash = hashlib.sha256(PDF.read_bytes()).hexdigest()
+    assert all(e.source in {"A_payment_ok_01.pdf", expected_hash} for e in entries)
     # The upload itself belongs to no case and is not among them.
     assert all(e.action != "datei_hochgeladen" for e in entries)
     assert verify_chain(production).valid

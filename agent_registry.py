@@ -5,8 +5,8 @@ the agents and the governance layer read from it, and `governance/` must not
 depend on `agents/` (see tests/test_layer_boundaries.py). The table is pure
 configuration with no behavior and no LLM dependency.
 
-Autonomy levels follow Parasuraman et al. (2000); oversight modes follow
-chapter 2.2 of the thesis. A change here changes runtime behavior -- the
+Autonomy levels follow Parasuraman et al. (2000) and are instantiated in
+sections 4.4 and 6.6 of the thesis; oversight modes follow section 2.2. A change here changes runtime behavior -- the
 table is enforcement, not documentation.
 """
 
@@ -17,7 +17,7 @@ from enum import Enum
 
 
 class AgentType(str, Enum):
-    """Functional types from chapter 2.2 / 3.3 / 3.4 of the thesis.
+    """Functional types from sections 4.3 and 7.4 of the thesis.
 
     Personal Agents do not occur in these two processes; all domain agents
     are Shared Domain Agents. A `System Agent` as a functional type does not
@@ -32,7 +32,7 @@ class AgentType(str, Enum):
 
 
 class AutonomyLevel(int, Enum):
-    """Per Parasuraman et al. (2000), instantiated according to chapter 3.4."""
+    """Per Parasuraman et al. (2000), instantiated in sections 4.4 and 6.6."""
 
     READ_ACCESS = 1
     PROPOSAL = 2
@@ -75,11 +75,16 @@ class AgentConfig:
     processes: tuple[str, ...]
     can_write: bool
     description: str
+    sponsor: str = "Plattformverantwortung"
+    active: bool = True
+    data_classes: tuple[str, ...] = ("internal_financial",)
+    allowed_tools: tuple[str, ...] = ()
 
 
 # The table from section 1 of the functional concept, 1:1.
 REGISTRY: dict[str, AgentConfig] = {
     "reader": AgentConfig(
+        allowed_tools=("reader.pdf",),
         name="Reader-Tool",
         type=AgentType.NOT_AN_AGENT,
         autonomy_level=None,
@@ -91,8 +96,8 @@ REGISTRY: dict[str, AgentConfig] = {
         "der AD-Sicherheitsgruppe (Least Privilege).",
     ),
     "orchestrator": AgentConfig(
-        name="Orchestrator-Agent",
-        type=AgentType.ORCHESTRATOR,
+        name="Workflow-Engine",
+        type=AgentType.NOT_AN_AGENT,
         autonomy_level=None,
         oversight=OversightMode.HUMAN_ON_THE_LOOP,
         model_class=ModelClass.NO_MODEL,
@@ -101,6 +106,7 @@ REGISTRY: dict[str, AgentConfig] = {
         description="Routet nach Dokumenttyp und steuert den Workflow.",
     ),
     "klassifikation": AgentConfig(
+        allowed_tools=("model.local",),
         name="Belegart-Router",
         type=AgentType.SHARED_DOMAIN,
         # The table names "1-2"; the upper bound governs, because the policy
@@ -114,6 +120,7 @@ REGISTRY: dict[str, AgentConfig] = {
                     "an den passenden prozessspezifischen Extraktions-Agenten.",
     ),
     "extraktion_zahlung": AgentConfig(
+        allowed_tools=("model.local",),
         name="Extraktions-Agent Zahlungsbestätigung",
         type=AgentType.SHARED_DOMAIN,
         autonomy_level=AutonomyLevel.PROPOSAL,
@@ -125,6 +132,7 @@ REGISTRY: dict[str, AgentConfig] = {
                     "Zuordnung zu Prozess A.",
     ),
     "extraktion_rechnung": AgentConfig(
+        allowed_tools=("model.local",),
         name="Extraktions-Agent Eingangsrechnung",
         type=AgentType.SHARED_DOMAIN,
         autonomy_level=AutonomyLevel.PROPOSAL,
@@ -136,8 +144,9 @@ REGISTRY: dict[str, AgentConfig] = {
                     "Kostenstellenreferenz nach der Zuordnung zu Prozess B.",
     ),
     "abgleich": AgentConfig(
-        name="Abgleich-Agent",
-        type=AgentType.SHARED_DOMAIN,
+        allowed_tools=("invoices.read",),
+        name="Abgleich-Dienst",
+        type=AgentType.NOT_AN_AGENT,
         autonomy_level=AutonomyLevel.READ_ACCESS,
         oversight=OversightMode.HUMAN_ON_THE_LOOP,
         # No model: exact primary-key lookup (Thesis §7.4, docs/mapping.md I1)
@@ -149,12 +158,13 @@ REGISTRY: dict[str, AgentConfig] = {
         "die Stammdatenbasis ab (deterministisch). Nur Lesezugriff.",
     ),
     "buchung": AgentConfig(
-        name="Buchungs-Agent",
-        type=AgentType.SHARED_DOMAIN,
-        autonomy_level=AutonomyLevel.REVERSIBLE_WRITE,
+        allowed_tools=("navision.book",),
+        name="Buchungs-Dienst",
+        type=AgentType.NOT_AN_AGENT,
+        autonomy_level=AutonomyLevel.IRREVERSIBLE_ACTION,
         # Thesis §7.4 / Table 11: the financially effective booking step is
         # human-in-the-loop -- every booking requires human approval.
-        # Coupling "rising autonomy -> tighter oversight" (chapter 2.2).
+        # Coupling "rising autonomy -> tighter oversight" (sections 2.2 and 6.5).
         oversight=OversightMode.HUMAN_IN_THE_LOOP,
         model_class=ModelClass.NO_MODEL,
         processes=("A",),
@@ -163,9 +173,10 @@ REGISTRY: dict[str, AgentConfig] = {
         "Finanzwirksam, daher immer freigabepflichtig (Human-in-the-loop).",
     ),
     "kostenstelle": AgentConfig(
-        name="Kostenstellen-Agent",
-        type=AgentType.SHARED_DOMAIN,
-        autonomy_level=AutonomyLevel.PROPOSAL,
+        allowed_tools=("cost_centers.read",),
+        name="Kostenstellen-Dienst",
+        type=AgentType.NOT_AN_AGENT,
+        autonomy_level=AutonomyLevel.READ_ACCESS,
         # Diagram part 3: human-on-the-loop. If the document reference
         # resolves to exactly one cost center, the case proceeds
         # automatically to archiving; if the reference is missing or
@@ -182,19 +193,20 @@ REGISTRY: dict[str, AgentConfig] = {
         "Katalog nach (deterministisch). Fehlt sie, Vier-Augen-Freigabe.",
     ),
     "elo": AgentConfig(
-        name="ELO-Agent",
-        type=AgentType.SHARED_DOMAIN,
+        allowed_tools=("elo.archive",),
+        name="Archivierungs-Dienst",
+        type=AgentType.NOT_AN_AGENT,
         autonomy_level=AutonomyLevel.REVERSIBLE_WRITE,
         oversight=OversightMode.HUMAN_ON_THE_LOOP,
         model_class=ModelClass.NO_MODEL,
         processes=("B",),
         can_write=True,
-        description="Archiviert die Rechnung revisionssicher im DMS. "
-        "Prozessende von Prozess B (Diagramm Teil 3).",
+        description="Archiviert Original und Zuordnung im DMS-Mock mit Hash- "
+        "und Versionsnachweis. Produktive Revisionssicherheit ist nicht Gegenstand des Prototyps.",
     ),
     "policy": AgentConfig(
         name="Policy-/Governance-Komponente",
-        type=AgentType.POLICY,
+        type=AgentType.NOT_AN_AGENT,
         autonomy_level=None,
         oversight=OversightMode.DETERMINISTIC,
         model_class=ModelClass.NO_MODEL,
@@ -204,7 +216,7 @@ REGISTRY: dict[str, AgentConfig] = {
     ),
     "audit": AgentConfig(
         name="Audit-/Monitoring-Komponente",
-        type=AgentType.AUDIT,
+        type=AgentType.NOT_AN_AGENT,
         autonomy_level=None,
         oversight=OversightMode.READ_ONLY,
         model_class=ModelClass.NO_MODEL,

@@ -82,13 +82,23 @@ def extract(
     because a model that fails the same schema twice does not understand
     the schema, and another pass only costs money and latency.
     """
-    client, choice = client_for(
-        agent_id, profile_id=profile_id, snapshot=profile_snapshot)
+    from governance.step_policy import PolicyDenied
+    try:
+        client, choice = client_for(agent_id, profile_id=profile_id, snapshot=profile_snapshot)
+    except PolicyDenied as error:
+        log_entry(con, actor=actor, agent=agent_id, action="inferenz_verweigert",
+                  decision=Decision.DENIED, reason=str(error), reference=reference, outcome="policy_denied")
+        con.commit()
+        return ExtractionResult(None, 0, "blocked", "none", escalation=str(error))
     current_prompt = prompt
     last_error = ""
     raw = ""
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
+        log_entry(con, actor=actor, agent=agent_id, action="inferenz_angefordert",
+                  decision=Decision.ALLOWED, reason="Lokaler Modellaufruf nach Datenfreigabe.",
+                  reference=reference, outcome="requested")
+        con.commit()
         try:
             raw = client.ask_json(system=system, prompt=current_prompt, schema=schema)
         except LLMUnreachable as e:
@@ -150,6 +160,13 @@ def extract(
             profile_id=choice.profile_id,
             configuration_revision=choice.configuration_revision,
         )
+
+    if reference.case_id and choice.provider == "ollama" and agent_id in {"extraktion_zahlung", "extraktion_rechnung"}:
+        import time
+        con.execute("INSERT INTO local_extraction_failures VALUES(?,?,?,?) ON CONFLICT(case_id,step) "
+                    "DO UPDATE SET reason=excluded.reason,occurred_at=excluded.occurred_at",
+                    (reference.case_id, agent_id, "local_schema_failure", time.time()))
+        con.commit()
 
     # Both attempts failed -> exception case instead of guessing.
     escalation = (

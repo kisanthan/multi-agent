@@ -11,18 +11,30 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from langchain_core.runnables import RunnableConfig
 
 from agents.shared import classification
 from agents.shared.schemas import Classification, DocumentType
 import config
-from contracts import ApprovalTrigger, CaseOutcome
-from governance.audit import CaseReference
+from contracts import (
+    ApprovalDecision,
+    ApprovalRequest,
+    ApprovalTrigger,
+    CaseOutcome,
+    InterruptKind,
+)
+from governance.audit import CaseReference, Decision, log_entry
+from governance import control, identity
+from governance.policy import check_approval
+from governance.step_policy import PolicyDenied
+from data.migrations import connect
 from graph.state import Case
+from langgraph.types import interrupt
 from tools.reader import AccessDenied, read_document
 
 
 def connection() -> sqlite3.Connection:
-    return sqlite3.connect(config.DB_PATH)
+    return connect(config.DB_PATH)
 
 
 def case_reference(state: Case) -> CaseReference:
@@ -66,13 +78,20 @@ def note(state: Case, node: str, text: str) -> list[dict]:
     return [*state.get("log", []), {"node": node, "text": text}]
 
 
-def node_reader(state: Case) -> dict:
+def node_reader(state: Case, config: RunnableConfig) -> dict:
     """Reader tool. The AD check sits inside `read_document` (Least Privilege)."""
     con = connection()
+    case_id = state.get("case_id") or config["configurable"]["thread_id"]
+    state = {**state, "case_id": case_id}
     try:
+        if identity.principal(con) != state["actor"]:
+            raise AccessDenied("Einreicher entspricht nicht der angemeldeten Person.")
         content = read_document(con, state["path"], actor=state["actor"],
                                 reference=case_reference(state))
-    except AccessDenied as e:
+        control.register_case(con, case_id=case_id, actor=state["actor"],
+                              document_hash=content.document_hash, filename=content.filename,
+                              content=Path(state["path"]).read_bytes())
+    except (AccessDenied, identity.AuthenticationError, PolicyDenied) as e:
         # Scenario 5: end of the case. No parsing, no model, no target system.
         return {
             "completed": True,
@@ -81,10 +100,14 @@ def node_reader(state: Case) -> dict:
             "log": note(state, "reader",
                        f"Zugriff nicht erlaubt: {e}"),
         }
+    except (OSError, ValueError, RuntimeError) as e:
+        return {"case_id": case_id, "completed": True, "outcome": CaseOutcome.PARSE_FAILED.value,
+                "error": str(e), "log": note(state, "reader", "Dokument nicht lesbar.")}
     finally:
         con.close()
 
     return {
+        "case_id": case_id,
         "markdown": content.markdown,
         "document_hash": content.document_hash,
         "filename": content.filename,
@@ -132,6 +155,12 @@ def node_classification(state: Case) -> dict:
         }
 
     d = e.data
+    if d.type in (DocumentType.PAYMENT_CONFIRMATION, DocumentType.INCOMING_INVOICE):
+        con = connection()
+        try:
+            control.select_process(con, state["case_id"], "A" if d.type is DocumentType.PAYMENT_CONFIRMATION else "B")
+        finally:
+            con.close()
     return {
         "document_type": d.type.value,
         "log": note(state, "klassifikation",
@@ -152,10 +181,104 @@ def route_document_type(state: Case) -> str:
     if state.get("completed"):
         return "ende"
     if state.get("exception_case"):
-        return "hitl"
+        return "review"
     t = state.get("document_type")
     if t == DocumentType.PAYMENT_CONFIRMATION.value:
         return "prozess_a"
     if t == DocumentType.INCOMING_INVOICE.value:
         return "prozess_b"
-    return "hitl"
+    return "review"
+
+
+def node_classification_review(state: Case) -> dict:
+    """Let a demo reviewer select the process when the model schema failed.
+
+    This is deliberately a narrow clarification step, not a second
+    classifier. It can only choose one of the two registered document
+    types or end the case. No process-specific candidate and no target
+    system command exists before this decision.
+    """
+    request = ApprovalRequest(
+        kind=InterruptKind.DOCUMENT_TYPE_REVIEW,
+        trigger=ApprovalTrigger.ESCALATION,
+        filename=state.get("filename"),
+        reason=state.get("exception_reason"),
+        escalation=state.get("escalation"),
+        document_type_options=(
+            {"value": DocumentType.PAYMENT_CONFIRMATION.value,
+             "label": "Zahlungsbestätigung"},
+            {"value": DocumentType.INCOMING_INVOICE.value,
+             "label": "Eingangsrechnung"},
+        ),
+    ).as_payload()
+    raw = interrupt(request)
+    con = connection()
+    try:
+        person = identity.principal(con)
+        permission = check_approval(
+            con, actor=person, agent_id="klassifikation",
+            submitter=state.get("actor"),
+        )
+        if not permission.allowed:
+            raise PolicyDenied(permission.reason)
+        if raw.get("approver", person) != person:
+            raise PolicyDenied("Sitzung und prüfende Person stimmen nicht überein.")
+        if raw.get("decision") != ApprovalDecision.APPROVED.value:
+            log_entry(
+                con, actor=person, agent="klassifikation",
+                action="dokumenttyp_manuell_geprueft",
+                decision=Decision.DENIED,
+                reason=raw.get("reason", "Vorgang verworfen."),
+                reference=case_reference(state), outcome="rejected",
+            )
+            con.commit()
+            return {
+                "completed": True,
+                "outcome": CaseOutcome.REJECTED.value,
+                "approved_by": person,
+                "log": note(state, "klassifikation", "Vorgang nach manueller Prüfung verworfen."),
+            }
+
+        document_type = DocumentType(raw.get("document_type", ""))
+        if document_type not in {
+            DocumentType.PAYMENT_CONFIRMATION,
+            DocumentType.INCOMING_INVOICE,
+        }:
+            raise PolicyDenied("Unzulässiger Dokumenttyp.")
+        process = "A" if document_type is DocumentType.PAYMENT_CONFIRMATION else "B"
+        control.select_process(con, state["case_id"], process)
+        log_entry(
+            con, actor=person, agent="klassifikation",
+            action="dokumenttyp_manuell_geprueft",
+            decision=Decision.INFO,
+            reason=f"Dokumenttyp manuell als {document_type.value} bestätigt.",
+            payload={"document_type": document_type.value, "process": process},
+            reference=case_reference(state), outcome="corrected",
+        )
+        con.commit()
+        return {
+            "document_type": document_type.value,
+            "exception_case": False,
+            "exception_reason": "",
+            "log": note(
+                state, "klassifikation",
+                "Belegart wurde durch eine Person festgelegt: "
+                + ("Zahlungsbestätigung." if process == "A" else "Eingangsrechnung."),
+            ),
+        }
+    except (PolicyDenied, identity.AuthenticationError, ValueError) as error:
+        log_entry(
+            con, actor=raw.get("approver") or "unauthenticated",
+            agent="klassifikation", action="dokumenttyp_manuell_verweigert",
+            decision=Decision.DENIED, reason=str(error),
+            reference=case_reference(state), outcome="rejected",
+        )
+        con.commit()
+        return {
+            "completed": True,
+            "outcome": CaseOutcome.REJECTED.value,
+            "error": str(error),
+            "log": note(state, "klassifikation", str(error)),
+        }
+    finally:
+        con.close()

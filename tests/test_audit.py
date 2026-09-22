@@ -117,6 +117,7 @@ def test_verify_chain_detects_changed_actor(con):
 def test_verify_chain_detects_deleted_entry(con):
     """A removed entry leaves a gap in the chain."""
     _three_entries(con)
+    con.execute("PRAGMA foreign_keys=OFF")
     con.execute("DROP TRIGGER audit_no_delete")
     con.execute("DELETE FROM audit WHERE id = 2")
     con.commit()

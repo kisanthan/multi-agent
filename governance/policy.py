@@ -66,7 +66,10 @@ def check_write_action(
     checked before the amount is even considered, so that a level-1 agent
     cannot write even at 0 EUR.
     """
-    cfg = get_config(agent_id)
+    try:
+        cfg = get_config(agent_id)
+    except KeyError:
+        return Ruling(Outcome.DENIED, "default_deny", "Unbekannte Komponente.", {"agent": agent_id})
     base = {"agent": agent_id, "actor": actor, "action": action,
             "autonomy_level": cfg.autonomy_level.value if cfg.autonomy_level else None,
             "oversight": cfg.oversight.value}
@@ -93,6 +96,14 @@ def check_write_action(
             f"{cfg.name} hat Autonomiestufe {level}; Schreiben erfordert "
             f"mindestens Stufe {AutonomyLevel.REVERSIBLE_WRITE.value}.", base,
         )
+
+    allowed_actions = {"buchung": {"zahlung_verbuchen"}, "elo": {"dokument_archivieren"}}
+    if action not in allowed_actions.get(agent_id, set()):
+        return Ruling(Outcome.DENIED, "tool_allowlist", "Unregistrierte Aktion.", base)
+    if not user.is_member(ad.READER_GROUP):
+        return Ruling(Outcome.DENIED, "reader_rbac", "Einreicher hat kein Prozessrecht.", base)
+    if not cfg.active:
+        return Ruling(Outcome.DENIED, "identity_disabled", "Dienst gesperrt.", base)
 
     # Rule 4 -- oversight mode from the registry.
     # The booking agent is human-in-the-loop (Thesis §7.4): the financially

@@ -18,6 +18,7 @@ from contracts import (
     ApprovalResponse,
     ApprovalTrigger,
     CaseOutcome,
+    InterruptKind,
 )
 from governance.audit import verify_chain
 from governance.policy import check_approval
@@ -53,6 +54,9 @@ def render(app, thread_id: str, *, upn: str, with_title: bool = True) -> None:
     style.stepper(steps_for(process, values.get("log", []),
                             waiting_on=(request or {}).get("kind"), status=status,
                             outcome=displayed_outcome))
+
+    from ui.cases.operations import render as render_operations
+    render_operations(app, thread_id, values)
 
     if request:
         _waiting_card(app, thread_id, request, values, upn=upn)
@@ -147,7 +151,13 @@ def decision_form(app, thread_id: str, request: dict, values: dict, *,
     """
     kind = request.get("kind", "")
     config = process_registry.for_interrupt(kind)
-    agent_id = (config.approval_agent_id if config else None) or "buchung"
+    review_agents = {
+        InterruptKind.DOCUMENT_TYPE_REVIEW.value: "klassifikation",
+        InterruptKind.INVOICE_EXTRACTION_REVIEW.value: "extraktion_rechnung",
+    }
+    agent_id = review_agents.get(kind) or (
+        (config.approval_agent_id if config else None) or "buchung"
+    )
 
     con = connection()
     try:
@@ -187,8 +197,59 @@ def decision_form(app, thread_id: str, request: dict, values: dict, *,
         st.markdown(f"**{i18n.t('detail.line_items')}:** "
                     + ", ".join(request["line_items"]))
 
-    view = process_views.for_interrupt(kind)
-    extra_response = view.approval_inputs(request, thread_id=thread_id) if view else {}
+    if kind == InterruptKind.DOCUMENT_TYPE_REVIEW.value:
+        options = request.get("document_type_options") or [
+            {"value": "zahlungsbestaetigung",
+             "label": "Zahlungsbestätigung"},
+            {"value": "eingangsrechnung",
+             "label": "Eingangsrechnung"},
+        ]
+        labels = {entry["value"]: entry["label"] for entry in options}
+        selected = st.selectbox(
+            "Belegart",
+            [entry["value"] for entry in options],
+            format_func=lambda value: labels.get(value, value),
+            key=f"document_type_{thread_id}",
+        )
+        extra_response = {"document_type": selected}
+    elif kind == InterruptKind.INVOICE_EXTRACTION_REVIEW.value:
+        number = st.text_input(
+            "Rechnungsnummer", value=request.get("number") or "",
+            key=f"invoice_number_{thread_id}",
+        )
+        supplier = st.text_input(
+            "Lieferant", value=request.get("supplier") or "",
+            key=f"invoice_supplier_{thread_id}",
+        )
+        amount = st.number_input(
+            "Rechnungsbetrag (EUR)", min_value=0.01,
+            value=float(request.get("amount_eur") or .01), step=.01,
+            key=f"invoice_amount_{thread_id}",
+        )
+        items = st.text_area(
+            "Rechnungspositionen (optional, eine Position pro Zeile)",
+            value="\n".join(request.get("line_items") or []),
+            key=f"invoice_items_{thread_id}",
+        )
+        reference = st.text_input(
+            "Kostenstellenreferenz (optional)",
+            value=request.get("reference") or "",
+            key=f"invoice_reference_{thread_id}",
+        )
+        st.caption(
+            "Die Werte werden vor der Kostenstellenzuordnung geprüft. "
+            "Ohne bestätigte Rechnungsdaten wird nichts archiviert."
+        )
+        extra_response = {
+            "number": number,
+            "supplier": supplier,
+            "amount_eur": amount,
+            "line_items": [line.strip() for line in items.splitlines() if line.strip()],
+            "cost_center_reference": reference.strip(),
+        }
+    else:
+        view = process_views.for_interrupt(kind)
+        extra_response = view.approval_inputs(request, thread_id=thread_id) if view else {}
 
     if decision.rule == "four_eyes":
         st.warning(person.own_document_hint)
@@ -216,9 +277,15 @@ def decision_form(app, thread_id: str, request: dict, values: dict, *,
         response = ApprovalResponse(
             decision=ApprovalDecision.APPROVED if confirm else ApprovalDecision.REJECTED,
             approver=upn,
-            number=request.get("number"),
+            number=extra_response.get("number", request.get("number")),
             cost_center_id=extra_response.get("cost_center_id"),
+            amount_eur=extra_response.get("amount_eur"),
+            supplier=extra_response.get("supplier"),
+            line_items=tuple(extra_response.get("line_items") or ()),
+            cost_center_reference=extra_response.get("cost_center_reference"),
+            document_type=extra_response.get("document_type"),
         ).as_resume()
+        response.update({"approval_id": request.get("approval_id"), "version": request.get("version")})
         st.session_state.pop(f"reject_confirmed_{thread_id}", None)
         resume(app, thread_id=thread_id, response=response)
         st.rerun()

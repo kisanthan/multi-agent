@@ -16,16 +16,18 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import sqlite3
 import sys
 import uuid
 from datetime import datetime, timezone
 
-from config import DB_PATH, INTAKE_DIR, MANIFEST_PATH, settings
+from config import DB_PATH, INTAKE_DIR, MANIFEST_PATH, PortalMode, settings
 from contracts import InterruptKind
 from data.bootstrap import ensure_configured_runtime
 from governance.audit import read_all, verify_chain
+from governance import identity
 from graph.effects import read_effect
 
 # Approver accounts from the AD mock (members of SG-CHG-Freigabe).
@@ -54,9 +56,43 @@ def list_documents() -> None:
         print()
 
 
-def _response_to(request: dict, approver: str, decision: str) -> dict:
+def _response_to(request: dict, approver: str, decision: str, *,
+                 interactive: bool = False) -> dict:
     """Builds the approval response for an interrupt."""
     kind = request.get("kind")
+    if kind == InterruptKind.DOCUMENT_TYPE_REVIEW.value:
+        if decision != "freigegeben":
+            return {"decision": decision, "approver": approver}
+        options = request.get("document_type_options") or []
+        if not interactive or not options:
+            return {"decision": "verworfen", "approver": approver}
+        print("      Belegart auswählen:")
+        for index, option in enumerate(options, start=1):
+            print(f"        {index}: {option['label']}")
+        choice = input("      Nummer: ").strip()
+        try:
+            document_type = options[int(choice) - 1]["value"]
+        except (ValueError, IndexError):
+            return {"decision": "verworfen", "approver": approver}
+        return {"decision": decision, "approver": approver,
+                "document_type": document_type}
+    if kind == InterruptKind.INVOICE_EXTRACTION_REVIEW.value:
+        if decision != "freigegeben" or not interactive:
+            return {"decision": "verworfen", "approver": approver}
+        number = input("      Rechnungsnummer: ").strip()
+        supplier = input("      Lieferant: ").strip()
+        amount = input("      Betrag EUR: ").strip().replace(",", ".")
+        reference = input("      Kostenstellenreferenz (optional): ").strip()
+        try:
+            amount_eur = float(amount)
+        except ValueError:
+            return {"decision": "verworfen", "approver": approver}
+        return {
+            "decision": decision, "approver": approver,
+            "number": number, "supplier": supplier,
+            "amount_eur": amount_eur,
+            "cost_center_reference": reference,
+        }
     if kind == InterruptKind.COST_CENTER_APPROVAL.value:
         # If the document reference is missing, the approver picks from the
         # catalog. In the non-interactive run we take the first catalog
@@ -68,7 +104,20 @@ def _response_to(request: dict, approver: str, decision: str) -> dict:
             "number": request.get("number")}
 
 
-def run_case(doc: dict, *, approver: str, decision: str, interactive: bool) -> None:
+def _session_token(upn: str, cache: dict[str, str]) -> str:
+    """Create a demo session; ask for a password only in optional admin mode."""
+    if upn not in cache:
+        with sqlite3.connect(DB_PATH) as con:
+            if settings.portal_mode is PortalMode.DEMO:
+                cache[upn] = identity.issue_demo_session(con, upn)
+            else:
+                password = getpass.getpass(f"Passwort für {upn}: ")
+                cache[upn] = identity.login(con, upn, password)
+    return cache[upn]
+
+
+def run_case(doc: dict, *, approver: str, decision: str, interactive: bool,
+             session_tokens: dict[str, str] | None = None) -> None:
     from langgraph.types import Command
 
     from graph.workflow import compile_graph
@@ -87,15 +136,17 @@ def run_case(doc: dict, *, approver: str, decision: str, interactive: bool) -> N
         print(f"  {profile_id:9s} {profile['provider']} / {profile['model_id']}")
     print("-" * 78)
 
+    tokens = session_tokens if session_tokens is not None else {}
     try:
-        state = app.invoke(
-            {"path": str(INTAKE_DIR / doc["filename"]), "actor": doc["submitter"],
-             "case_id": case_id,
-             "started_at": datetime.now(timezone.utc).isoformat(),
-             "configuration_revision": settings.configuration_revision,
-             "model_profiles": settings.profile_snapshot(), "log": []},
-            thread,
-        )
+        with identity.session(_session_token(doc["submitter"], tokens)):
+            state = app.invoke(
+                {"path": str(INTAKE_DIR / doc["filename"]), "actor": doc["submitter"],
+                 "case_id": case_id,
+                 "started_at": datetime.now(timezone.utc).isoformat(),
+                 "configuration_revision": settings.configuration_revision,
+                 "model_profiles": settings.profile_snapshot(), "log": []},
+                thread,
+            )
 
         # As long as the graph is stuck at a HITL point, keep asking for a decision.
         while "__interrupt__" in state:
@@ -112,9 +163,12 @@ def run_case(doc: dict, *, approver: str, decision: str, interactive: bool) -> N
                 dec = decision
                 print(f"\n      -> automatisch '{dec}' durch {approver}")
 
-            state = app.invoke(
-                Command(resume=_response_to(request, approver, dec)), thread
-            )
+            with identity.session(_session_token(approver, tokens)):
+                state = app.invoke(
+                    Command(resume=_response_to(
+                        request, approver, dec, interactive=interactive
+                    )), thread
+                )
 
         print("\n  Ablauf:")
         for s in state.get("log", []):
@@ -139,7 +193,7 @@ def _show_effect(doc: dict, state: dict) -> None:
                   f"Status '{effect.navision_status}'")
         if effect.elo_archive_id:
             print(f"  ELO:      {effect.elo_archive_id} "
-                  "(revisionssicher, Prozessende B)")
+                  "(prototypisch nachvollziehbar, Prozessende B)")
 
         entries = read_all(con)
         print(f"\n  Audit-Trail (letzte Eintraege dieses Laufs):")
@@ -204,10 +258,11 @@ def main() -> None:
         sys.exit(0 if check_models() else 1)
 
     docs = _manifest()
+    session_tokens: dict[str, str] = {}
     if args.alle:
         for d in docs:
             run_case(d, approver=args.pruefer, decision=args.entscheidung,
-                     interactive=args.interaktiv)
+                     interactive=args.interaktiv, session_tokens=session_tokens)
         return
     if not args.szenario:
         return p.print_help()
@@ -227,7 +282,7 @@ def main() -> None:
 
     for d in matches:
         run_case(d, approver=args.pruefer, decision=args.entscheidung,
-                 interactive=args.interaktiv)
+                 interactive=args.interaktiv, session_tokens=session_tokens)
 
 
 if __name__ == "__main__":

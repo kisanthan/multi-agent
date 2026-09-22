@@ -89,6 +89,8 @@ def _as_row(e, columns: dict[str, str]) -> dict:
 
 
 def render() -> None:
+    with connection() as contract_con:
+        render_contract_events(contract_con, st.query_params.get("case"))
     style.css()
     st.title(i18n.t("audit.title"))
     st.caption(i18n.t("audit.caption"))
@@ -180,3 +182,15 @@ def _to_csv(entries, chain, columns: dict[str, str]) -> str:
     for e in entries:
         writer.writerow(_as_row(e, columns))
     return buffer.getvalue()
+
+
+def render_contract_events(con, case_id=None):
+    import json
+    from governance.audit_contract import verify
+    check = verify(con)
+    st.caption(f"Strukturierter Auditvertrag: {check.checked} Ereignisse; Kette {'gültig' if check.valid else 'fehlerhaft'}.")
+    rows = [json.loads(row[0]) for row in con.execute("SELECT event FROM audit_v2 ORDER BY id DESC LIMIT 200")]
+    if case_id:
+        rows = [row for row in rows if row.get("case_id") == case_id]
+    with st.expander("Freigaben und Ausführungsbelege"):
+        st.json(rows)

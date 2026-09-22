@@ -32,13 +32,15 @@ def _stream_run(app, thread: dict, payload, title: str, *, show_ai: bool = False
         live_ai_panel.begin(payload)
     with st.status(title, expanded=True) as box:
         try:
-            for state in app.stream(payload, thread, stream_mode="values"):
-                if show_ai and isinstance(state, dict):
-                    live_ai_panel.update(state)
-                log = state.get("log", []) if isinstance(state, dict) else []
-                for entry in log[shown:]:
-                    st.write(f"**{entry['node']}** — {entry['text']}")
-                shown = max(shown, len(log))
+            from governance.identity import session
+            with session(st.session_state.get("auth_token", "")):
+                for state in app.stream(payload, thread, stream_mode="values"):
+                    if show_ai and isinstance(state, dict):
+                        live_ai_panel.update(state)
+                    log = state.get("log", []) if isinstance(state, dict) else []
+                    for entry in log[shown:]:
+                        st.write(f"**{entry['node']}** — {entry['text']}")
+                    shown = max(shown, len(log))
         except Exception as e:  # noqa: BLE001 - the user should see the reason
             if show_ai:
                 live_ai_panel.fail(e)

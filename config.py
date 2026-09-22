@@ -60,6 +60,13 @@ class ModelMode(str, Enum):
     CLOUD = "cloud"
 
 
+class PortalMode(str, Enum):
+    """Authentication presentation for the local prototype portal."""
+
+    ADMIN = "admin"
+    DEMO = "demo"
+
+
 class Provider(str, Enum):
     OLLAMA = "ollama"
     GOOGLE = "google"
@@ -158,6 +165,15 @@ class Settings(BaseSettings):
     navision_url: str = "http://localhost:8001"
     elo_url: str = "http://localhost:8002"
 
+    # Portal modes are intentionally explicit. ADMIN uses the normal local
+    # password boundary. DEMO issues sessions only for the two configured
+    # synthetic identities and leaves all downstream controls active.
+    portal_mode: PortalMode = PortalMode.DEMO
+    portal_admin_email: str = "admin@prototype.local"
+    portal_admin_password: str = "Admin-Prototype-2026!"
+    demo_submitter_upn: str = "m.keller@chg-meridian.com"
+    demo_approver_upn: str = "s.hofmann@chg-meridian.com"
+
     # Legacy settings. They remain readable so an existing installation does
     # not suddenly change model routing after the feature update.
     model_mode: ModelMode = ModelMode.LOCAL
@@ -219,6 +235,12 @@ class Settings(BaseSettings):
             raise ValueError("Anthropic unterstützt API-Key oder Workspace-Profil.")
         if self.google_auth_method not in {AuthMethod.API_KEY, AuthMethod.OAUTH}:
             raise ValueError("Google unterstützt API-Key oder OAuth.")
+        if "@" not in self.portal_admin_email or len(self.portal_admin_password) < 12:
+            raise ValueError("Das vorkonfigurierte Administratorkonto ist unvollständig.")
+        if not self.demo_submitter_upn or not self.demo_approver_upn:
+            raise ValueError("Für den Demo-Modus müssen Einreicher und Prüfer festgelegt sein.")
+        if self.demo_submitter_upn.casefold() == self.demo_approver_upn.casefold():
+            raise ValueError("Demo-Einreicher und Demo-Prüfer müssen verschieden sein.")
         return self
 
     def _legacy_profile(self, profile_id: ProfileId) -> ModelProfile:
@@ -260,6 +282,7 @@ settings = Settings()
 SECRET_FIELDS = frozenset({
     "anthropic_api_key", "openai_api_key", "google_api_key",
     "google_oauth_client_secret", "google_oauth_refresh_token",
+    "portal_admin_password",
 })
 
 

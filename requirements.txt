@@ -1,6 +1,5 @@
 # Full pinned dependency closure (direct + transitive), not a curated
-# top-level list -- this is what makes `pip install -r requirements.txt`
-# reproducible (docs/limitations.md's environment note). Some entries look
+# top-level list. Some entries look
 # unused because the project's own code never imports them directly, but
 # each is a real transitive dependency: GitPython/gitdb/smmap <- streamlit,
 # onnxruntime/flatbuffers <- pymupdf-layout <- pymupdf4llm, sqlite-vec <-
@@ -8,8 +7,13 @@
 # such a line does not stop the package from being installed -- it only
 # drops the version pin, which pip's resolver then re-picks freely.
 #
+# Cloud SDKs remain pinned for compatibility with historical configuration
+# and model-discovery tests. The controlled standard execution path blocks
+# their use with document content; the masked layout exception uses its own
+# proxy contract in llm/layout.py.
+#
 # Not included: `docling`, the alternate reader parser selectable via
-# READER_PARSER=docling (see README.md) -- opt-in and heavier (~1-2 GB of
+# READER_PARSER=docling -- opt-in and heavier (~1-2 GB of
 # weights), install manually if you use it; tools/reader.py gives an
 # actionable error if it's missing.
 aiosqlite==0.22.1

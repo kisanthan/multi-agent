@@ -14,7 +14,7 @@ from ui.shared import i18n
 from ui.shared.context import connection
 
 RESULT_TEXTS = {
-    "archiviert": "Die Rechnung ist revisionssicher abgelegt. Damit ist der "
+    "archiviert": "Original und Zuordnung sind im Prototyp nachvollziehbar abgelegt. Damit ist der "
                   "Vorgang beendet.",
     "archivierung_fehlgeschlagen": "Die Ablage im Archiv ist fehlgeschlagen.",
 }

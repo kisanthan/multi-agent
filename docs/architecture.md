@@ -1,136 +1,36 @@
-# Technische Architektur und Wartungsleitfaden
+# Architektur des kontrollierten Prototyps
 
-Stand: 2026-08-30 · Geltungsbereich: aktueller Prototyp im Repository
+Stand: 21. September 2026
 
-## Zweck und Dokumentationsentscheidung
+## Schichten und Verantwortungen
 
-Dieses Dokument erklärt die implementierte Architektur so, dass eine neue
-Person den Prototyp verstehen, Fehler eingrenzen und Änderungen sicher
-vornehmen kann. Es beschreibt den Code, nicht nur das fachliche Zielbild.
+| Schicht | Komponenten | Verbindliche Aufgabe |
+|---|---|---|
+| Identität und Zugriff | `governance/identity.py`, `governance/ad.py` | Admin-Passwortmodus oder begrenzte Demositzung; kurzlebige Sitzung, Benutzer- und Gruppenprüfung |
+| Orchestrierung | `graph/workflow.py`, `graph/nodes/` | Prozessfolge, Unterbrechung und Fortsetzung; keine Berechtigungsquelle |
+| Policy und Governance | `governance/step_policy.py`, `governance/policy.py`, `governance/control.py` | geschlossene Schrittmatrix, Freigabevertrag, aktive Rechteprüfung, Stop/Fortsetzen |
+| Tool-Gateway | `runtime/tool_gateway.py` | lokaler Endpunkt, ScopedGrant, Payload-Hash, Kommandozustand |
+| Zielsystem | `runtime/targets.py`, `mocks/` | atomarer Effekt, dauerhafter Receipt, Zielsystem-Audit |
+| Audit und Monitoring | `governance/audit.py`, `governance/audit_contract.py` | kompatibler Legacy-Hashverbund und sieben Kategorien in `audit_v2` |
+| Daten und Migration | `data/migrations.py`, `data/control_schema.sql` | additive, versionierte Kontrolltabellen |
+| Präsentation | `ui/`, `demo.py` | Anmeldung, Vorgangsdarstellung und Eingaben; keine alleinige Policy-Entscheidung |
 
-Eine klassische Architekturdokumentation allein wäre dafür nicht die
-sinnvollste Form: Komponentenbilder erklären zwar den Aufbau, helfen aber
-wenig bei pausierten LangGraph-Läufen, persistierten Verträgen, Änderungen an
-einem Prozess oder Abweichungen zwischen Agentenmodell und Laufzeit. Deshalb
-kombiniert dieses Dokument vier Sichten:
+LangGraph hält den Ablaufzustand und die Position eines unterbrochenen
+Vorgangs. Der verbindliche Kontrollzustand liegt in den Tabellen
+`controlled_cases`, `case_candidates`, `approvals`, `execution_commands` und
+`scoped_grants`. Dadurch kann ein alter oder veränderter Checkpoint keine
+Schreibberechtigung erzeugen.
 
-1. System-, Komponenten- und Abhängigkeitsstruktur,
-2. tatsächliche Laufzeit- und Fehlerpfade,
-3. Datenhaltung, Verträge und Sources of Truth,
-4. Änderungslandkarte, Verifikation und technische Risiken.
+Der Portalmodus betrifft ausschließlich die Erzeugung der menschlichen
+Sitzung. `admin` verlangt ein Passwort und installiert einmalig das
+dokumentierte lokale Administratorkonto. `demo` erlaubt ohne Passwort nur die
+konfigurierten synthetischen Einreicher- und Prüferidentitäten. Hinter dieser
+Grenze laufen beide Modi durch dieselben Kontrolltabellen und Policyprüfungen.
 
-Die Detaildokumente bleiben bewusst getrennt:
-
-- [guide.md](guide.md): Setup, Betrieb und Troubleshooting,
-- [mapping.md](mapping.md): Zuordnung des Fach-/Thesenkonzepts zum Code,
-- [limitations.md](limitations.md): Grenzen des Demonstrators,
-- [flow.mmd](flow.mmd): aus dem kompilierten Graphen erzeugter Ablauf.
-
-## Kurzurteil zur Architektur
-
-**Für einen Demonstrator mit zwei Prozessen ist die Architektur sinnvoll und
-sollte nicht grundlegend ersetzt werden.** LangGraph bildet explizite
-Verzweigungen und Human-in-the-loop-Unterbrechungen passend ab. Die Trennung
-von deterministischer Governance und LLM-Aufruf ist fachlich wichtig, im Code
-sichtbar und durch Tests geschützt. Prozessspezifische Module verhindern,
-dass die beiden Abläufe unkontrolliert ineinander wachsen.
-
-**Für Produktion oder deutlich mehr Prozesse ist sie in der heutigen Form
-nicht geeignet.** Die wichtigsten Grenzen sind die synchrone Ausführung in
-Streamlit, SQLite als gemeinsame Laufzeitdatenbank, die Nutzung des internen
-Checkpoint-Schemas als Fallübersicht, fehlende echte Authentifizierung und
-die noch fehlende Produktionsidentität und Worker-/Queue-Infrastruktur.
-Eine Migration sollte jedoch von konkreten Last-, Sicherheits-
-oder Änderungsanforderungen ausgelöst werden, nicht vom Wunsch nach einer
-abstrakteren Architektur.
-
-### Was gut wartbar ist
-
-- Der Kontrollfluss ist explizit in `graph/workflow.py` verdrahtet.
-- Beide Prozesse teilen nur den Intake und haben danach eigene Agenten-,
-  Node- und UI-Module.
-- Persistierte HITL-Nachrichten sind als Verträge in `contracts.py` definiert.
-- Agenten- und Prozessmetadaten sind in Registries zentralisiert.
-- Governance ist deterministisch und darf keine höheren Schichten oder
-  Modellclients importieren; Architekturtests erzwingen dies.
-- Der gespeicherte Ablauf wird gegen den kompilierten Graphen getestet.
-
-### Was Wartung erschwert
-
-- „Agent“, „Modellklasse“ und „LLM-Aufruf“ bedeuten nicht dasselbe. Die drei
-  tatsächlichen Aufrufer (Router und zwei Extraktionen) sind deshalb als
-  gemeinsame Profile in `config.py` zentralisiert; UI und Preflight lesen
-  genau diese Source of Truth.
-- Ein neuer Prozess ist nur teilweise registry-getrieben und erfordert
-  weiterhin Änderungen an Graph, Routing, UI-View, Übersetzungen und Tests.
-- Fallzustand und Fallliste hängen am LangGraph-Checkpoint; es gibt keine
-  eigene, migrationsfähige Fallprojektion.
-- Node-Namen, Log-Schrittnamen und UI-Schritte sind getrennte Namensräume.
-  Tests verhindern Drift, die Kopplung bleibt aber bei Änderungen relevant.
-- Die Datenhaltung ist absichtlich prototypisch und nicht auf parallele
-  Verarbeitung ausgelegt.
-
-## Systemkontext
-
-```text
- Einspeiser / Prüfer
-         |
-         +---------------------+
-         |                     |
-         v                     v
- Streamlit-UI               demo.py (CLI)
-         |                     |
-         +----------+----------+
-                    v
-        kompilierter LangGraph-Workflow
-             |       |        |
-             |       |        +----> Ollama oder Anthropic
-             |       |              (aktuell nur Klassifikation)
-             |       |
-             |       +-------------> Navision-Mock / ELO-Mock (HTTP)
-             |
-             +---------------------> SQLite-Checkpoints
-             +---------------------> SQLite-Stammdaten, Uploads, Audit,
-                                      ERP-/DMS-Mockzustand
-```
-
-Der Prototyp automatisiert zwei Belegarten:
-
-- Prozess A, Zahlungsbestätigung: Abgleich und nach menschlicher Freigabe
-  Verbuchung in Navision.
-- Prozess B, Eingangsrechnung: Kostenstellenzuordnung und Ablage in ELO;
-  eine Kostenstellenfreigabe ist nur bei fehlender/ungültiger Referenz nötig.
-
-Nicht im System enthalten sind reale Identität, reales AD/Entra, echte ERP-
-oder DMS-Schnittstellen, ein Worker-/Queue-System und produktionsreife
-unveränderliche Audit-Speicherung.
-
-## Ausführbarer Workflow
-
-Der folgende Block ist die technische Referenz des Kontrollflusses. Er wird
-aus `build_graph().compile().get_graph().draw_mermaid()` erzeugt. Der Test
-`tests/test_flow.py` vergleicht seine Kanten und [flow.mmd](flow.mmd) mit dem
-kompilierten Graphen.
+## Prozessgraph
 
 ```mermaid
----
-config:
-  flowchart:
-    curve: linear
----
 graph TD;
-	__start__([<p>__start__</p>]):::first
-	reader(reader)
-	klassifikation(klassifikation)
-	extraktion_zahlung(extraktion_zahlung)
-	abgleich(abgleich)
-	buchung(buchung)
-	klaerfall(klaerfall)
-	extraktion_rechnung(extraktion_rechnung)
-	kostenstelle(kostenstelle)
-	freigabe_kostenstelle(freigabe_kostenstelle)
-	elo(elo)
-	__end__([<p>__end__</p>]):::last
 	__start__ --> reader;
 	abgleich -.-> buchung;
 	abgleich -. &nbsp;hitl&nbsp; .-> klaerfall;
@@ -138,6 +38,7 @@ graph TD;
 	buchung -. &nbsp;hitl&nbsp; .-> klaerfall;
 	extraktion_rechnung -. &nbsp;ende&nbsp; .-> __end__;
 	extraktion_rechnung -.-> kostenstelle;
+	extraktion_rechnung -. &nbsp;review&nbsp; .-> rechnungsextraktion_klaerfall;
 	extraktion_zahlung -. &nbsp;ende&nbsp; .-> __end__;
 	extraktion_zahlung -.-> abgleich;
 	freigabe_kostenstelle -. &nbsp;ende&nbsp; .-> __end__;
@@ -148,388 +49,105 @@ graph TD;
 	klassifikation -. &nbsp;ende&nbsp; .-> __end__;
 	klassifikation -. &nbsp;prozess_b&nbsp; .-> extraktion_rechnung;
 	klassifikation -. &nbsp;prozess_a&nbsp; .-> extraktion_zahlung;
-	klassifikation -. &nbsp;hitl&nbsp; .-> klaerfall;
+	klassifikation -. &nbsp;review&nbsp; .-> klassifikation_klaerfall;
+	klassifikation_klaerfall -. &nbsp;ende&nbsp; .-> __end__;
+	klassifikation_klaerfall -. &nbsp;prozess_b&nbsp; .-> extraktion_rechnung;
+	klassifikation_klaerfall -. &nbsp;prozess_a&nbsp; .-> extraktion_zahlung;
 	kostenstelle -.-> elo;
 	kostenstelle -. &nbsp;freigabe&nbsp; .-> freigabe_kostenstelle;
 	reader -. &nbsp;ende&nbsp; .-> __end__;
 	reader -.-> klassifikation;
+	rechnungsextraktion_klaerfall -. &nbsp;ende&nbsp; .-> __end__;
+	rechnungsextraktion_klaerfall -.-> kostenstelle;
 	elo --> __end__;
-	classDef default fill:#f2f0ff,line-height:1.2
-	classDef first fill-opacity:0
-	classDef last fill:#bfb6fc
+	freigabe_kostenstelle -. &nbsp;freigabe&nbsp; .-> freigabe_kostenstelle;
+	klaerfall -. &nbsp;hitl&nbsp; .-> klaerfall;
+	klassifikation_klaerfall -. &nbsp;review&nbsp; .-> klassifikation_klaerfall;
+	rechnungsextraktion_klaerfall -. &nbsp;review&nbsp; .-> rechnungsextraktion_klaerfall;
 ```
 
-### Gemeinsamer Intake
+## Kontrollierter Schreibpfad
 
-1. UI oder CLI erzeugt eine `thread_id` und den initialen `Case`-State.
-2. `reader` ruft `tools.reader.read_document()` auf. Die
-   Berechtigungsprüfung liegt innerhalb des Tools und erfolgt vor jedem
-   Dateizugriff.
-3. Bei Ablehnung endet der Vorgang mit `zugriff_verweigert`; PDF-Parser,
-   Modell und Zielsystem werden nicht aufgerufen.
-4. Bei Erfolg wird das PDF deterministisch in Markdown umgewandelt und der
-   SHA-256 des Rohdokuments berechnet.
-5. `klassifikation` bestimmt als gemeinsamer KI-Router ausschließlich die
-   Belegart. Pydantic validiert die strukturierte Antwort.
-6. `route_document_type()` routet deterministisch anhand des erkannten
-   Dokumenttyps. Der Orchestrator führt keinen eigenen Modellaufruf aus.
-7. `extraktion_zahlung` oder `extraktion_rechnung` liest anschließend nur die
-   Felder des ausgewählten Prozesses mit seinem eigenen Modellprofil. Nach
-   maximal zwei ungültigen Antworten wird eskaliert, nicht geraten.
+```mermaid
+sequenceDiagram
+    actor E as Einreicher
+    participant G as LangGraph
+    participant P as Policy/Control
+    actor R as Prüfer
+    participant W as Tool-Gateway
+    participant Z as Zielsystem-Mock
 
-### Prozess A: Zahlungsbestätigung
-
-1. `abgleich` normalisiert die Rechnungsnummer und liest den Stammdatensatz
-   per exaktem SQL-Lookup.
-2. Unbekannte, bereits bezahlte oder betragsabweichende Vorgänge laufen in
-   `klaerfall`; der Happy Path läuft zu `buchung`.
-3. `buchung` prüft die Policy. Da der Agent als Human-in-the-loop
-   konfiguriert ist, erzeugt auch der Happy Path zunächst einen
-   Freigabebedarf.
-4. `klaerfall` persistiert mit `interrupt()` einen `ApprovalRequest`. Ein
-   berechtigter Mensch setzt den Graphen später mit `Command(resume=...)`
-   fort oder verwirft ihn.
-5. Nach Freigabe läuft `buchung` ein zweites Mal, prüft die Berechtigung des
-   Prüfers erneut und ruft `POST /booking` am Navision-Mock auf.
-
-Wichtig: Ein Logeintrag des Nodes `buchung` beweist noch keine Buchung. Der
-erste Durchlauf fordert nur die Freigabe an. Das fachliche Ergebnis steht in
-`state["outcome"]` und wird zusätzlich über `graph/effects.py` im Zielsystem
-nachgelesen.
-
-### Prozess B: Eingangsrechnung
-
-1. `kostenstelle` löst die extrahierte Referenz exakt gegen den
-   Kostenstellenkatalog auf; es gibt kein semantisches Matching.
-2. Eine eindeutige Referenz läuft ohne Dialog direkt zu `elo`.
-3. Eine fehlende oder unbekannte Referenz führt zu
-   `freigabe_kostenstelle`. Der Prüfer wählt eine Kostenstelle und setzt den
-   Graphen fort oder verwirft den Vorgang.
-4. `elo` prüft die Write-Policy und ruft `POST /archive` am ELO-Mock auf.
-   Die Dokumentidentität basiert auf dem SHA-256; erneute Ablage desselben
-   Inhalts liefert dieselbe Archiv-ID.
-
-Prozess B endet mit der Archivierung. Er schreibt nie nach Navision.
-
-### Fehler- und Wiederaufnahmesemantik
-
-- Modell nicht erreichbar: keine Wiederholung, Audit-Eintrag und Eskalation
-  in den Freigabepfad.
-- Modellschema verletzt: genau ein Korrekturversuch, danach Eskalation.
-- Navision nicht erreichbar: Vorgang endet als
-  `buchungssystem_nicht_erreichbar`; eine fachliche Navision-Ablehnung endet
-  weiterhin als `abgelehnt`. Ein ELO-Fehler endet als
-  `archivierung_fehlgeschlagen`.
-- Mensch lehnt ab oder ist nicht berechtigt: Ende mit `verworfen`.
-- Ein wartender Vorgang ist durch den Checkpoint, nicht durch den Browser,
-  definiert. Ein anderer Tab kann ihn fortsetzen.
-- Es existiert kein automatischer Retry für HTTP-Schreibaufrufe. ELO ist auf
-  Dokumenthash-Ebene idempotent, Navision schützt gegen Doppelbuchungen über
-  den Rechnungsstatus.
-
-## Komponenten, Verantwortungen und Abhängigkeiten
-
-| Bereich | Zentrale Dateien | Verantwortung | Darf kennen |
-|---|---|---|---|
-| Verträge/Konfiguration | `config.py`, `contracts.py`, `agent_registry.py`, `process_registry.py` | Einstellungen, persistierte Nachrichten, Agenten- und Prozessmetadaten | möglichst keine höheren Schichten |
-| Governance | `governance/ad.py`, `policy.py`, `audit.py` | Identität/Gruppen, Write-/Approval-Regeln, Audit-Kette | Konfiguration und Agenten-Registry; nie LLM, Graph oder UI |
-| Reader | `tools/reader.py` | autorisierter PDF-Zugriff, Parsing, Dokumenthash | Governance und Konfiguration |
-| LLM | `llm/client.py`, `extraction.py`, `preflight.py` | Providerwahl, Transport, Schema-Validierung, Readiness | Agenten-Registry und Konfiguration |
-| Domain | `agents/shared/`, `agents/payment_confirmation/`, `agents/incoming_invoice/` | fachliche Entscheidungen und Zielsystemaufrufe | Governance, LLM beziehungsweise Adapter |
-| Orchestrierung | `graph/workflow.py`, `graph/nodes/`, `graph/state.py` | Nodes verdrahten, Status fortschreiben, HITL unterbrechen | Domain-Komponenten und Verträge |
-| Projektionen | `graph/cases.py`, `graph/effects.py` | Fallliste/-status und Nachweis des Zielsystemeffekts | Checkpoint beziehungsweise Stammdaten-DB |
-| Adapter | `mocks/navision.py`, `mocks/elo.py` | strikte simulierte Zielsysteme | DB und Audit |
-| Präsentation | `ui/`, `demo.py` | Start/Fortsetzung, Anzeige, Übersetzung; Identitätsadapter in `ui/shared/identity.py` | Graph, Projektionen, Registries; keine Policy-Entscheidung nur im UI |
-
-Die wichtigste erzwungene Grenze ist `governance/`: Eine
-Berechtigungsentscheidung darf weder ein LLM noch eine von ihr kontrollierte
-höhere Schicht erreichen. `tests/test_layer_boundaries.py` prüft Imports per
-AST. `tests/test_process_separation.py` schützt zusätzlich die Trennung der
-beiden Prozessmodule.
-
-### Abhängigkeitsrichtung
-
-```text
- config.py / contracts.py / agent_registry.py
-                 ^
-                 |
- governance/     |       process_registry.py
-       ^         |               ^
-       |         |               |
- tools/  llm/  agents/ <----- graph/nodes/
-                          ^          ^
-                          |          |
-                       mocks/   graph/workflow.py
-                                      ^
-                                      |
-                                 ui/ und demo.py
+    E->>G: authentifizierte Sitzung + Dokument
+    G->>P: Vorgang und versionierten Vorschlag registrieren
+    P-->>G: approval_id + payload_hash + policy_version
+    G-->>R: exakt diesen Vorschlag anzeigen
+    R->>P: Entscheidung in eigener Sitzung
+    P->>P: Fremdperson, Rolle, Version, Hash und Ablauf prüfen
+    P-->>G: einmal verwendbare Freigabe
+    G->>P: idempotentes Ausführungskommando erzeugen
+    W->>P: Rechte erneut prüfen und ScopedGrant ausstellen
+    W->>Z: command_id + payload_hash + Grant
+    Z->>Z: Effekt und Receipt atomar speichern
+    Z-->>W: Receipt
+    W->>P: Kommando als succeeded/rejected abschließen
 ```
 
-Das Bild ist vereinfacht: `process_registry.py` importiert den
-`DocumentType` aus `agents/shared/schemas.py`, und die Prozess-B-View liest
-den Kostenstellenkatalog über den Domain-Agenten nach. Diese pragmatischen
-Kopplungen sind für den Prototyp vertretbar, sollten aber bei einer
-Produktionsmigration durch neutrale Vertrags- beziehungsweise Query-Module
-ersetzt werden.
+Bei einem Transportfehler wird das Kommando `in_doubt`. Ein Prüfer kann es
+über die Bedienoberfläche anhand des eigenen, zum Kommando gehörenden Receipts
+wiederaufnehmen. Fremde oder lediglich zufällig passende Zielsystemzustände
+gelten nicht als Beleg.
 
-## Agentenmodell versus reale LLM-Nutzung
+## Prozess A – Zahlungsbestätigung
 
-`agent_registry.py` ist ein fachliches Rollen- und Risikomodell. Eine
-`model_class` dort ist derzeit **kein Beweis für einen Modellaufruf**. Die
-reale Call Chain besteht aus dem gemeinsamen Router und genau einem
-prozessspezifischen Extraktionsagenten. Beide gehen über
-`llm/extraction.py` und `llm/client.py::client_for()` zum jeweils im Profil
-gewählten Anbieter (Ollama, Google, Anthropic oder OpenAI).
+1. Der Reader prüft die authentifizierte Identität und das Einspeiserecht,
+   liest das PDF und registriert Hash sowie unveränderte Bytes.
+2. Klassifikation und Extraktion laufen lokal.
+3. Der deterministische Abgleich prüft Rechnungsnummer, offenen Status und
+   centgenauen Betrag.
+4. Jede Buchung wird als versionierter Vorschlag dargestellt. Korrekturen
+   erzeugen eine neue Version und damit eine neue Freigabe.
+5. Eine andere berechtigte Person bestätigt. Vor dem Senden werden deren
+   Rechte und die Rechte des Einreichers erneut geprüft.
+6. Navision ändert genau einen offenen Posten atomar zu `bezahlt` und liefert
+   einen Receipt mit Vorher-/Nachher-Zustand.
 
-| Komponente | deklarierte Modellklasse | tatsächlicher LLM-Aufruf |
-|---|---:|---:|
-| Reader | kein Modell | nein |
-| Orchestrator | kein Modell | nein; deterministisches Routing |
-| Belegart-Router | vision-fähig | **ja**, bestimmt nur die Belegart |
-| Zahlungsextraktion | vision-fähig | **ja**, eigenes Provider-/Modellprofil |
-| Rechnungsextraktion | vision-fähig | **ja**, eigenes Provider-/Modellprofil |
-| Abgleich | kein Modell | nein; SQL-Lookup |
-| Buchung | kein Modell | nein; Policy + HTTP |
-| Kostenstelle | kein Modell | nein; SQL-Lookup |
-| ELO | kein Modell | nein; Policy + HTTP |
-| Policy/Audit | kein Modell | nein |
+## Prozess B – Eingangsrechnung
 
-Die Agentenkonfiguration und `llm/preflight.py` verwenden dieselben drei
-effektiven Profile. Deterministische Agenten erscheinen ausdrücklich als
-„keine KI erforderlich“ und können kein Modell auswählen.
+1. Reader, Klassifikation und Extraktion folgen demselben lokalen Eintrittspfad.
+2. Die Kostenstelle wird ausschließlich über eine exakte Referenz ermittelt.
+3. Fehlt eine eindeutige Referenz, wählt eine andere berechtigte Person aus dem
+   aktuellen Katalog; die geänderte Auswahl muss als neuer Vorschlag erneut
+   bestätigt werden.
+4. ELO speichert den logischen Archiveintrag mit dem bereits unveränderlich
+   registrierten Original und der aktiven Kostenstellenzuordnung.
+5. Eine Korrektur deaktiviert die bisher aktive Zuordnung und ergänzt eine
+   neue Version. Original und Historie bleiben erhalten.
 
-## Persistenz und Datenverantwortung
+Prozess B endet in ELO und schreibt nicht in Navision. Prozess A endet in
+Navision und archiviert nicht in ELO.
 
-| Speicher | Inhalt | Besitzer/Zugriff | Lebenszyklus |
-|---|---|---|---|
-| `data/demo/` | versionierte, unveränderliche Seed-DB, Manifest und 13 synthetische PDFs | Generator schreibt nur mit `--seed-bundle`; Bootstrap liest | immer im Repository vorhanden; eine Integritätsprüfung läuft im Test |
-| `data/inbox/<upload_id>/*.pdf` | hochgeladene Rohbelege; generierte Demo-Belege liegen direkt im Inbox-Ordner | Intake schreibt atomar und unveränderlich, Reader liest, UI zeigt Vorschau | gleiche Dateinamen überschreiben einander nicht; der Demo-Generator setzt Demo-PDFs zurück |
-| `data/masterdata.db` | beschreibbare Laufzeitkopie mit Rechnungen, Kostenstellen, Lieferanten, AD-Mock, Uploads, Archiv-Mock und Audit | fast alle fachlichen Komponenten über kurze SQLite-Verbindungen | wird bei Fehlen atomar aus `data/demo/masterdata.seed.db` kopiert; vorhandener Zustand gewinnt |
-| `data/checkpoints.sqlite` | LangGraph-State und Interrupts pro `thread_id` | kompilierter Graph; `graph/cases.py` liest Thread-IDs direkt | Fall ist hier die Source of Truth |
-| `.env` | Provider-, Verbindungs- und Modellprofile | `config.py`; die Agentenkonfiguration schreibt atomar | gespeicherte UI-Änderungen werden in der laufenden Sitzung neu geladen |
+## Modell- und Datenfluss
 
-### Fall, Upload und Dokument sind verschiedene Identitäten
+`governance/inference_policy.py` akzeptiert für Standardverarbeitung nur den
+registrierten lokalen Ollama-Endpunkt. Ein Providerprofil oder eine
+Oberflächeneinstellung kann diese Laufzeitregel nicht aufheben.
 
-- `upload_id` bezeichnet die Annahme einer Datei.
-- `content_hash` bezeichnet ihren Inhalt.
-- `case_id`/LangGraph-`thread_id` bezeichnet genau einen Verarbeitungslauf.
-- `filename` ist nur Anzeige-/Quellinformation und nicht eindeutig.
+`llm/layout.py` stellt einen separaten Ausnahmeweg bereit. Er setzt einen
+gespeicherten lokalen Extraktionsfehler voraus, erzeugt aus genau einer
+Seitenregion ein gerastertes PNG und verlangt eine menschliche
+Maskierungsbestätigung. Erst wenn zusätzlich aktuelle Nachweisdateien für
+Region, Auftragsverarbeitung, Löschfristen, kein Training und den freigegebenen
+internen Proxy vorliegen, wird der Bildausschnitt übertragen. Der normale
+Dokumenttext und das vollständige PDF sind kein Bestandteil dieses Payloads.
 
-Ein Upload kann mehrere Cases erzeugen. Der Case selbst wird absichtlich
-nicht in `masterdata.db` dupliziert, sondern ausschließlich aus dem
-Checkpoint gelesen. Die Fallübersicht scannt dafür alle Thread-IDs und ruft
-pro Thread `app.get_state()` auf; das ist für wenige Demo-Fälle akzeptabel,
-aber keine skalierbare Query-Schnittstelle.
+## Persistenz
 
-`data/bootstrap.py` trennt Repositoryzustand und Demo-Laufzeit: UI, CLI und
-Mocks installieren nur fehlende Dateien. Ein normaler Start überschreibt
-niemals eine bereits veränderte Datenbank oder ein vorhandenes PDF. Tests
-installieren denselben Seed-Bundle in ein temporäres Verzeichnis.
+Die Migrationen sind additiv. `data/schema.sql` bleibt die Basisschicht;
+`data/control_schema.sql` ergänzt die Kontrolltabellen und wird über
+`data/migrations.py` genau einmal pro Version angewendet. Unveränderliche
+Dokumentobjekte und `audit_v2` werden zusätzlich durch SQLite-Trigger gegen
+Änderung und Löschung geschützt.
 
-### Transaktionsgrenzen
-
-- Agenten öffnen überwiegend pro Schritt eine neue SQLite-Verbindung.
-- Audit-Helper committen nicht selbst; der Aufrufer legt die
-  Transaktionsgrenze fest.
-- HTTP-Zielsysteme besitzen in der Demo dieselbe SQLite-Datei, sind aber
-  logisch externe Systeme. Ein Commit über Anwendung und HTTP-Adapter hinweg
-  ist nicht atomar.
-- Der Checkpoint und `masterdata.db` sind zwei getrennte Transaktionsräume.
-  Ein Zielsystemeffekt kann daher nicht gemeinsam mit dem Graph-State
-  committed werden.
-
-Bei Produktionsbetrieb wären Outbox/Inbox, idempotente Kommandos und eine
-explizite Recovery-Strategie nötig.
-
-## Persistierte Verträge und Sources of Truth
-
-| Konzept | Source of Truth | Konsumenten | Änderungshinweis |
-|---|---|---|---|
-| Agentenrolle, Autonomie, Oversight, Schreibrecht | `agent_registry.py` | Policy, Architektur-/Modellseite, Preflight | kann Laufzeit-Policy ändern |
-| Prozessmetadaten und UI-Schritte | `process_registry.py` | Navigation, Listen, Stepper, Approval-Auflösung | Node-/Log-Namen mitprüfen |
-| Graphknoten und Routinglabels | `graph/workflow.py`, `graph/nodes/*` | LangGraph | `flow.mmd` und Architekturblock regenerieren |
-| Case-State | `graph/state.py` | Nodes, Checkpointer, UI, CLI | `TypedDict` validiert Laufzeitdaten nicht |
-| Interrupt/Resume/Outcome | `contracts.py` | Nodes, Checkpoint, UI, CLI | rückwärtskompatibel halten; pausierte Cases überleben Deployments |
-| DB-Schema | `data/schema.sql` | Generator, Agents, Mocks, UI | keine allgemeine Migration vorhanden |
-| UI-Übersetzung | `ui/locales/*.json`, deutsche Registry-Texte | UI | aufgezeichnete Evidenz wird nicht übersetzt |
-
-### Drei verschiedene „Outcome“-Begriffe
-
-| Begriff | Bedeutung | Beispiele |
-|---|---|---|
-| `governance.policy.Outcome` | Ergebnis genau einer Policy-Prüfung | `erlaubt`, `freigabe_noetig`, `verweigert` |
-| `contracts.CaseOutcome` | Endzustand des gesamten Cases | `verbucht`, `archiviert`, `verworfen` |
-| Audit-Spalte `outcome` | Ergebnis eines einzelnen Audit-Ereignisses; offenes Vokabular | Policy-, Agenten-, Freigabe- oder Case-Wert |
-
-Die Begriffe dürfen nicht zusammengeführt werden: Sie beantworten
-unterschiedliche Fragen und haben unterschiedliche Konsumenten.
-
-## Sicherheits- und Governance-Modell
-
-1. Reader-Zugriff erfordert `SG-CHG-DocIngest` und wird vor Dateizugriff im
-   Tool geprüft.
-2. Schreibaktionen fragen `governance.policy.check_write_action()` direkt am
-   Write-Site.
-3. Freigaben erfordern `SG-CHG-Freigabe`; der Resume-Payload wird nicht als
-   vertrauenswürdig behandelt.
-4. Unbekannte Nutzer und nicht abgedeckte Oversight-Modi enden mit Deny.
-5. Der Audit-Trail verkettet alle Einträge per Hash; DB-Trigger verhindern
-   UPDATE/DELETE durch normale SQL-Nutzung.
-6. Zielsystem-Mocks prüfen eigene Vorbedingungen, statt dem aufrufenden
-   Agenten blind zu vertrauen.
-
-Bewusste Grenzen: Die Anmeldung ist eine Auswahlbox, nicht Authentifizierung.
-Die Zugehörigkeit zur Freigabegruppe wird erzwungen, aber Einspeiser und
-Prüfer dürfen dieselbe Person sein. Wer direkten Schreibzugriff auf die
-SQLite-Datei hat, kann die gesamte Audit-Kette neu aufbauen. Siehe
-[limitations.md](limitations.md).
-
-## Wartungslandkarte
-
-### Einen vorhandenen Prozess ändern
-
-1. Fachlogik in `agents/<prozess>/` ändern.
-2. State-Schreibzugriffe in `graph/nodes/<prozess>.py` und `graph/state.py`
-   abgleichen.
-3. Routing in `graph/workflow.py` prüfen.
-4. Prozessmetadaten, Stepper und Ergebnisdarstellung in
-   `process_registry.py` und `ui/cases/process_views/<prozess>.py` prüfen.
-5. Verträge nur über `contracts.py` ändern.
-6. Prozess-, Flow-, Contract- und Szenariotests ausführen.
-
-### Einen dritten Prozess hinzufügen
-
-Ein Registry-Eintrag allein genügt nicht. Mindestens erforderlich sind:
-
-1. `DocumentType` und Extraktionsschema erweitern.
-2. `process_registry.py` ergänzen.
-3. Agenten unter `agents/<prozess>/` anlegen.
-4. Nodes unter `graph/nodes/<prozess>.py` anlegen.
-5. Nodes und Kanten in `graph/workflow.py` verdrahten.
-6. Routing in `graph/nodes/shared.py::route_document_type()` erweitern.
-7. View-Fragment und `VIEWS`-Eintrag unter `ui/cases/process_views/`
-   ergänzen.
-8. Bei Sonderlogik den Stepper in `ui/cases/steps.py` erweitern.
-9. Sprachkataloge und Tests aktualisieren.
-10. [flow.mmd](flow.mmd) und den eingebetteten Graphen regenerieren.
-
-Ab drei bis vier fachlich unabhängigen Prozessen sollte geprüft werden, ob
-ein gemeinsamer Intake-Subgraph plus ein separat kompilierter Graph pro
-Prozess verständlicher ist als der weiter wachsende gemeinsame Graph.
-
-### Einen persistierten HITL-Vertrag ändern
-
-- Felder in `ApprovalRequest`/`ApprovalResponse` ergänzen, nicht als freie
-  Dict-Schlüssel in UI und Nodes verteilen.
-- Neue Felder optional und mit sicherem Default lesen.
-- Alte Checkpoints ohne das neue Feld testen.
-- Enum-Werte nicht umbenennen, solange wartende Cases existieren.
-- CLI und UI gemeinsam anpassen; beide produzieren Resume-Payloads.
-
-### Das Datenbankschema ändern
-
-- `data/schema.sql`, `data/generate.py`, Query-Code und Fixtures gemeinsam
-  anpassen.
-- Für Demo-Daten ist Neuaufbau erlaubt; für reale Daten existiert keine
-  Migrationsstrategie.
-- Audit-Felder sind Teil des Hashmaterials. Eine Änderung erfordert eine
-  versionierte neue Kette und Verankerung des alten Head-Hash, nicht das
-  nachträgliche Umhashen bestehender Einträge.
-
-### Ein reales Zielsystem anbinden
-
-Die HTTP-Aufrufe liegen derzeit direkt in den Domain-Agenten. Für eine reale
-Integration zuerst ein Adapterinterface einführen und danach Mock und
-Produktivadapter dahinter legen. Zusätzlich festlegen:
-
-- Authentifizierung und Secret-Handling,
-- Timeouts, Retry- und Backoff-Regeln,
-- idempotenter Schlüssel pro Case/Aktion,
-- Fehlerklassifikation (fachlich, transient, permanent),
-- Observability sowie Outbox/Recovery.
-
-### Modell oder Provider ändern
-
-- Eine Source of Truth: die drei Profile in `.env`, gelesen über
-  `config.py::Settings.profile()` und bearbeitet auf der Seite
-  „Agentenkonfiguration“.
-- Schema-/Retry-Verhalten: `llm/extraction.py`.
-- Tatsächlichen Aufrufer per `rg 'client_for\(|extract\('` verifizieren;
-  nicht allein auf `model_class` vertrauen.
-
-## Test- und Verifikationsstrategie
-
-Die Tests prüfen überwiegend deterministische Architekturregeln; reale
-Modellqualität wird nicht gemessen. `tests/conftest.py` erzeugt dafür einmal
-pro Testlauf eine isolierte Laufzeitdatenbank samt Demo-PDFs. Entwicklerdaten
-unter `data/` werden weder gelesen noch verändert.
-
-| Risiko | Relevante Tests |
-|---|---|
-| Graph/Dokumentationsdrift | `tests/test_flow.py` |
-| Governance erreicht LLM/höhere Schicht | `tests/test_layer_boundaries.py` |
-| Prozess A/B koppeln sich | `tests/test_process_separation.py` |
-| Persistierte Payloads driften | `tests/test_contracts.py` |
-| Audit-Manipulation | `tests/test_audit.py` |
-| Policy-/Freigaberegeln | `tests/test_policy.py`, `tests/test_scenarios.py` |
-| Upload → Case → Audit | `tests/test_upload_to_case.py` |
-| Modellwahl/Validierung | `tests/test_llm.py`, `tests/test_preflight.py` |
-| UI-Struktur und Sprache | `tests/test_ui_smoke.py`, `tests/test_i18n.py`, `tests/test_ui_language.py` |
-
-Minimal nach einer Architekturänderung:
-
-```bash
-.venv/bin/python -m pytest -q \
-  tests/test_flow.py \
-  tests/test_layer_boundaries.py \
-  tests/test_process_separation.py \
-  tests/test_contracts.py \
-  tests/test_structure.py
-```
-
-Vor Übergabe die vollständige Suite:
-
-```bash
-.venv/bin/python -m pytest -q
-```
-
-## Technische Risiken und empfohlene Reihenfolge
-
-| Priorität | Risiko | Auswirkung | Empfohlene Maßnahme |
-|---|---|---|---|
-| hoch vor Produktion | SQLite + synchrone Läufe | geringe Parallelität; die Hashkette ist innerhalb SQLite serialisiert, aber nicht extern verankert | Worker-Queue, transaktionale Produktions-DB, externer Audit-Writer/WORM-Anker |
-| hoch vor Produktion | Mock-Login | Identität und Claims sind nicht belastbar; die Vier-Augen-Regel selbst wird serverseitig erzwungen | OIDC/Entra und serverseitig verifizierte Claims |
-| mittel | Cases werden über internes Checkpoint-Schema aufgelistet | O(n)-Zugriff und Kopplung an LangGraph-SQLite-Schema | eigene Fallprojektion/Event-Consumer mit stabiler Query-API |
-| mittel | keine Versionierung von State, Checkpoints und Audit-Schema | Deployments können wartende Cases unlesbar machen | Schema-/Contract-Versionen und Migrations-/Drain-Strategie |
-| mittel | direkte synchrone HTTP-Aufrufe ohne Retry/Outbox | unklare Recovery nach Teilfehlern | Adapter, Idempotency-Key, Retry-Klassen, Outbox |
-| mittel | `Case` ist ein `TypedDict` ohne Runtime-Validierung | fehlende/inkonsistente Felder werden spät sichtbar | validierte Boundary-Modelle oder Node-Ein-/Ausgabeverträge |
-| niedrig im Prototyp | manuell gepflegte Sonderfälle im Stepper | neuer Prozess kann falsch angezeigt werden | Schrittstatus als Prozessmetadaten/State-Machine modellieren |
-
-### Wann die Architektur neu bewertet werden sollte
-
-Eine strukturelle Weiterentwicklung ist fällig, sobald mindestens eines
-dieser Kriterien gilt:
-
-- parallele Verarbeitung oder mehrere produktive Nutzer,
-- reale, nicht idempotente Zielsysteme,
-- verbindliche regulatorische Audit-Anforderungen,
-- Deployment mit wartenden Vorgängen über mehrere Codeversionen,
-- mehr als drei bis vier eigenständige Prozesse,
-- Such-/Reporting-Anforderungen über viele Cases,
-- echte OCR-/Scan-Verarbeitung mit empirisch messbarer Modellqualität.
-
-Bis dahin ist die beste Maintenance-Strategie: den expliziten Graphen und
-die Prozessmodule beibehalten, die beschriebenen Abweichungen beseitigen und
-Architekturregeln weiterhin als Tests statt nur als Prosa sichern.
-
-## Empfohlene Lesereihenfolge für neue Maintainer
-
-1. `README.md` und [guide.md](guide.md) für Zweck und Start.
-2. `process_registry.py` und `agent_registry.py` für fachliche Struktur.
-3. `graph/workflow.py` für den realen Kontrollfluss.
-4. `graph/state.py` und `contracts.py` für persistierte Daten.
-5. `graph/nodes/shared.py`, danach genau eines der Prozessmodule.
-6. Die zugehörigen Agenten und Governance-Prüfungen.
-7. `data/schema.sql` für Datenbesitz und Zielsystemeffekte.
-8. `ui/cases/detail.py` und die passende `process_views`-Datei.
-9. Die Architekturtests und [limitations.md](limitations.md).
+Geldbeträge werden an der Kommandogrenze als ganzzahlige Centwerte validiert.
+Gleitkommazahlen sind ausschließlich Darstellungs- und Eingabeformat; Werte,
+die nicht positiv, endlich oder centgenau sind, werden abgewiesen.

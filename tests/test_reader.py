@@ -9,18 +9,18 @@ apart.
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+import config
 from governance.audit import read_all, verify_chain
 from tools.reader import DocumentContent, AccessDenied, read_document
 
 SUBMITTER = "einspeiser@chg-meridian.com"
 EXTERNAL = "extern@partner.de"
 
-PDF = Path(__file__).parent.parent / "data" / "inbox" / "A_payment_ok_01.pdf"
+PDF = config.INTAKE_DIR / "A_payment_ok_01.pdf"
 
 pytestmark = pytest.mark.skipif(
     not PDF.is_file(),

@@ -1,0 +1,11 @@
+Stand-ID: MA-PROTOTYP-20260921-FINAL-01
+Datum: 21. September 2026
+Python: 3.14.3
+pytest: 9.1.1
+streamlit: 1.59.2
+langgraph: 1.2.9
+fastapi: 0.139.2
+pydantic: 2.13.4
+PyMuPDF: 1.28.0
+
+Die vollständigen deklarierten Projektabhängigkeiten stehen in requirements.txt.

@@ -110,22 +110,11 @@ def _account_tab(at: AppTest):
                 if element.type == "popover")
 
 
-def test_topbar_offers_ad_users_for_sign_in():
+def test_demo_opens_without_login_and_offers_only_role_selection():
     at = _app()
-    selection = _account_selector(at)
-
-    assert selection.label == "Konto wechseln"
-    assert selection.options, "Ohne AD-Nutzer wäre keine Anmeldung möglich"
-    tab = _account_tab(at).proto.popover
-    assert tab.label.startswith(f"{selection.value} · ")
-    assert tab.icon == ":material/info:"
-    assert tab.help
-    assert not any(s.label == "Konto wechseln" for s in at.sidebar.selectbox)
-    stylesheet = " ".join(m.body for m in at.markdown)
-    assert ".st-key-account_topbar" in stylesheet
-    assert "position:fixed" in stylesheet
-    assert "right:3.75rem" in stylesheet
-    assert "border-bottom:1px solid var(--app-border)" not in stylesheet
+    assert not any(field.label == "Benutzerkonto" for field in at.text_input)
+    assert not any(field.label == "Passwort" for field in at.text_input)
+    assert any(field.label == "Demo-Rolle" for field in at.selectbox)
 
 
 def test_preferences_offer_every_language_not_the_agent_configuration():
@@ -240,42 +229,14 @@ def test_every_navigation_page_renders_with_the_dark_theme(upn, call, preamble):
     assert "--app-background: #0e1117" in stylesheet
 
 
-def test_topbar_names_the_accounts_capabilities():
-    """The compact tab names the account and explains its rights on hover."""
-    at = _app()
-    options = _account_selector(at).options
-
-    # The account selection lives inside the floating details container.
-    extern = [o for o in options if o.startswith("Erik Extern")]
-    keller = [o for o in options if o.startswith("Martina Keller")]
-    if not (extern and keller):
-        pytest.skip("Erwartete Testkonten fehlen in den Stammdaten.")
-
-    _account_selector(at).set_value(extern[0]).run()
+def test_demo_topbar_names_role_without_logout_flow():
+    at = AppTest.from_file("ui/app.py", default_timeout=STARTUP_TIMEOUT)
+    at.run()
+    assert not at.exception
     tab = _account_tab(at).proto.popover
-    text = " ".join(
-        [m.body for m in at.main.markdown]
-        + [c.value for c in at.main.caption]
-    )
-    assert tab.label == "Erik Extern · Nur lesen"
-    assert "Vorgänge ansehen" in tab.help
-    assert "keine Belege hochladen" in tab.help
-    assert "SG-CHG" not in text
-    # The full sign-in name is available inside the floating details panel.
-    assert "e.extern@partner-consulting.de" in text
+    assert "Martina Keller" in tab.label
+    assert not any(button.label == "Abmelden" for button in at.button)
 
-    _account_selector(at).set_value(keller[0]).run()
-    tab = _account_tab(at).proto.popover
-    text = " ".join(
-        [m.body for m in at.main.markdown]
-        + [c.value for c in at.main.caption]
-    )
-    assert tab.label == "Martina Keller · Hochladen"
-    assert "Zahlungsbestätigungen oder Eingangsrechnungen hochladen" in tab.help
-    assert "Zahlungsbestätigungen oder Eingangsrechnungen hochladen" in text
-
-
-# ------------------------------------------------------------ Individual pages
 
 def test_upload_page_offers_dropzone_without_case_history(upn):
     """Case history belongs only on the dedicated history page."""

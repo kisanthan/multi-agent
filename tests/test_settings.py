@@ -69,61 +69,27 @@ def test_mask_never_reveals_whole_secret():
 
 
 def test_openai_uses_responses_structured_output(monkeypatch):
-    import openai
-
-    captured = {}
-
-    class Responses:
-        def parse(self, **kwargs):
-            captured.update(kwargs)
-            return SimpleNamespace(output_parsed=Answer(value="ok"), output_text='{"value":"ok"}')
-
-    class FakeOpenAI:
-        def __init__(self, *, api_key):
-            assert api_key == "test-key"
-            self.responses = Responses()
-
-    monkeypatch.setattr(settings, "openai_api_key", "test-key")
-    monkeypatch.setattr(openai, "OpenAI", FakeOpenAI)
-    assert OpenAIClient("gpt-test").ask_json(
-        system="s", prompt="p", schema=Answer) == '{"value":"ok"}'
-    assert captured["text_format"] is Answer
-    assert captured["store"] is False
+    """Table 23 blocks standard cloud inference even when credentials exist."""
+    import pytest
+    from governance.step_policy import PolicyDenied
+    with pytest.raises(PolicyDenied, match="Cloudmodelle"):
+        OpenAIClient("synthetic-model").ask_json(system="system", prompt="unmasked invoice", schema=Answer)
 
 
 def test_openai_refusal_stops_as_provider_failure(monkeypatch):
-    import openai
+    """Table 23 blocks standard cloud inference even when credentials exist."""
     import pytest
-
-    refusal = SimpleNamespace(type="refusal")
-    response = SimpleNamespace(
-        error=None, output=[SimpleNamespace(content=[refusal])],
-        output_parsed=None, output_text="",
-    )
-
-    class FakeOpenAI:
-        def __init__(self, *, api_key):
-            self.responses = SimpleNamespace(parse=lambda **kwargs: response)
-
-    monkeypatch.setattr(settings, "openai_api_key", "test-key")
-    monkeypatch.setattr(openai, "OpenAI", FakeOpenAI)
-    with pytest.raises(LLMUnreachable, match="abgelehnt"):
-        OpenAIClient("gpt-test").ask_json(system="s", prompt="p", schema=Answer)
+    from governance.step_policy import PolicyDenied
+    with pytest.raises(PolicyDenied, match="Cloudmodelle"):
+        OpenAIClient("synthetic-model").ask_json(system="system", prompt="unmasked invoice", schema=Answer)
 
 
 def test_google_uses_pydantic_response_schema(monkeypatch):
-    captured = {}
-
-    class Models:
-        def generate_content(self, **kwargs):
-            captured.update(kwargs)
-            return SimpleNamespace(text='{"value":"ok"}')
-
-    monkeypatch.setattr(GoogleClient, "_client",
-                        lambda self: SimpleNamespace(models=Models()))
-    assert GoogleClient("gemini-test").ask_json(
-        system="s", prompt="p", schema=Answer) == '{"value":"ok"}'
-    assert captured["config"].response_schema is Answer
+    """Table 23 blocks standard cloud inference even when credentials exist."""
+    import pytest
+    from governance.step_policy import PolicyDenied
+    with pytest.raises(PolicyDenied, match="Cloudmodelle"):
+        GoogleClient("synthetic-model").ask_json(system="system", prompt="unmasked invoice", schema=Answer)
 
 
 def test_auth_methods_are_part_of_effective_profile(monkeypatch):
@@ -151,21 +117,27 @@ def test_provider_failure_stops_payment_without_fallback(monkeypatch):
     assert result["outcome"] == "modell_nicht_erreichbar"
 
 
-def test_configuration_audit_payload_excludes_secret(monkeypatch):
+def test_configuration_audit_payload_excludes_secret(con, monkeypatch):
+    import pytest
     from ui.settings import service
-
-    captured = {}
-    fake_con = SimpleNamespace(commit=lambda: None, close=lambda: None)
+    from governance import identity
+    upn = "pruefer@chg-meridian.com"
+    con.execute("INSERT INTO ad_groups VALUES('SG-CHG-Konfiguration','Admin')")
+    con.execute("INSERT INTO ad_memberships VALUES(?, 'SG-CHG-Konfiguration')", (upn,))
+    con.commit()
+    identity.set_password(con, upn, "synthetic-admin-password")
+    token = identity.login(con, upn, "synthetic-admin-password")
+    captured = []
     monkeypatch.setattr(service, "save_settings", lambda updates: settings)
-    monkeypatch.setattr(service, "connection", lambda: fake_con)
+    monkeypatch.setattr(service, "connection", lambda: con)
     monkeypatch.setattr(service, "public_snapshot", lambda: {"profile": {}})
-    monkeypatch.setattr(service, "log_entry",
-                        lambda con, **kwargs: captured.update(kwargs))
-    service.save_configuration({"openai_api_key": "top-secret",
-                                "llm_router_model": "model-x"},
-                               "admin@example.com")
+    monkeypatch.setattr(service, "log_entry", lambda con, **kwargs: captured.append(kwargs))
+    with identity.session(token):
+        with pytest.raises(PermissionError, match="Cloud"):
+            service.save_configuration({"openai_api_key": "top-secret", "llm_router_model": "model-x"}, upn)
+        service.save_configuration({"ollama_base_url": "http://localhost:11434"}, upn)
     assert "top-secret" not in repr(captured)
-    assert captured["payload"]["geaenderte_felder"] == ["llm_router_model"]
+    assert captured[0]["payload"]["fields"] == ["ollama_base_url"]
 
 
 def test_configuration_group_migration_is_idempotent_and_assigns_sabine():

@@ -34,7 +34,7 @@ import streamlit as st
 import agent_registry
 import process_registry
 from agent_registry import OversightMode
-from contracts import ApprovalTrigger
+from contracts import ApprovalTrigger, InterruptKind
 from ui.shared import i18n
 
 # Session key of the case whose dialog was dismissed with "Später". Keeps
@@ -51,7 +51,12 @@ def agent_of(request: dict) -> tuple[str, str | None]:
     approval step (`approval_agent_id`), and the agent registry holds the
     oversight mode. Adding a process therefore needs no entry here.
     """
-    config = process_registry.for_interrupt(request.get("kind"))
+    kind = request.get("kind")
+    if kind == InterruptKind.DOCUMENT_TYPE_REVIEW.value:
+        return "klassifikation", None
+    if kind == InterruptKind.INVOICE_EXTRACTION_REVIEW.value:
+        return "extraktion_rechnung", "B"
+    config = process_registry.for_interrupt(kind)
     agent_id = (config.approval_agent_id if config else None) or "buchung"
     return agent_id, (config.key if config else None)
 

@@ -23,6 +23,10 @@ def public_snapshot() -> dict:
         "ollama_base_url": settings.ollama_base_url,
         "reader_parser": settings.reader_parser.value,
         "amount_tolerance_eur": settings.amount_tolerance_eur,
+        "portal_mode": settings.portal_mode.value,
+        "portal_admin_email": settings.portal_admin_email,
+        "demo_submitter_upn": settings.demo_submitter_upn,
+        "demo_approver_upn": settings.demo_approver_upn,
         "anthropic_auth_method": settings.anthropic_auth_method.value,
         "google_auth_method": settings.google_auth_method.value,
         "anthropic_profile": settings.anthropic_profile,
@@ -31,26 +35,32 @@ def public_snapshot() -> dict:
 
 
 def save_configuration(updates: dict, actor_upn: str) -> None:
-    before = public_snapshot()
-    save_settings(updates)
-    after = public_snapshot()
+    from governance import identity, ad
+    from governance.inference_policy import authorize_local
+
+    for key, value in updates.items():
+        if key.startswith("llm_") and key.endswith("_provider") and Provider(value) is not Provider.OLLAMA:
+            raise PermissionError("Cloudprofile sind für die Standardverarbeitung gesperrt.")
+        if key.startswith(("anthropic_", "google_", "openai_")) and value:
+            raise PermissionError("Cloudzugangsdaten gehören nicht in die Standardverarbeitung.")
+    if "ollama_base_url" in updates:
+        authorize_local("klassifikation", Provider.OLLAMA.value, str(updates["ollama_base_url"]))
+
     con = connection()
     try:
-        log_entry(
-            con,
-            actor=actor_upn,
-            agent="policy",
-            action="konfiguration_geaendert",
-            decision=Decision.ALLOWED,
-            reason=(f"Systemkonfiguration auf Revision "
-                    f"{settings.configuration_revision} geaendert."),
-            payload={
-                "vorher": before,
-                "nachher": after,
-                "geaenderte_felder": sorted(set(updates) - SECRET_FIELDS),
-            },
-            outcome="gespeichert",
-        )
+        person = identity.principal(con)
+        if person != actor_upn or not ad.check_configuration_permission(con, person).allowed:
+            raise PermissionError("Keine Berechtigung zur Konfigurationsänderung.")
+        before = public_snapshot()
+        # A durable intent is required BEFORE activating any file-based setting.
+        log_entry(con, actor=person, agent="policy", action="konfiguration_beantragt",
+                  decision=Decision.ALLOWED, reason="Authentifizierte Konfigurationsänderung.",
+                  payload={"before": before, "fields": sorted(set(updates) - SECRET_FIELDS)}, outcome="prepared")
+        con.commit()
+        save_settings(updates)
+        log_entry(con, actor=person, agent="policy", action="konfiguration_geaendert",
+                  decision=Decision.ALLOWED, reason=f"Revision {settings.configuration_revision} aktiviert.",
+                  payload={"after": public_snapshot()}, outcome="saved")
         con.commit()
     finally:
         con.close()

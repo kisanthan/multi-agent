@@ -12,8 +12,8 @@ def test_unreachable_booking_system_explains_approval_and_missing_effect():
 
     assert "Freigabe wurde erteilt" in text
     assert "Navision" in text
-    assert "nicht verbucht" in text
-    assert "bleibt offen" in text
+    assert "Ausführungsbeleg" in text
+    assert "nicht verbucht" not in text
 
 
 def test_legacy_connection_refusal_is_displayed_as_unreachable():

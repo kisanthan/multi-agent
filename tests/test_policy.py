@@ -20,7 +20,7 @@ EXTERNAL = "extern@partner.de"
 
 def test_unknown_actor_is_denied(con):
     e = check_write_action(con, agent_id="buchung", actor="niemand@nirgends.de",
-                           action="verbuchen", amount_eur=100.0)
+                           action="zahlung_verbuchen", amount_eur=100.0)
     assert e.outcome is Outcome.DENIED
     assert e.rule == "zero_trust"
 
@@ -57,14 +57,14 @@ def test_booking_always_needs_approval(con, amount):
     threshold above which it would be booked automatically.
     """
     e = check_write_action(con, agent_id="buchung", actor=SUBMITTER,
-                           action="verbuchen", amount_eur=amount)
+                           action="zahlung_verbuchen", amount_eur=amount)
     assert e.outcome is Outcome.APPROVAL_NEEDED
     assert e.rule == "oversight_mode"
 
 
 def test_booking_needs_approval_even_without_amount(con):
     e = check_write_action(con, agent_id="buchung", actor=SUBMITTER,
-                           action="verbuchen")
+                           action="zahlung_verbuchen")
     assert e.outcome is Outcome.APPROVAL_NEEDED
 
 
@@ -76,7 +76,7 @@ def test_elo_agent_is_on_the_loop_and_runs_automatically(con):
     The human approval in process B sits at the cost-center step before it,
     and only on ambiguity (four-eyes); archiving is not asked again.
     """
-    e = check_write_action(con, agent_id="elo", actor=SUBMITTER, action="archivieren")
+    e = check_write_action(con, agent_id="elo", actor=SUBMITTER, action="dokument_archivieren")
     assert e.outcome is Outcome.ALLOWED
     assert e.rule == "oversight_mode"
 
@@ -130,8 +130,7 @@ def test_external_may_not_approve(con):
 
 def test_unknown_agent_is_a_programming_error(con):
     """No default fallback: the policy must not check against a guess."""
-    with pytest.raises(KeyError, match="Unknown agent"):
-        check_write_action(con, agent_id="gibt_es_nicht", actor=SUBMITTER, action="x")
+    assert check_write_action(con, agent_id="gibt_es_nicht", actor=SUBMITTER, action="x").outcome is Outcome.DENIED
 
 
 def test_ruling_carries_reason_and_rule(con):

@@ -1,0 +1,9 @@
+{
+  "endpoint": "https://approved-internal-layout-proxy.example/extract",
+  "region": "EU-REPLACE",
+  "processing_agreement": "C:/absolute/path/to/verified-processing-agreement.pdf",
+  "residency_evidence": "C:/absolute/path/to/verified-eu-residency-evidence.pdf",
+  "training_excluded_evidence": "C:/absolute/path/to/verified-no-training-evidence.pdf",
+  "retention_evidence": "C:/absolute/path/to/verified-retention-and-deletion-evidence.pdf",
+  "owner": "REPLACE WITH ACCOUNTABLE ORGANIZATIONAL OWNER"
+}

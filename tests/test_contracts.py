@@ -89,6 +89,13 @@ def test_request_round_trips_through_its_payload():
                         reference="KTR-X", reason="r",
                         catalog=({"id": "KST-1", "name": "n", "reference": "KTR-X"},),
                         unique=True),
+        ApprovalRequest(
+            kind=InterruptKind.DOCUMENT_TYPE_REVIEW, filename="z.pdf",
+            document_type_options=(
+                {"value": "zahlungsbestaetigung", "label": "Zahlungsbestätigung"},
+                {"value": "eingangsrechnung", "label": "Eingangsrechnung"},
+            ),
+        ),
     ):
         assert ApprovalRequest.from_payload(request.as_payload()) == request
 
@@ -144,7 +151,11 @@ def test_response_omits_cost_center_id_when_absent():
 
 def test_response_round_trips_through_its_resume_payload():
     response = ApprovalResponse(decision=ApprovalDecision.REJECTED, approver="a@b.c",
-                                number="RE-1", cost_center_id="KST-5000")
+                                number="RE-1", cost_center_id="KST-5000",
+                                amount_eur=42.5, supplier="Lieferant",
+                                line_items=("Position 1",),
+                                cost_center_reference="KTR-X",
+                                document_type="eingangsrechnung")
     assert ApprovalResponse.from_resume(response.as_resume()) == response
 
 
@@ -177,8 +188,9 @@ def test_every_process_interrupt_kind_is_declared_and_unique():
     import process_registry
 
     interrupt_kinds = [p.interrupt_kind for p in process_registry.PROCESSES.values()]
-    assert set(interrupt_kinds) == {k.value for k in InterruptKind}
+    assert set(interrupt_kinds) <= {k.value for k in InterruptKind}
     assert len(interrupt_kinds) == len(set(interrupt_kinds)), (
         "two processes claiming the same interrupt kind would make "
         "process_registry.for_interrupt() ambiguous"
     )
+    assert process_registry.wait_points().keys() == {k.value for k in InterruptKind}

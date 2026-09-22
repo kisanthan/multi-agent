@@ -20,12 +20,17 @@ def master_data(con):
     ])
     con.execute("INSERT INTO archive VALUES ('ELO-2026-0001','b.pdf','abc123',"
                 "'2026-07-29T11:00:00')")
+    import json
+    for cid,step,receipt in [("cmd-a","buchung",{"number":"RE-2026-4200","after":"bezahlt","paid_at":"2026-07-29T10:00:00"}),
+                             ("cmd-b","elo",{"archive_id":"ELO-2026-0001","filed_at":"2026-07-29T11:00:00"})]:
+        con.execute("INSERT INTO execution_commands VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                    (cid,cid,step,1,"hash","{}",None,"v2","succeeded",json.dumps(receipt),0))
     con.commit()
     return con
 
 
 def test_booked_payment_shows_navision_status(master_data):
-    w = read_effect(master_data, {"number": "RE-2026-4200"})
+    w = read_effect(master_data, {"number": "RE-2026-4200", "case_id":"cmd-a", "command_id":"cmd-a"})
 
     assert w.navision_number == "RE-2026-4200"
     assert w.navision_status == "bezahlt"
@@ -36,7 +41,7 @@ def test_booked_payment_shows_navision_status(master_data):
 def test_open_invoice_is_reported_as_open(master_data):
     w = read_effect(master_data, {"number": "RE-2026-4201"})
 
-    assert w.navision_status == "offen"
+    assert w.navision_status is None  # Existing target state is not a receipt of this case.
     assert w.navision_paid_at is None
 
 
@@ -54,7 +59,7 @@ def test_unknown_number_is_not_an_error(master_data):
 
 
 def test_archiving_shows_elo_reference(master_data):
-    w = read_effect(master_data, {"archive_id": "ELO-2026-0001"})
+    w = read_effect(master_data, {"archive_id": "ELO-2026-0001", "case_id":"cmd-b", "command_id":"cmd-b"})
 
     assert w.elo_archive_id == "ELO-2026-0001"
     assert w.elo_filed_at == "2026-07-29T11:00:00"

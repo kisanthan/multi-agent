@@ -1,138 +1,114 @@
-# Operator's guide
+# Betriebsanleitung für den lokalen Demonstrator
 
-Step-by-step guide for setting up, running, and configuring the prototype.
-The README covers the same ground more tersely and links here for the
-details; this document adds nothing architectural -- for that, see
-[architecture.md](architecture.md) and [limitations.md](limitations.md).
+## 1. Laufzeit vorbereiten
 
-## 1. Prerequisites
-
-- Python 3.12+ (tested on 3.14).
-- For local models: [Ollama](https://ollama.com), running as a service or
-  reachable over the network.
-- For cloud models: an Anthropic API key. Not needed for `MODEL_MODE=lokal`
-  (the default).
-
-## 2. Setup
-
-```bash
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-cp .env.example .env
+```powershell
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item .env.example .env
 ```
 
-Synthetic PDFs, their manifest and a pristine SQLite database are already
-versioned under `data/demo/`. On the first UI/CLI/mock access they are copied
-atomically to the ignored runtime paths under `data/`. Existing runtime data
-is never overwritten automatically.
+`OLLAMA_BASE_URL` muss auf einen lokalen Host zeigen. `demo.py --check` prüft
+Erreichbarkeit und Modellnamen, lädt jedoch selbst keine Modelle.
 
-Reset the writable runtime explicitly with `python -m data.generate`. After
-an intentional change to the fixture definitions, maintainers update the
-repository bundle with `python -m data.generate --seed-bundle`.
+## 2. Portal-Modus auswählen
 
-`.env` is where every runtime switch lives: amount tolerance, model
-provisioning, which PDF parser, and the two mock target-system URLs. Changes
-made on the **Agentenkonfiguration** page are validated, written atomically
-and activated immediately without a restart.
+Im **Admin-Modus** steht in `.env`:
 
-## 3. Running it
-
-Start the two target-system mocks (needed for any scenario that writes):
-
-```bash
-.venv/bin/uvicorn mocks.navision:app --port 8001 &
-.venv/bin/uvicorn mocks.elo:app --port 8002 &
+```dotenv
+PORTAL_MODE=admin
+PORTAL_ADMIN_EMAIL=admin@prototype.local
+PORTAL_ADMIN_PASSWORD=Admin-Prototype-2026!
 ```
 
-Then either the CLI:
+Das Konto wird beim ersten Start automatisch angelegt. Das Startpasswort gilt
+nur für diesen lokalen Prototyp. Eine Passwortänderung erfolgt mit:
 
-```bash
-.venv/bin/python demo.py --check      # is the model provisioning ready?
-.venv/bin/python demo.py --liste      # all documents + expectations
-.venv/bin/python demo.py --szenario 1 # run one scenario
-.venv/bin/python demo.py --alle       # all five in sequence
+```powershell
+.venv\Scripts\python.exe -m governance.identity admin@prototype.local
 ```
 
-or the UI:
+Für die getrennte Freigabe können weitere Konten provisioniert werden:
 
-```bash
-.venv/bin/streamlit run ui/app.py
+```powershell
+.venv\Scripts\python.exe -m governance.identity m.keller@chg-meridian.com
+.venv\Scripts\python.exe -m governance.identity t.brandt@chg-meridian.com
+.venv\Scripts\python.exe -m governance.identity s.hofmann@chg-meridian.com
 ```
 
-The UI's navigation follows the question a user currently has -- upload,
-history, the two process views, the audit trail ("Protokoll" / "Record"),
-the architecture view, and the model configuration described next. A single
-run takes one to three minutes with a local model; approvals from a second
-browser tab work independently, because the case state lives in the
-LangGraph checkpoint, not in the tab.
+Passwörter werden verdeckt abgefragt, mit `scrypt` abgeleitet und niemals im
+Checkpoint oder Audit gespeichert. Nach wiederholten Fehlversuchen wird das
+lokale Konto zeitweise gesperrt. Die Provisionierung ist eine vertrauensvolle
+Bootstrap-Operation auf dem lokalen Rechner.
 
-The **Benachrichtigungen / Notifications** entry in the sidebar carries the
-number of approval tasks for the signed-in person. Its page lists only cases
-that are currently waiting and that this person may actually decide. The same
-permission and four-eyes policy as the decision form is applied, so a person's
-own uploads do not appear in their queue. A toast announces newly added tasks.
+Im **Demo-Modus** steht in `.env`:
 
-During a new payment-confirmation or incoming-invoice run, the sidebar opens
-as a live AI overview and remains visible while processing is active. It names
-the PDF and the currently active provider/model, marks document routing and
-field extraction as they finish, and displays the structured values returned
-by the extraction model in a compact two-column table. The completed overview
-survives the automatic move to the case page and can then be closed manually.
-PDF content itself remains in the case detail preview, so the sidebar stays
-compact.
-
-The language control under **System → Einstellungen** switches the
-interface between **Deutsch** and **English**; it
-takes effect immediately, including the navigation itself. What was
-*recorded* -- the run log's entries and the audit trail's
-reasons and outcomes -- deliberately stays in the language it was written
-in, so an exported trail reads the same regardless of who was looking at
-the screen. Adding a third language means one more file in `ui/locales/`
-and one more entry in `ui/shared/i18n.py::LANGUAGES`; `tests/test_i18n.py`
-then reports every key that file is still missing.
-
-The **Dunkelmodus / Dark mode** switch on the same page changes the whole
-interface between a light and dark appearance for the current browser
-session. Navigation, forms, cards, document upload, and process views all
-use the same central theme.
-
-## 4. Configuring AI models per agent
-
-Open **System → Agentenkonfiguration**. The page has one independent area
-for each real model call:
-
-- **Document type detection** selects the shared router provider and model.
-- **Payment confirmation** selects the payment-field extraction provider and model.
-- **Incoming invoice** selects the invoice-field extraction provider and model.
-
-In each area, first select Ollama, Google, Anthropic or OpenAI. Only the
-parameters relevant to that provider are shown: the Ollama host address,
-the cloud API key, or the supported account/workspace fields. Credentials
-are central and reused when two profiles select the same provider.
-
-Press **Check connection & load models** to make a non-billable model-list
-request. The page then shows a connected/not-connected status and offers the
-discovered models in a selector. A custom model id remains possible. Save the
-agent configuration before running the separately labelled structured test;
-that test performs a model call and may incur provider cost.
-
-All changes are written to `.env`, revisioned and audited without secrets.
-Cases already started retain their provider/model snapshot. `MODEL_MODE`
-remains only as a backwards-compatible default until explicit profiles have
-been saved.
-
-**Local models still have to be loaded outside the app:**
-
-```bash
-ollama serve
-ollama pull <model>
+```dotenv
+PORTAL_MODE=demo
+DEMO_SUBMITTER_UPN=m.keller@chg-meridian.com
+DEMO_APPROVER_UPN=s.hofmann@chg-meridian.com
 ```
 
-## 5. Troubleshooting
+Das Portal überspringt die Loginseite und zeigt den Schalter **Demo-Rolle**.
+Ein Vorgang wird mit der Einreicherrolle gestartet. Für eine wartende
+Freigabe wird zur Prüferrolle gewechselt. Beide Rollen erhalten intern
+getrennte Sitzungen; Fremdfreigabe, Payloadbindung und Audit bleiben aktiv.
 
-| Symptom | Cause | Fix |
+## 3. Dienste starten
+
+In getrennten PowerShell-Fenstern:
+
+```powershell
+.venv\Scripts\python.exe -m uvicorn mocks.navision:app --port 8001
+.venv\Scripts\python.exe -m uvicorn mocks.elo:app --port 8002
+.venv\Scripts\python.exe -m streamlit run ui/app.py
+```
+
+Im Admin-Modus verlangt die Oberfläche Benutzerkennung und Passwort. Für eine
+Fremdfreigabe meldet sich die prüfende Person in einem eigenen Browserkontext
+oder nach einem Sitzungswechsel an. Im Demo-Modus öffnet sich die Oberfläche
+direkt; die Rollen werden über **Demo-Rolle** getrennt. Eine Benutzerkennung in
+einem Resume-Payload allein genügt in keinem Modus.
+
+## 4. Vorgänge bearbeiten
+
+- Unter **Neuer Beleg** wird ein synthetisches PDF ausgewählt und gestartet.
+- Die Detailansicht zeigt den aktuellen Vorschlag einschließlich
+  `approval_id` und Version.
+- Prozess A verlangt bei jeder Buchung die Entscheidung einer anderen Person.
+- Prozess B archiviert bei einer eindeutigen Referenz direkt. Ohne eindeutige
+  Referenz wählt eine andere Person eine Kostenstelle; nach einer inhaltlichen
+  Änderung wird der neue Vorschlag nochmals angezeigt und bestätigt.
+- Unter **Vorgangsoperationen** können berechtigte Personen einen Fall stoppen,
+  fortsetzen, ein `in_doubt`-Kommando prüfen und eine Archivzuordnung
+  versioniert korrigieren.
+
+## 5. Layout-Ausnahmeweg
+
+Die Funktion erscheint nur nach einem gespeicherten lokalen
+Extraktionsfehler. Die prüfende Person wählt Seite und Rechteck, bestätigt die
+Maskierung und kontrolliert den erzeugten PNG-Ausschnitt. Das System versendet
+erst, wenn die nicht versionierte `data/layout-deployment.json` auf einen
+aktuellen, separat geprüften Nachweissatz verweist. Im ausgelieferten Paket
+existiert dieser Nachweis nicht; die Cloud-Ausführung bleibt deshalb gesperrt.
+
+## 6. Störungen
+
+| Anzeige | Bedeutung | Vorgehen |
 |---|---|---|
-| "Keine Verbindung zu Ollama" | `OLLAMA_BASE_URL` unreachable | `ollama serve`, or fix the URL in `.env` |
-| "Modell ... ist ... nicht geladen" | Model not pulled on that Ollama instance | `ollama pull <model>`, then reload the model list on the Agentenkonfiguration page |
-| "ANTHROPIC_API_KEY ist nicht gesetzt" | `MODEL_MODE=hybrid`/`cloud` (or a cloud override) without a key | Set `ANTHROPIC_API_KEY` in `.env`, or switch back to a local override/mode |
-| `demo.py --check` reports "NICHT BEREIT" | Any of the above | Read its message list -- it names exactly which model is missing where |
+| `zugriff_verweigert` | Anmeldung oder Prozessrecht fehlt | Identität und Gruppenzuordnung prüfen |
+| `verworfen` | Vorschlag abgelehnt oder Kontrollvertrag verletzt | Auditgrund lesen; ggf. neuen Vorgang/Vorschlag erzeugen |
+| `buchungssystem_nicht_erreichbar` / `in_doubt` | Transportausgang unbekannt | über Vorgangsoperationen den eigenen Receipt prüfen |
+| `archivierung_fehlgeschlagen` | ELO hat verbindlich abgelehnt oder war nicht erreichbar | Kommando- und Auditstatus unterscheiden; nicht blind wiederholen |
+| Cloud-Layout gesperrt | Nachweis fehlt oder Maskierung nicht bestätigt | keinen Umgehungsweg verwenden; Nachweise außerhalb der Anwendung prüfen |
+
+## 7. Nachweise prüfen
+
+```powershell
+.venv\Scripts\python.exe demo.py --audit
+.venv\Scripts\python.exe -m pytest -q
+```
+
+Der CLI-Auditbefehl zeigt die kompatible Legacy-Kette. Die Tests prüfen
+zusätzlich `audit_v2`, Kontrollverträge, Rechteentzug, Replay, Beträge,
+Archivversionen und beide Ende-zu-Ende-Prozesse.

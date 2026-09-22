@@ -26,17 +26,27 @@ ARCHITECTURE_MD = PROJECT_ROOT / "docs" / "architecture.md"
 # the graph itself changes -- `get_graph().edges` is stable public API,
 # unlike the `draw_mermaid()` string used further down.
 FLOW = {
+    ("klaerfall", "klaerfall", "hitl"),
+    ("freigabe_kostenstelle", "freigabe_kostenstelle", "freigabe"),
     ("__start__", "reader", None),
     ("reader", "__end__", "ende"),
     ("reader", "klassifikation", None),
     ("klassifikation", "__end__", "ende"),
     ("klassifikation", "extraktion_zahlung", "prozess_a"),
     ("klassifikation", "extraktion_rechnung", "prozess_b"),
-    ("klassifikation", "klaerfall", "hitl"),
+    ("klassifikation", "klassifikation_klaerfall", "review"),
+    ("klassifikation_klaerfall", "__end__", "ende"),
+    ("klassifikation_klaerfall", "extraktion_zahlung", "prozess_a"),
+    ("klassifikation_klaerfall", "extraktion_rechnung", "prozess_b"),
+    ("klassifikation_klaerfall", "klassifikation_klaerfall", "review"),
     ("extraktion_zahlung", "abgleich", None),
     ("extraktion_zahlung", "__end__", "ende"),
     ("extraktion_rechnung", "kostenstelle", None),
+    ("extraktion_rechnung", "rechnungsextraktion_klaerfall", "review"),
     ("extraktion_rechnung", "__end__", "ende"),
+    ("rechnungsextraktion_klaerfall", "kostenstelle", None),
+    ("rechnungsextraktion_klaerfall", "rechnungsextraktion_klaerfall", "review"),
+    ("rechnungsextraktion_klaerfall", "__end__", "ende"),
     ("abgleich", "buchung", None),
     ("abgleich", "klaerfall", "hitl"),
     ("buchung", "__end__", "ende"),
@@ -70,7 +80,8 @@ def test_every_process_step_maps_to_a_graph_node():
     nodes = set(build_graph().compile().get_graph().nodes) - {"__start__", "__end__"}
     all_steps = (*process_registry.SHARED_STEPS,
                 *(s for p in process_registry.PROCESSES.values() for s in p.own_steps))
-    declared = {s.graph_node or s.node for s in all_steps}
+    declared = ({s.graph_node or s.node for s in all_steps}
+                | set(process_registry.CLARIFICATION_GRAPH_NODES))
     assert declared == nodes
 
 

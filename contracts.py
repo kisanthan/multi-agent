@@ -50,6 +50,8 @@ class InterruptKind(str, Enum):
     `process_registry.ProcessConfig.interrupt_kind`.
     """
 
+    DOCUMENT_TYPE_REVIEW = "klassifikations_klaerfall"  # shared intake
+    INVOICE_EXTRACTION_REVIEW = "rechnungsextraktion_klaerfall"  # process B
     EXCEPTION_CASE = "klaerfall"                     # process A
     COST_CENTER_APPROVAL = "kostenstellen_freigabe"  # process B
 
@@ -92,6 +94,10 @@ class ApprovalDecision(str, Enum):
 
 
 class CaseOutcome(str, Enum):
+    EFFECT_UNCERTAIN = "wirkung_ungeklaert"
+    PARSE_FAILED = "dokument_nicht_lesbar"
+    CONTROL_BLOCKED = "kontrolle_verweigert"
+
     """How a case ended -- `state["outcome"]`, the last thing a node writes.
 
     Named `CaseOutcome`, not `Outcome`: `governance.policy.Outcome` already
@@ -155,6 +161,7 @@ class ApprovalRequest:
     reference: str | None = None
     unique: bool | None = None
     catalog: tuple[dict[str, str], ...] = ()
+    document_type_options: tuple[dict[str, str], ...] = ()
 
     def as_payload(self) -> dict[str, Any]:
         """The dict handed to `interrupt()` -- and stored in the checkpoint."""
@@ -170,6 +177,8 @@ class ApprovalRequest:
             payload["line_items"] = list(self.line_items)
         if self.catalog:
             payload["catalog"] = [dict(e) for e in self.catalog]
+        if self.document_type_options:
+            payload["document_type_options"] = [dict(e) for e in self.document_type_options]
         return payload
 
     @classmethod
@@ -193,6 +202,7 @@ class ApprovalRequest:
             reference=payload.get("reference"),
             unique=payload.get("unique"),
             catalog=tuple(payload.get("catalog") or ()),
+            document_type_options=tuple(payload.get("document_type_options") or ()),
         )
 
 
@@ -212,6 +222,11 @@ class ApprovalResponse:
     approver: str
     number: str | None = None           # A: the approver may correct the number
     cost_center_id: str | None = None   # B: the approver's pick from the catalog
+    amount_eur: float | None = None
+    supplier: str | None = None
+    line_items: tuple[str, ...] = ()
+    cost_center_reference: str | None = None
+    document_type: str | None = None
 
     @property
     def approved(self) -> bool:
@@ -223,6 +238,16 @@ class ApprovalResponse:
                                    "number": self.number}
         if self.cost_center_id is not None:
             payload["cost_center_id"] = self.cost_center_id
+        if self.amount_eur is not None:
+            payload["amount_eur"] = self.amount_eur
+        if self.supplier is not None:
+            payload["supplier"] = self.supplier
+        if self.line_items:
+            payload["line_items"] = list(self.line_items)
+        if self.cost_center_reference is not None:
+            payload["cost_center_reference"] = self.cost_center_reference
+        if self.document_type is not None:
+            payload["document_type"] = self.document_type
         return payload
 
     @classmethod
@@ -241,4 +266,9 @@ class ApprovalResponse:
         return cls(decision=decision,
                    approver=payload.get("approver", ""),
                    number=payload.get("number"),
-                   cost_center_id=payload.get("cost_center_id"))
+                   cost_center_id=payload.get("cost_center_id"),
+                   amount_eur=payload.get("amount_eur"),
+                   supplier=payload.get("supplier"),
+                   line_items=tuple(payload.get("line_items") or ()),
+                   cost_center_reference=payload.get("cost_center_reference"),
+                   document_type=payload.get("document_type"))

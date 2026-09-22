@@ -58,6 +58,9 @@ def con() -> sqlite3.Connection:
     con = sqlite3.connect(":memory:")
     con.executescript((PROJECT_ROOT / "data" / "schema.sql").read_text(encoding="utf-8"))
 
+    from data.migrations import migrate
+    migrate(con)
+
     con.executemany("INSERT INTO ad_groups VALUES (?,?)", [
         ("SG-CHG-DocIngest", "Darf einspeisen"),
         ("SG-CHG-Freigabe", "Darf freigeben"),

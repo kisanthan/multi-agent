@@ -31,6 +31,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from graph.nodes import incoming_invoice, payment_confirmation, shared
 from graph.state import Case
+from graph.enforcement import guarded
 
 
 def build_graph() -> StateGraph:
@@ -60,7 +61,7 @@ def build_graph() -> StateGraph:
         {"ende": END, "klassifikation": "klassifikation"},
     )
 
-    g.add_node("klassifikation", shared.node_classification)
+    g.add_node("klassifikation", guarded(shared.node_classification, "shared", "klassifikation"))
     # Orchestrator agent: routing by document type, no model call (the
     # classification agent already determined the type; see
     # shared.route_document_type).
@@ -68,7 +69,16 @@ def build_graph() -> StateGraph:
         "klassifikation", shared.route_document_type,
         {"prozess_a": "extraktion_zahlung",       # -> process A
          "prozess_b": "extraktion_rechnung",      # -> process B
-         "hitl": "klaerfall",           # extraction failed, see node_classification
+         "review": "klassifikation_klaerfall",
+         "ende": END},
+    )
+
+    g.add_node("klassifikation_klaerfall", shared.node_classification_review)
+    g.add_conditional_edges(
+        "klassifikation_klaerfall", shared.route_document_type,
+        {"prozess_a": "extraktion_zahlung",
+         "prozess_b": "extraktion_rechnung",
+         "review": "klassifikation_klaerfall",
          "ende": END},
     )
 
@@ -77,13 +87,13 @@ def build_graph() -> StateGraph:
     # and guards both callers. The booking node runs on the approval path
     # TWICE: once to request approval, once -- after a human decides -- to
     # actually book (see ui/cases/steps.py for how the stepper shows this).
-    g.add_node("extraktion_zahlung", payment_confirmation.node_payment_extraction)
+    g.add_node("extraktion_zahlung", guarded(payment_confirmation.node_payment_extraction, "A", "extraktion_zahlung"))
     g.add_conditional_edges(
         "extraktion_zahlung", payment_confirmation.route_payment_extraction,
         {"abgleich": "abgleich", "ende": END},
     )
 
-    g.add_node("abgleich", payment_confirmation.node_reconciliation)
+    g.add_node("abgleich", guarded(payment_confirmation.node_reconciliation, "A", "abgleich"))
     g.add_conditional_edges("abgleich", payment_confirmation.route_reconciliation,
                             {"hitl": "klaerfall", "buchung": "buchung"})
 
@@ -94,7 +104,7 @@ def build_graph() -> StateGraph:
     g.add_node("klaerfall", payment_confirmation.node_exception_case)
     g.add_conditional_edges(
         "klaerfall", payment_confirmation.route_exception_case,
-        {"buchung": "buchung",           # approved -> book (closes the cycle)
+        {"hitl": "klaerfall", "buchung": "buchung",           # corrected proposal requires fresh approval
          "kostenstelle": "kostenstelle", # guard only, see route_exception_case
          "ende": END},                   # rejected
     )
@@ -103,13 +113,21 @@ def build_graph() -> StateGraph:
     # kostenstelle -> (on ambiguity) freigabe_kostenstelle -> elo. Ends at
     # ELO (diagram part 3) -- no balance-sheet-effective booking happens in
     # process B; Navision is only ever addressed in process A.
-    g.add_node("extraktion_rechnung", incoming_invoice.node_invoice_extraction)
+    g.add_node("extraktion_rechnung", guarded(incoming_invoice.node_invoice_extraction, "B", "extraktion_rechnung"))
     g.add_conditional_edges(
         "extraktion_rechnung", incoming_invoice.route_invoice_extraction,
-        {"kostenstelle": "kostenstelle", "ende": END},
+        {"review": "rechnungsextraktion_klaerfall",
+         "kostenstelle": "kostenstelle", "ende": END},
     )
 
-    g.add_node("kostenstelle", incoming_invoice.node_cost_center)
+    g.add_node("rechnungsextraktion_klaerfall", incoming_invoice.node_invoice_extraction_review)
+    g.add_conditional_edges(
+        "rechnungsextraktion_klaerfall", incoming_invoice.route_invoice_extraction,
+        {"review": "rechnungsextraktion_klaerfall",
+         "kostenstelle": "kostenstelle", "ende": END},
+    )
+
+    g.add_node("kostenstelle", guarded(incoming_invoice.node_cost_center, "B", "kostenstelle"))
     # A unique assignment proceeds automatically to archiving; only on
     # ambiguity does the four-eyes approval kick in.
     g.add_conditional_edges("kostenstelle", incoming_invoice.route_cost_center,
@@ -117,7 +135,7 @@ def build_graph() -> StateGraph:
 
     g.add_node("freigabe_kostenstelle", incoming_invoice.node_cost_center_approval)
     g.add_conditional_edges("freigabe_kostenstelle", incoming_invoice.route_cost_center_approval,
-                            {"elo": "elo", "ende": END})
+                            {"elo": "elo", "freigabe": "freigabe_kostenstelle", "ende": END})
 
     g.add_node("elo", incoming_invoice.node_elo)
     g.add_edge("elo", END)

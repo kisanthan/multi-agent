@@ -5,7 +5,7 @@ hashes its predecessor; `verify_chain()` therefore detects any subsequent
 change, any deletion, and any insertion -- not just the change itself, but
 also the point from which the chain breaks.
 
-No LLM. Pure Python logic (chapter 3.4 / section 7 of the functional
+No LLM. Pure Python logic (sections 6.1.6 and 8 of the thesis and the functional
 concept).
 """
 
@@ -108,7 +108,8 @@ def log_entry(con: sqlite3.Connection, *, actor: str, action: str,
               decision: Decision, reason: str,
               agent: str | None = None, payload: dict | None = None,
               reference: CaseReference = NO_REFERENCE,
-              outcome: str | None = None) -> AuditEntry:
+              outcome: str | None = None, approval: dict | None = None,
+              policy_version: str | None = None, command_id: str | None = None) -> AuditEntry:
     """Appends an entry to the chain.
 
     Deliberately without `commit()`: the caller decides the transaction
@@ -138,6 +139,19 @@ def log_entry(con: sqlite3.Connection, *, actor: str, action: str,
         (ts, actor, agent, action, decision.value, reason,
          reference.case_id, reference.source, outcome, p_hash, prev, h),
     )
+    from governance.audit_contract import append
+    if con.execute("SELECT 1 FROM sqlite_master WHERE name='audit_v2'").fetchone():
+        append(con, {
+            "version": 2, "time": ts, "case_id": reference.case_id,
+            "requester": actor,
+            "component": agent or "system",
+            "source": {"reference": reference.source, "status": "referenced" if reference.source else "not_applicable"},
+            "tool": {"action": action, "payload_hash": p_hash, "command_id": command_id},
+            "policy": {"decision": decision.value, "reason": reason, "version": policy_version or "legacy-adapter-v2"},
+            "approval": approval or {"status": "not_required", "person": None, "time": None, "reference": None},
+            "result": outcome or "not_applicable: system event",
+            "legacy_hash": h,
+        }, cur.lastrowid, prev)
     return AuditEntry(
         id=cur.lastrowid, ts=ts, actor=actor, agent=agent, action=action,
         decision=decision, reason=reason,

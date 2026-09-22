@@ -60,6 +60,9 @@ class SharedFields(TypedDict, total=False):
     # Written by either process's approval node (klaerfall for A,
     # freigabe_kostenstelle for B) -- same shape, same question asked of a
     # human, hence shared rather than duplicated per process.
+    approval_id: str | None
+    candidate_version: int
+    command_id: str | None
     approved_by: str | None
     approval_decision: str        # 'freigegeben' | 'verworfen'
     exception_case: bool

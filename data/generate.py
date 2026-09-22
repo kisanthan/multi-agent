@@ -78,6 +78,9 @@ AD_USERS = [
     ("s.hofmann@chg-meridian.com", "Sabine Hofmann", "pruefer",
      ["SG-CHG-DocIngest", "SG-CHG-Freigabe", "SG-CHG-Konfiguration"]),
     ("r.wagner@chg-meridian.com", "Robert Wagner", "pruefer", ["SG-CHG-Freigabe"]),
+    ("l.schneider@chg-meridian.com", "Laura Schneider", "pruefer",
+     ["SG-CHG-DocIngest", "SG-CHG-Freigabe"]),
+    ("j.becker@chg-meridian.com", "Jonas Becker", "einspeiser", ["SG-CHG-DocIngest"]),
     # Not a member of the reader group -> scenario 5 (governance demo).
     ("e.extern@partner-consulting.de", "Erik Extern", "beobachter", []),
 ]

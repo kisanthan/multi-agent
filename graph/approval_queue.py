@@ -46,6 +46,16 @@ def available_from_cases(
         if not isinstance(request, dict):
             continue
 
+        import time
+        if not request.get("approval_id"):
+            continue  # Legacy checkpoints require a new controlled submission.
+        pending = con.execute("SELECT 1 FROM approvals a JOIN controlled_cases c ON c.case_id=a.case_id "
+                              "WHERE a.approval_id=? AND a.case_id=? AND a.status='requested' "
+                              "AND a.expires>? AND c.stopped=0",
+                              (request["approval_id"], case.thread_id, time.time())).fetchone()
+        if not pending:
+            continue
+
         process = process_registry.for_interrupt(request.get("kind"))
         agent_id = process.approval_agent_id if process else None
         if not agent_id:
