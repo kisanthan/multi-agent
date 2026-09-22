@@ -58,7 +58,6 @@ DOCUMENTED_PATHS = [
     "ui/settings",
     "tests",
     "docs",
-    "docs/guide.md",
 ]
 
 

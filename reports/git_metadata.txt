@@ -1,9 +1,0 @@
-Stand-ID: MA-PROTOTYP-20260921-FINAL-01
-Quellprojekt: C:\Users\nki\Desktop\multi-agent
-Branch: main
-Basis-Commit: 601d9a314ba96a237152aa38e616f66d3c85936c
-Arbeitsbaum beim Paketbau: enthält die im ZIP vollständig erfassten, noch nicht als eigener Commit gespeicherten Änderungen
-
-Für die Identität des Abgabestands sind STAND_ID.txt, PACKAGE_MANIFEST.json,
-SHA256SUMS.txt und der SHA-256-Wert der ZIP-Datei maßgeblich. Der Basis-Commit
-allein bezeichnet den Inhalt des Abgabestands nicht vollständig.

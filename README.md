@@ -57,9 +57,13 @@ dezentral verhandelndes Multi-Agenten-System.
 - Archivkorrekturen erzeugen eine neue aktive Zuordnungsversion; Original und
   Historie werden nicht gelöscht.
 
-Die fachliche Zuordnung steht in [docs/mapping.md](docs/mapping.md), die
-Kontrollverträge in [docs/controlled-execution.md](docs/controlled-execution.md)
-und die Grenzen des Prototyps in [docs/limitations.md](docs/limitations.md).
+Die technische Architektur einschließlich des geprüften Prozessgraphen steht
+in [docs/architecture.md](docs/architecture.md). Die fachliche Zuordnung steht
+in [docs/mapping.md](docs/mapping.md), die Kontrollverträge in
+[docs/controlled-execution.md](docs/controlled-execution.md) und die Grenzen
+des Prototyps in [docs/limitations.md](docs/limitations.md). Diese README ist
+zugleich die vollständige Betriebsanleitung; eine zweite Startanleitung wird
+nicht parallel gepflegt.
 
 ## Installation
 
@@ -173,6 +177,22 @@ Admin-Modus fragt Passwörter ab:
 .venv\Scripts\python.exe demo.py --audit
 ```
 
+## Betrieb und Fehlerdiagnose
+
+| Anzeige | Bedeutung | Vorgehen |
+|---|---|---|
+| `zugriff_verweigert` | Anmeldung oder Prozessrecht fehlt | Identität und Gruppenzuordnung prüfen |
+| `verworfen` | Vorschlag abgelehnt oder Kontrollvertrag verletzt | Auditgrund prüfen und bei Bedarf einen neuen Vorschlag erzeugen |
+| `buchungssystem_nicht_erreichbar` / `in_doubt` | Ausgang eines Zielsystemaufrufs ist unbekannt | Unter **Vorgangsoperationen** den gespeicherten Receipt prüfen; nicht blind wiederholen |
+| `archivierung_fehlgeschlagen` | ELO hat abgelehnt oder war nicht erreichbar | Kommando- und Auditstatus unterscheiden und Ursache beheben |
+| Cloud-Layout gesperrt | Lokaler Fehlschlag, Maskierungsfreigabe oder Bereitstellungsnachweis fehlt | Keinen Umgehungsweg verwenden; Nachweise außerhalb der Anwendung prüfen |
+
+Laufzeitdaten entstehen ausschließlich in den durch `.gitignore` ausgeschlossenen
+Pfaden `data/masterdata.db`, `data/checkpoints.sqlite`, `data/inbox/`,
+`.runtime_logs/` und `.runtime_secrets/`. Die unveränderlichen synthetischen
+Ausgangsdaten unter `data/demo/` bleiben davon getrennt. `python -m
+data.generate` setzt den lokalen Demostand bewusst zurück.
+
 ## Sollprozesse
 
 | Prozess | Kontrollierter Ablauf | Zielsystem |
@@ -216,7 +236,7 @@ mocks/        Navision- und ELO-Schnittstellen
 data/         Stammdaten, additive Migrationen und Demo-Bundle
 ui/           Streamlit-Cockpit
 tests/        Vertrags-, Integrations- und Oberflächentests
-docs/         Architektur, Mapping, Betrieb und Limitationen
+docs/         Architektur, Kontrollverträge, Mapping und Limitationen
 ```
 
 Die ausführbaren Sicherheitsentscheidungen liegen in `governance/` und

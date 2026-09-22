@@ -32,6 +32,7 @@ htmlcov/
 .ruff_cache/
 .dmypy.json
 .runtime_logs/
+reports/
 
 # --- Editors and tooling ----------------------------------------------------
 .claude/

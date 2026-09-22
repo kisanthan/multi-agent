@@ -1,11 +1,11 @@
-"""Pins both process flows against the compiled graph itself.
+"""Pins both process flows and their documented diagram to the compiled graph.
 
 Three things could otherwise drift apart unnoticed: the routing labels a
 graph node module returns, the step list `process_registry.py` declares for
-the UI, and the two copies of the generated diagram (`docs/flow.mmd` and
-its embed in `docs/architecture.md`). All three are checked here against
-LangGraph's own `get_graph()` -- the one thing that cannot be out of date,
-because it *is* the running graph, not a description of it.
+the UI, and the diagram embedded in `docs/architecture.md`. All three are
+checked here against LangGraph's own `get_graph()` -- the one thing that
+cannot be out of date, because it *is* the running graph, not a description
+of it.
 """
 
 from __future__ import annotations
@@ -17,7 +17,6 @@ import process_registry
 from graph.workflow import build_graph
 
 PROJECT_ROOT = Path(__file__).parent.parent
-FLOW_MMD = PROJECT_ROOT / "docs" / "flow.mmd"
 ARCHITECTURE_MD = PROJECT_ROOT / "docs" / "architecture.md"
 
 
@@ -109,26 +108,12 @@ def _current_flow_edges() -> set[str]:
     return _edge_lines(build_graph().compile().get_graph().draw_mermaid())
 
 
-def test_flow_mmd_matches_the_compiled_graph():
-    """docs/flow.mmd is generated, not hand-authored (see the regeneration
-    command in its own header comment) -- this is the tripwire for when
-    graph/workflow.py changes and nobody regenerates it."""
-    stored = FLOW_MMD.read_text(encoding="utf-8")
-    assert _edge_lines(stored) == _current_flow_edges(), (
-        "docs/flow.mmd is stale -- regenerate it with the command in its "
-        "own header comment."
-    )
-
-
 def test_architecture_md_embeds_the_current_flow_diagram():
-    """docs/architecture.md keeps its own copy of the diagram so it renders
-    inline without following a link to docs/flow.mmd. Checked separately
-    from docs/flow.mmd (both against the compiled graph, not against each
-    other) so a failure here points at exactly which copy went stale."""
+    """The single maintained diagram must match the executable graph."""
     text = ARCHITECTURE_MD.read_text(encoding="utf-8")
     match = re.search(r"```mermaid\n(.*?)```", text, re.DOTALL)
     assert match, "docs/architecture.md no longer embeds a ```mermaid block."
     assert _edge_lines(match.group(1)) == _current_flow_edges(), (
         "The flow diagram embedded in docs/architecture.md is stale -- "
-        "regenerate docs/flow.mmd and paste its graph body back in."
+        "regenerate it from graph/workflow.py."
     )
