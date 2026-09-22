@@ -55,3 +55,8 @@ die regulatorische Konformität eines späteren Produktivsystems.
     Prototyp über einen geprüften Code- und Releasewechsel; ein eigener
     Laufzeitworkflow mit Antrag, unabhängiger Freigabe und Aktivierung ist
     nicht implementiert.
+13. **Menschliche Freigabekapazität:** Die Benutzeroberfläche trennt reguläre
+    Buchungsfreigaben von der Klärung erkannter Dubletten und benennt die
+    jeweilige Wirkung. Der Prototyp untersucht jedoch weder Bearbeitungszeiten
+    noch Vertretungslasten oder Approval Fatigue. Diese Faktoren müssen in
+    einem realen Betrieb organisatorisch und empirisch bewertet werden.

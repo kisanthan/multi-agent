@@ -171,6 +171,7 @@
 
   "result.unknown": "Case ended: {outcome}",
   "result.unknown.value": "unknown",
+  "result.dublette_geschlossen": "The case was closed as a duplicate. No second posting was executed.",
   "result.verworfen": "The case was rejected. Nothing was posted and nothing was filed.",
   "result.zugriff_verweigert": "The document was not opened: the account is not permitted to.",
   "result.verbucht": "The payment is posted. The invoice counts as paid.",

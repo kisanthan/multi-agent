@@ -197,6 +197,7 @@ def decision_form(app, thread_id: str, request: dict, values: dict, *,
         st.markdown(f"**{i18n.t('detail.line_items')}:** "
                     + ", ".join(request["line_items"]))
 
+    view = None
     if kind == InterruptKind.DOCUMENT_TYPE_REVIEW.value:
         options = request.get("document_type_options") or [
             {"value": "zahlungsbestaetigung",
@@ -251,6 +252,8 @@ def decision_form(app, thread_id: str, request: dict, values: dict, *,
         view = process_views.for_interrupt(kind)
         extra_response = view.approval_inputs(request, thread_id=thread_id) if view else {}
 
+    actions = view.decision_actions(request, extra_response) if view else {}
+
     if decision.rule == "four_eyes":
         st.warning(person.own_document_hint)
     elif not decision.allowed:
@@ -260,17 +263,17 @@ def decision_form(app, thread_id: str, request: dict, values: dict, *,
 
     left, right = st.columns(2)
     with left:
-        confirm = st.button(i18n.t("detail.confirm"), key=f"confirm_{thread_id}",
-                            type="primary", disabled=not decision.allowed,
+        confirm = st.button(actions.get("confirm", i18n.t("detail.confirm")), key=f"confirm_{thread_id}",
+                            type="primary", disabled=(not decision.allowed or actions.get("confirm_disabled", False)),
                             width="stretch")
     with right:
-        reject = st.button(i18n.t("detail.reject"), key=f"reject_{thread_id}",
+        reject = st.button(actions.get("reject", i18n.t("detail.reject")), key=f"reject_{thread_id}",
                            disabled=not decision.allowed,
                            width="stretch")
 
     if reject and not st.session_state.get(f"reject_confirmed_{thread_id}"):
         st.session_state[f"reject_confirmed_{thread_id}"] = True
-        st.warning(i18n.t("detail.reject.again"))
+        st.warning(actions.get("reject_confirmation", i18n.t("detail.reject.again")))
         return False
 
     if confirm or reject:
@@ -284,6 +287,7 @@ def decision_form(app, thread_id: str, request: dict, values: dict, *,
             line_items=tuple(extra_response.get("line_items") or ()),
             cost_center_reference=extra_response.get("cost_center_reference"),
             document_type=extra_response.get("document_type"),
+            reason=(actions.get("approve_reason") if confirm else actions.get("reject_reason")),
         ).as_resume()
         response.update({"approval_id": request.get("approval_id"), "version": request.get("version")})
         st.session_state.pop(f"reject_confirmed_{thread_id}", None)

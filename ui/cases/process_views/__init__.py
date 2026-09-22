@@ -38,15 +38,18 @@ class ProcessView:
     key: str
     result_texts: Mapping[str, str]
     approval_inputs: Callable[..., dict]
+    decision_actions: Callable[[dict, dict], dict]
     effect_metric: Callable[[Effect], tuple[str, str] | None]
 
 
 VIEWS: dict[str, ProcessView] = {
     "A": ProcessView("A", payment_confirmation.RESULT_TEXTS,
                      payment_confirmation.approval_inputs,
+                     payment_confirmation.decision_actions,
                      payment_confirmation.effect_metric),
     "B": ProcessView("B", incoming_invoice.RESULT_TEXTS,
                      incoming_invoice.approval_inputs,
+                     incoming_invoice.decision_actions,
                      incoming_invoice.effect_metric),
 }
 

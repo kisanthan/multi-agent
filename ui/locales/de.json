@@ -171,6 +171,7 @@
 
   "result.unknown": "Vorgang beendet: {outcome}",
   "result.unknown.value": "unbekannt",
+  "result.dublette_geschlossen": "Der Vorgang wurde als Dublette geschlossen. Es wurde keine erneute Buchung ausgeführt.",
 
   "invoice.no_cost_center": "Auf dem Beleg steht keine Kostenstelle, die zugeordnet werden konnte. Bitte wählen Sie die passende aus.",
   "invoice.cost_center": "Kostenstelle",

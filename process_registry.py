@@ -87,6 +87,7 @@ class ProcessConfig:
     completion_outcome: str      # `outcome` value of a successful run
     interrupt_kind: str           # the `kind` value of this process's HITL interrupt
     approval_step_node: str       # node name (log namespace) of the approval step
+    additional_success_outcomes: tuple[str, ...] = ()
 
     @property
     def steps(self) -> tuple[ProcessStep, ...]:
@@ -128,6 +129,7 @@ PROCESSES: dict[str, ProcessConfig] = {
         completion_outcome="verbucht",
         interrupt_kind="klaerfall",
         approval_step_node="klaerfall",
+        additional_success_outcomes=("dublette_geschlossen",),
     ),
     "B": ProcessConfig(
         key="B",
@@ -223,7 +225,11 @@ def document_kinds() -> list[str]:
 
 def successful_outcomes() -> frozenset[str]:
     """All `outcome` values that mean a business-successful completion."""
-    return frozenset(p.completion_outcome for p in PROCESSES.values())
+    return frozenset(
+        outcome
+        for process in PROCESSES.values()
+        for outcome in (process.completion_outcome, *process.additional_success_outcomes)
+    )
 
 
 def step_title(node: str) -> str:

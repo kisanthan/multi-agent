@@ -155,7 +155,8 @@ def test_response_round_trips_through_its_resume_payload():
                                 amount_eur=42.5, supplier="Lieferant",
                                 line_items=("Position 1",),
                                 cost_center_reference="KTR-X",
-                                document_type="eingangsrechnung")
+                                document_type="eingangsrechnung",
+                                reason="Fachlich geprüft")
     assert ApprovalResponse.from_resume(response.as_resume()) == response
 
 
@@ -180,7 +181,11 @@ def test_approved_property():
 def test_process_outcomes_use_the_declared_vocabulary():
     import process_registry
 
-    completion_outcomes = {p.completion_outcome for p in process_registry.PROCESSES.values()}
+    completion_outcomes = {
+        outcome
+        for process in process_registry.PROCESSES.values()
+        for outcome in (process.completion_outcome, *process.additional_success_outcomes)
+    }
     assert completion_outcomes <= {o.value for o in CaseOutcome}
 
 

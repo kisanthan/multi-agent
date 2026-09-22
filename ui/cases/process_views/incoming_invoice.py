@@ -42,6 +42,11 @@ def approval_inputs(request: dict, *, thread_id: str) -> dict:
     return {"cost_center_id": cost_center_id} if cost_center_id else {}
 
 
+def decision_actions(request: dict, values: dict) -> dict:
+    """Process B keeps the shared confirmation wording."""
+    return {}
+
+
 def effect_metric(effect: Effect) -> tuple[str, str] | None:
     if effect.elo_archive_id:
         return (i18n.t("invoice.archived_as"), effect.elo_archive_id)

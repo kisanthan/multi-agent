@@ -70,6 +70,11 @@ def test_unknown_outcome_does_not_count_as_success():
     assert determine_status(values, waiting=False) is Status.FAILED
 
 
+def test_closed_duplicate_is_a_completed_business_case():
+    values = {"completed": True, "outcome": "dublette_geschlossen"}
+    assert determine_status(values, waiting=False) is Status.COMPLETED
+
+
 def test_open_statuses():
     assert Status.RUNNING.is_open
     assert Status.WAITING_FOR_APPROVAL.is_open

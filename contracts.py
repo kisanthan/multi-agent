@@ -119,6 +119,7 @@ class CaseOutcome(str, Enum):
     BOOKED = "verbucht"                      # process A, success -- agents/payment_confirmation/booking.py
     ARCHIVED = "archiviert"                   # process B, success -- agents/incoming_invoice/archiving.py
     REJECTED = "verworfen"                    # either approval point, human said no
+    DUPLICATE_CLOSED = "dublette_geschlossen" # process A: resolved without posting
     ACCESS_DENIED = "zugriff_verweigert"       # reader, AD check denied (scenario 5)
     BOOKING_REFUSED = "abgelehnt"              # process A, Navision refused the booking
     BOOKING_UNAVAILABLE = "buchungssystem_nicht_erreichbar"  # process A, Navision transport failure
@@ -154,6 +155,7 @@ class ApprovalRequest:
     number: str | None = None
     amount_eur: float | None = None
     expected_amount_eur: float | None = None
+    current_status: str | None = None
     escalation: str | None = None
     # --- evidence, process B (Eingangsrechnung) ---
     supplier: str | None = None
@@ -168,7 +170,7 @@ class ApprovalRequest:
         payload: dict[str, Any] = {"kind": self.kind.value,
                                    "trigger": self.trigger.value}
         for name in ("filename", "reason", "finding", "number", "amount_eur",
-                     "expected_amount_eur", "escalation", "supplier",
+                     "expected_amount_eur", "current_status", "escalation", "supplier",
                      "reference", "unique"):
             value = getattr(self, name)
             if value is not None:
@@ -196,6 +198,7 @@ class ApprovalRequest:
             number=payload.get("number"),
             amount_eur=payload.get("amount_eur"),
             expected_amount_eur=payload.get("expected_amount_eur"),
+            current_status=payload.get("current_status"),
             escalation=payload.get("escalation"),
             supplier=payload.get("supplier"),
             line_items=tuple(payload.get("line_items") or ()),
@@ -227,6 +230,7 @@ class ApprovalResponse:
     line_items: tuple[str, ...] = ()
     cost_center_reference: str | None = None
     document_type: str | None = None
+    reason: str | None = None
 
     @property
     def approved(self) -> bool:
@@ -248,6 +252,8 @@ class ApprovalResponse:
             payload["cost_center_reference"] = self.cost_center_reference
         if self.document_type is not None:
             payload["document_type"] = self.document_type
+        if self.reason is not None:
+            payload["reason"] = self.reason
         return payload
 
     @classmethod
@@ -271,4 +277,5 @@ class ApprovalResponse:
                    supplier=payload.get("supplier"),
                    line_items=tuple(payload.get("line_items") or ()),
                    cost_center_reference=payload.get("cost_center_reference"),
-                   document_type=payload.get("document_type"))
+                   document_type=payload.get("document_type"),
+                   reason=payload.get("reason"))

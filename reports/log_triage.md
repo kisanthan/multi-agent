@@ -11,7 +11,7 @@ Stand: 21. September 2026
 
 ## Ergebnis
 
-Der vollständige Abnahmelauf bestand mit 390 Tests ohne Fehler oder
+Der vollständige Abnahmelauf bestand mit 393 Tests ohne Fehler oder
 Überspringungen. Compileall und `git diff --check` wurden ohne Fehler
 abgeschlossen.
 

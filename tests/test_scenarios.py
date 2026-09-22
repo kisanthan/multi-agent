@@ -382,10 +382,18 @@ def test_scenario2b_duplicate_is_flagged_not_rebooked(app, thread, monkeypatch):
 
     state = app.invoke(
         Command(resume={"decision": "verworfen",
-                        "approver": "s.hofmann@chg-meridian.com"}),
+                        "approver": "s.hofmann@chg-meridian.com",
+                        "reason": "Als Dublette geschlossen; keine Buchung ausgeführt."}),
         thread2,
     )
-    assert state["outcome"] == "verworfen"
+    assert state["outcome"] == "dublette_geschlossen"
+
+    from config import DB_PATH
+    from governance.audit import read_all
+    con = sqlite3.connect(DB_PATH)
+    entries = [entry for entry in read_all(con) if entry.case_id == thread2["configurable"]["thread_id"]]
+    assert any(entry.action == "klaerfall_entschieden" and "Dublette" in entry.reason for entry in entries)
+    con.close()
 
 
 def test_scenario2c_amount_mismatch_becomes_exception_case(app, thread, monkeypatch):

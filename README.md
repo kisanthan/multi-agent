@@ -33,6 +33,9 @@ dezentral verhandelndes Multi-Agenten-System.
 - Prozess A benötigt für jede Buchung eine Freigabe durch eine andere,
   weiterhin berechtigte Person. Prozess B fordert eine menschliche Auswahl
   nur an, wenn keine eindeutige Kostenstellenreferenz vorliegt.
+- Eine erkannte Dublette ist kein normaler Buchungsvorschlag: Die erneute
+  Buchung bleibt gesperrt. Der Prüfer kann den Fall ohne Buchung als Dublette
+  schließen oder korrigierte Daten erneut validieren lassen.
 - Eine endgültig schemawidrige Klassifikation wird als neutraler Klärfall
   geführt. Eine endgültig fehlgeschlagene Rechnungsextraktion muss vor dem
   Kostenstellenabgleich durch die Prüferrolle ergänzt werden.

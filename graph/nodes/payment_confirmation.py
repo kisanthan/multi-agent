@@ -161,7 +161,9 @@ def node_exception_case(state: Case) -> dict:
         filename=state.get("filename"), reason=state.get("exception_reason"),
         finding=state.get("finding"), number=proposal["payload"]["number"],
         amount_eur=(proposal["payload"]["amount_cents"] / 100 if proposal["payload"]["amount_cents"] is not None else None),
-        expected_amount_eur=state.get("expected_amount_eur"), escalation=state.get("escalation"),
+        expected_amount_eur=state.get("expected_amount_eur"),
+        current_status=proposal["payload"].get("expected_status"),
+        escalation=state.get("escalation"),
     ).as_payload()
     request.update({k: proposal[k] for k in ("approval_id", "version", "payload_hash", "expires")})
     raw = interrupt(request)
@@ -174,9 +176,16 @@ def node_exception_case(state: Case) -> dict:
         if raw.get("approver", person) != person or raw.get("approval_id") != proposal["approval_id"] or raw.get("version") != proposal["version"]:
             raise PolicyDenied("Sitzung oder angezeigte Freigabe stimmt nicht überein.")
         if raw.get("decision") != ApprovalDecision.APPROVED.value:
-            control.decide(con, proposal, approved=False, reason=raw.get("reason", "Verworfen"))
-            return {"completed": True, "outcome": CaseOutcome.REJECTED.value, "approved_by": person,
-                    "log": note(state, "klaerfall", "Vorgang verworfen.")}
+            duplicate = state.get("finding") == reconciliation.Finding.ALREADY_PAID.value
+            reason = raw.get("reason") or (
+                "Als Dublette geschlossen; keine Buchung ausgeführt."
+                if duplicate else "Verworfen"
+            )
+            control.decide(con, proposal, approved=False, reason=reason)
+            outcome = CaseOutcome.DUPLICATE_CLOSED if duplicate else CaseOutcome.REJECTED
+            message = "Dublette geschlossen; es wurde nichts gebucht." if duplicate else "Vorgang verworfen."
+            return {"completed": True, "outcome": outcome.value, "approved_by": person,
+                    "log": note(state, "klaerfall", message)}
         number = raw.get("number") or proposal["payload"]["number"]
         amount = raw.get("amount_eur", state.get("amount_eur"))
         new_payload = control.payment_payload(con, state["case_id"], number, amount)
@@ -186,7 +195,7 @@ def node_exception_case(state: Case) -> dict:
             return {"number": new_payload["number"], "amount_eur": amount,
                     "expected_amount_eur": new_payload["expected_cents"] / 100,
                     "candidate_version": replacement["version"], "approval_id": replacement["approval_id"],
-                    "approval_decision": "", "exception_case": True,
+                    "approval_decision": "", "exception_case": True, "finding": "korrigiert",
                     "exception_reason": "Korrigierter Vorschlag erneut geprüft. Bitte den neuen Inhalt bestätigen.",
                     "log": note(state, "klaerfall", "Neuer Vorschlag benötigt eine eigene Bestätigung.")}
         person = control.decide(con, proposal, approved=True, reason=raw.get("reason", "Inhalt geprüft"))

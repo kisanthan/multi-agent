@@ -106,9 +106,12 @@ gelten nicht als Beleg.
    centgenauen Betrag.
 4. Jede Buchung wird als versionierter Vorschlag dargestellt. Korrekturen
    erzeugen eine neue Version und damit eine neue Freigabe.
-5. Eine andere berechtigte Person bestätigt. Vor dem Senden werden deren
+5. Ein bereits bezahlter Posten wird als eigener Klärfall dargestellt. Die
+   Oberfläche trennt den Abschluss als Dublette von der Korrektur mit erneuter
+   Prüfung; die serverseitige Statussperre bleibt unabhängig davon wirksam.
+6. Eine andere berechtigte Person bestätigt. Vor dem Senden werden deren
    Rechte und die Rechte des Einreichers erneut geprüft.
-6. Navision ändert genau einen offenen Posten atomar zu `bezahlt` und liefert
+7. Navision ändert genau einen offenen Posten atomar zu `bezahlt` und liefert
    einen Receipt mit Vorher-/Nachher-Zustand.
 
 ## Prozess B – Eingangsrechnung

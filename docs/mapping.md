@@ -13,6 +13,7 @@ prüfbaren Prototypstand und ist keine Aussage über einen Produktivbetrieb.
 | Getrennter Konzept- und Vorführbetrieb | Demonstration und Evaluation des Artefakts | `PortalMode.ADMIN`, `PortalMode.DEMO`, `ui/app.py` | umgesetzt; Demo überspringt nur Login, nicht Prozesskontrollen |
 | Schichtentrennung von Orchestrierung, Policy, Audit und Werkzeugen | Kap. 6.1 | `graph/`, `governance/`, `runtime/`, `mocks/` | umgesetzt |
 | Human-in-the-loop bei finanziell wirksamer Buchung | Kap. 6.5–6.6; Kap. 7.4; Prozess A | `graph/nodes/payment_confirmation.py`, `governance/control.py` | umgesetzt; jede Buchung benötigt Fremdfreigabe |
+| Getrennte Behandlung von Buchungsfreigabe und Dublettenklärung | Kap. 6.5–6.6; Kap. 7.4; Prozess A | `ui/cases/process_views/payment_confirmation.py`, `graph/nodes/payment_confirmation.py` | umgesetzt; bereits bezahlte Posten sind gesperrt und können ohne Buchung als Dublette geschlossen oder nach Korrektur erneut geprüft werden |
 | Human-on-the-loop beziehungsweise Ausnahmefreigabe bei Kostenstellenzuordnung | Kap. 6.5–6.6; Kap. 7.4; Prozess B | `graph/nodes/incoming_invoice.py` | umgesetzt; Freigabe nur ohne eindeutige Referenz |
 | Schemafehler werden nach dem Retry als Klärfall behandelt | Kap. 6.6, Tabelle 12 | `graph/nodes/shared.py`, `graph/nodes/incoming_invoice.py` | umgesetzt; Dokumenttyp beziehungsweise Rechnungsfelder werden vor der Fachwirkung geprüft |
 | Autorisierung darf nicht aus einem LLM oder Checkpoint folgen | Kap. 4.4; 6.1.4–6.1.5 | `governance/step_policy.py`, `governance/control.py` | umgesetzt, Default-Deny |
@@ -38,6 +39,7 @@ prüfbaren Prototypstand und ist keine Aussage über einen Produktivbetrieb.
 | Wird ein Rechteentzug vor Ausführung erkannt? | `test_revoked_approver_cannot_authorize_command` |
 | Kann ein Grant wiederverwendet oder an ein anderes Ziel gesendet werden? | `test_scoped_grant_is_single_use_and_audience_bound` |
 | Führt eine Wiederholung zu einer Doppelbuchung? | `test_target_replay_returns_same_receipt_without_second_effect` |
+| Kann eine erkannte Dublette wie eine normale Buchung bestätigt werden? | `test_scenario2b_duplicate_is_flagged_not_rebooked`, `test_duplicate_actions_cannot_look_like_a_posting_approval` |
 | Wird Auditmanipulation erkannt? | `test_v2_verifier_detects_rollback_or_missing_tail` |
 | Bleibt die Archivkorrektur historisch sichtbar? | `test_archive_correction_versions_assignment_without_deleting_original` |
 | Verlässt Standardinferenz den lokalen Rechner? | `test_remote_or_cloud_standard_inference_is_denied` |

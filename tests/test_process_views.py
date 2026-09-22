@@ -1,6 +1,7 @@
 """Precise user-facing result messages for process-specific failures."""
 
 from ui.cases import process_views
+from ui.cases.process_views import payment_confirmation
 from ui.shared import i18n
 
 
@@ -34,3 +35,24 @@ def test_business_rejection_stays_a_business_rejection():
     )
 
     assert displayed == "abgelehnt"
+
+
+def test_duplicate_actions_cannot_look_like_a_posting_approval():
+    actions = payment_confirmation.decision_actions(
+        {"finding": "bereits_bezahlt", "trigger": "eskalation"},
+        {"_changed": False},
+    )
+
+    assert actions["reject"] == "Als Dublette schließen"
+    assert actions["confirm"] == "Korrigierte Daten erneut prüfen"
+    assert actions["confirm_disabled"] is True
+
+
+def test_normal_payment_names_the_financial_effect():
+    actions = payment_confirmation.decision_actions(
+        {"finding": "ok", "trigger": "aufsichtsmodus"},
+        {"_changed": False},
+    )
+
+    assert actions["confirm"] == "Buchung freigeben"
+    assert actions["reject"] == "Buchung ablehnen"
