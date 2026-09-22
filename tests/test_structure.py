@@ -58,6 +58,12 @@ DOCUMENTED_PATHS = [
     "ui/settings",
     "tests",
     "docs",
+    "scripts/check_environment.py",
+    "scripts/setup.ps1",
+    "scripts/setup.sh",
+    "scripts/start.ps1",
+    "scripts/start.sh",
+    ".github/workflows/cross-platform.yml",
 ]
 
 

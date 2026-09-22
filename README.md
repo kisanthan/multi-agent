@@ -65,32 +65,74 @@ des Prototyps in [docs/limitations.md](docs/limitations.md). Diese README ist
 zugleich die vollständige Betriebsanleitung; eine zweite Startanleitung wird
 nicht parallel gepflegt.
 
-## Installation
+## Voraussetzungen
 
-Python 3.12 oder neuer wird vorausgesetzt.
+| Voraussetzung | Zweck |
+|---|---|
+| Windows 10/11, macOS oder Linux | lokale Ausführung des Demonstrators |
+| Python 3.12 oder neuer mit `venv` | isolierte Projektumgebung |
+| Ollama | ausschließlich lokale Standardinferenz |
+| Netzwerkzugriff bei der Erstinstallation | Python-Pakete und Ollama-Modelle beziehen |
+| freie Ports 8001, 8002 und 8501 | Navision-Mock, ELO-Mock und Streamlit |
+
+Python und Ollama werden nicht ungefragt systemweit installiert. Die
+Setup-Skripte prüfen beide Programme, installieren ausschließlich die
+Python-Pakete innerhalb von `.venv`, übernehmen keine vorhandene `.env` und
+setzen bestehende Demodaten nur mit einem expliziten Reset-Parameter zurück.
+Der Sicherheitsvertrag akzeptiert für Standardinferenz nur `localhost`
+beziehungsweise `127.0.0.1`.
+
+## Schnellstart
+
+### Windows
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/setup.ps1
+powershell -ExecutionPolicy Bypass -File scripts/start.ps1
+```
+
+### macOS und Linux
+
+```bash
+chmod +x scripts/setup.sh scripts/start.sh
+./scripts/setup.sh
+./scripts/start.sh
+```
+
+Das Setup nennt fehlende Ollama-Modelle mit dem jeweils erforderlichen
+`ollama pull <modell>`-Befehl. Ollama muss anschließend laufen; je nach
+Installation geschieht dies über die Desktop-Anwendung oder `ollama serve`.
+
+## Manuelle Installation und Prüfung
+
+Unter Windows:
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 Copy-Item .env.example .env
-```
-
-Der erste Start erzeugt aus `data/demo/` eine beschreibbare Laufzeitkopie.
-Zum bewussten Zurücksetzen dient:
-
-```powershell
 .venv\Scripts\python.exe -m data.generate
-```
-
-Ollama und das konfigurierte Modell werden außerhalb des Projekts
-bereitgestellt. Der Sicherheitsvertrag akzeptiert für Standardinferenz nur
-`localhost` beziehungsweise `127.0.0.1`.
-
-```powershell
-ollama serve
-ollama pull qwen3:8b
+.venv\Scripts\python.exe scripts/check_environment.py --mode runtime
 .venv\Scripts\python.exe demo.py --check
 ```
+
+Unter macOS und Linux:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+cp .env.example .env
+.venv/bin/python -m data.generate
+.venv/bin/python scripts/check_environment.py --mode runtime
+.venv/bin/python demo.py --check
+```
+
+`scripts/check_environment.py` benötigt selbst keine externen Python-Pakete.
+Mit `--mode setup` prüft es das Basissystem, mit `--mode runtime` die fertige
+Installation und mit `--mode start` zusätzlich die drei benötigten Ports.
+Ein bewusster Reset erfolgt unter Windows mit `scripts/setup.ps1
+-ResetDemoData` und unter macOS/Linux mit `./scripts/setup.sh
+--reset-demo-data`.
 
 ## Demo-Modus und optionale technische Anmeldung
 
@@ -154,7 +196,10 @@ und verwalteten Dienstidentitäten erforderlich.
 
 ## Start
 
-Die lokalen Zielsystem-Mocks laufen in zwei eigenen Terminals:
+Die Startskripte prüfen Umgebung und Ports, starten beide Zielsystem-Mocks,
+warten auf deren `/health`-Endpunkte und öffnen anschließend Streamlit. Beim
+Beenden werden nur die durch das jeweilige Skript erzeugten Prozesse beendet.
+Der manuelle Start in drei Terminals bleibt möglich:
 
 ```powershell
 .venv\Scripts\python.exe -m uvicorn mocks.navision:app --port 8001
@@ -224,6 +269,12 @@ sind:
   und unveränderte Fremdfreigabe im Demo-Modus.
 - `tests/test_scenarios.py`: die fünf Demonstrationsszenarien.
 
+Der Workflow `.github/workflows/cross-platform.yml` installiert und prüft den
+Prototyp bei Pushes und Pull Requests mit Python 3.12 auf Windows, macOS und
+Ubuntu. Er validiert zusätzlich die Syntax der jeweiligen Setup- und
+Startskripte. Ollama wird in dieser Testmatrix nicht benötigt, weil die
+Modellantworten der Tests vollständig gemockt sind.
+
 ## Struktur
 
 ```text
@@ -237,6 +288,7 @@ data/         Stammdaten, additive Migrationen und Demo-Bundle
 ui/           Streamlit-Cockpit
 tests/        Vertrags-, Integrations- und Oberflächentests
 docs/         Architektur, Kontrollverträge, Mapping und Limitationen
+scripts/      Umgebungsprüfung sowie Setup und Start für Windows/macOS/Linux
 ```
 
 Die ausführbaren Sicherheitsentscheidungen liegen in `governance/` und
